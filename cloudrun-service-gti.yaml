@@ -1,0 +1,29 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: harimau-gti-mcp
+  annotations:
+    run.googleapis.com/launch-stage: BETA
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "3"
+    spec:
+      containers:
+      - image: gcr.io/GOOGLE_CLOUD_PROJECT/harimau-gti-mcp
+        env:
+        - name: MCP_TRANSPORT
+          value: "sse"
+        - name: GTI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: GTI_API_KEY
+              key: "latest"
+        resources:
+          limits:
+            memory: 512Mi
+            cpu: 1000m
+        ports:
+        - containerPort: 8080

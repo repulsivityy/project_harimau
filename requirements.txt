@@ -15,3 +15,12 @@ networkx>=3.0
 httpx
 pytest
 pytest-asyncio
+fastapi
+uvicorn
+
+# Phase 2 Dependencies
+asyncpg==0.29.0
+google-cloud-tasks==2.16.3
+langgraph-checkpoint-postgres==1.0.0
+psycopg[binary]>=3.2.0
+psycopg-pool>=3.2.0

@@ -1,6 +1,7 @@
 # Project Harimau
 
 Cloud-Native AI Threat Hunter using LangGraph, Vertex AI (Gemini 3.0 Pro), and NetworkX.
+**Status**: Live on Google Cloud Run (Phase 1).
 See `docs/` for detailed documentation.
 
 ## Setup

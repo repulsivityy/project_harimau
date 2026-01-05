@@ -1,0 +1,62 @@
+steps:
+  # 1. Build GTI Image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/harimau-gti-mcp', '-f', 'mcp-servers/gti-server/Dockerfile', 'mcp-servers/gti-server']
+
+  # 2. Push GTI Image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/harimau-gti-mcp']
+
+  # 3. Build Backend Image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/harimau-backend', '-f', 'backend/Dockerfile', '.']
+
+  # 4. Push Backend Image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/harimau-backend']
+
+  # 5. Deploy GTI Service
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'harimau-gti-mcp'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/harimau-gti-mcp'
+      - '--region'
+      - 'asia-southeast1'
+      - '--allow-unauthenticated'
+      - '--set-env-vars'
+      - 'MCP_TRANSPORT=sse'
+      - '--set-secrets=GTI_API_KEY=GTI_API_KEY:latest'
+
+  # 6. Deploy Backend Service (Injection of URL requires script)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        # Get GTI Service URL
+        GTI_URL=$(gcloud run services describe harimau-gti-mcp --platform managed --region asia-southeast1 --format 'value(status.url)')
+        
+        # Get Backend Service URL (if exists, else this might fail on first deploy - but we are past that)
+        # Using || true to avoid failure on first run, but we really need it.
+        # However, for updates, this works.
+        BACKEND_URL=$(gcloud run services describe harimau-backend --platform managed --region asia-southeast1 --format 'value(status.url)')
+        
+        echo "GTI URL: $$GTI_URL"
+        echo "BACKEND URL: $$BACKEND_URL"
+        
+        # Deploy Backend with both URLs
+        gcloud run deploy harimau-backend \
+          --image gcr.io/$PROJECT_ID/harimau-backend \
+          --region asia-southeast1 \
+          --allow-unauthenticated \
+          --add-cloudsql-instances=virustotal-lab:asia-southeast1:harimau-db \
+          --set-env-vars GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GTI_MCP_MODE=http,GTI_MCP_URL=$$GTI_URL/sse,CLOUD_TASKS_QUEUE=investigation-queue,CLOUD_TASKS_LOCATION=asia-southeast1,SERVICE_ACCOUNT_EMAIL=$PROJECT_NUMBER-compute@developer.gserviceaccount.com,SERVICE_URL=$$BACKEND_URL \
+          --set-secrets=DB_URL=DB_URL:latest
+
+images:
+  - 'gcr.io/$PROJECT_ID/harimau-gti-mcp'
+  - 'gcr.io/$PROJECT_ID/harimau-backend'

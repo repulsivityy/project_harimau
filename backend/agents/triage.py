@@ -8,6 +8,8 @@ from backend.utils.ioc_utils import classify_ioc_type
 from backend.utils.gti_parser import parse_gti_response
 
 
+from backend.models import check_budget
+
 def create_triage_agent(logger):
     """
     Factory function for triage agent.
@@ -30,6 +32,18 @@ def create_triage_agent(logger):
         4. Add root node to graph
         5. Make routing decision
         """
+        
+        # 0. Check Budget
+        can_continue, reason = check_budget(state["budget"])
+        if not can_continue:
+            logger.log("WARN", "triage", f"Budget exceeded: {reason}")
+            state["status"] = "failed"
+            state["findings"].append({
+                "agent": "system",
+                "verdict": "ERROR",
+                "decision": f"Investigation halted: {reason}"
+            })
+            return state
         
         logger.log("INFO", "triage", "Starting IOC classification")
         
@@ -121,9 +135,10 @@ def create_triage_agent(logger):
             "data": gti_result
         })
         
+        
         # Update budget
-        state["budget"].api_calls_made += 1
-        state["budget"].nodes_created += 1
+        state["budget"]["api_calls_made"] += 1
+        state["budget"]["nodes_created"] += 1
         
         # Step 5: Make routing decision
         if verdict in ["MALICIOUS", "SUSPICIOUS"]:
@@ -149,6 +164,7 @@ def create_triage_agent(logger):
             "decision": decision
         })
         
+        state["status"] = "complete"
         return state
     
     return triage_agent

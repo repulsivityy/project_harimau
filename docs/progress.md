@@ -60,7 +60,39 @@ This document tracks the specific changes specific changes made during this deve
 
 ---
 
+
+---
+
+## Session Date: January 6, 2026 (Phase 2 Deployment)
+
+### Changes Made
+
+### 1. Asynchronous Architecture
+**Files**: `backend/main.py`, `backend/database.py`, `requirements.txt`
+**Changes**:
+- Implemented **Cloud Tasks** queue (`investigation-queue`).
+- Added `/internal/worker` endpoint for off-hours processing.
+- Added `asyncpg` connection pooling.
+
+### 2. State Persistence
+**Files**: `backend/database.py`, `backend/main.py`
+**Changes**:
+- Implemented `AsyncPostgresSaver` (LangGraph).
+- Connected to **Cloud SQL (PostgreSQL)** via Unix Sockets (`host=/cloudsql/...`).
+- Created `investigation_jobs` table for status tracking.
+
+### 3. Code Quality
+**Changes**:
+- Removed vestigial `NetworkX` code.
+- Refactored imports and removed duplicate comments.
+- Implemented "Fail-Fast" startup checks for `DB_URL` and `SERVICE_URL`.
+
+## Validation Results
+**Job ID**: `inv-7e1c6892`
+**Result**: **SUCCESS** (Running asynchronously).
+
 ## Status
-**Phase 1**: **COMPLETE**
-**Current State**: Live on Cloud Run (US-Central1)
-**Next Step**: Phase 2 (Asynchronous Job Queue)
+**Phase 2**: **COMPLETE**
+**Current State**: Live on Cloud Run (asia-southeast1)
+**Next Step**: Phase 3 (Graph Foundation - KuzuDB)
+

@@ -50,7 +50,7 @@ def extract_domain_from_url(url: str) -> str:
     try:
         parsed = urlparse(url)
         return parsed.hostname or ""
-    except:
+    except (ValueError, AttributeError):
         return ""
 
 

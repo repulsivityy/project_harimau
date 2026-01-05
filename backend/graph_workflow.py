@@ -28,7 +28,6 @@ def create_investigation_graph(logger):
 
 def compile_workflow(builder, checkpointer=None):
     """Compile the graph with optional checkpointer"""
-    from langgraph.checkpoint.memory import MemorySaver
     if checkpointer is None:
         checkpointer = MemorySaver()
     return builder.compile(checkpointer=checkpointer)

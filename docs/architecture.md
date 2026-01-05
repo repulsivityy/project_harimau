@@ -46,3 +46,45 @@ graph TD
 5.  **Synthesis Agent**:
     *   Aggregates findings.
     *   Generates the final Markdown report.
+
+## Phase 2: Asynchronous & Persistent (Current)
+
+This phase introduces reliability and state persistence using Cloud SQL and Cloud Tasks.
+
+```mermaid
+graph TD
+    Client[Client / CLI] -- POST /investigate --> API[Cloud Run: Backend API]
+    API -- Enqueue Job --> Tasks[Cloud Tasks Queue]
+    API -- Create Job Record --> DB[(Cloud SQL: PostgreSQL)]
+    
+    subgraph "Async Execution"
+        Tasks -- POST /internal/worker --> Worker[Cloud Run: Backend Worker]
+        Worker -- Load/Save State --> DB
+        Worker -- HTTP/SSE --> GTI[Cloud Run: GTI MCP]
+    end
+    
+    Client -- GET /investigation/{id} --> API
+    API -- Read Status --> DB
+    
+    GTI -- Threat Intel API --> VT[Google Threat Intelligence]
+    
+    classDef service fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
+    classDef storage fill:#fff3e0,stroke:#e65100,stroke-width:2px;
+    classDef queue fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px;
+    
+    class API,Worker,GTI service;
+    class DB storage;
+    class Tasks queue;
+```
+
+### New Components
+
+1.  **Cloud SQL (PostgreSQL)**:
+    *   Stores `investigation_jobs` (Job ID, Status, Result).
+    *   Stores **LangGraph Checkpoints** (Thread state) via `AsyncPostgresSaver`.
+2.  **Cloud Tasks**:
+    *   Decouples request submission from processing.
+    *   Retries failed investigations automatically (configurable).
+3.  **Worker Endpoint**:
+    *   Private endpoint (`/internal/worker`) triggered only by Cloud Tasks.
+    *   Executes the heavy Triage/Synthesis workflow.

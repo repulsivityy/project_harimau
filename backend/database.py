@@ -1,7 +1,5 @@
 import os
-import json
 import uuid
-import time
 from typing import Optional, Dict, Any
 from contextlib import asynccontextmanager
 import asyncpg
@@ -61,10 +59,6 @@ async def init_db():
                 result JSONB
             );
         """)
-        
-        # Initialize LangGraph Checkpointer tables
-        # PostgresSaver handles this internally usually, but we need the connection string
-        pass
 
 class JobManager:
     """Manages investigation jobs persistence"""
@@ -101,9 +95,7 @@ class JobManager:
             if row:
                 res = dict(row)
                 # Parse result JSON if exists
-                # Parse result JSON if exists
                 # AsyncPG handles JSONB deserialization automatically
-                pass
                 # Convert timestamps to str
                 res['created_at'] = str(res['created_at'])
                 res['updated_at'] = str(res['updated_at'])

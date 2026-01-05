@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import asyncio
+import time
 from typing import Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, Header
 from datetime import datetime
@@ -19,6 +20,9 @@ class JobStatus(str, Enum):
 from backend.models import InvestigationState
 from backend.database import init_db, JobManager, get_db_pool
 from backend.tools.mcp_registry import mcp_registry
+from backend.logging_config import InvestigationLogger
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from urllib.parse import urlparse, parse_qs, unquote
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -83,7 +87,6 @@ async def start_investigation(request: InvestigationRequest):
             logger.error("SERVICE_URL env var is required for Cloud Tasks")
             raise HTTPException(status_code=500, detail="Configuration Error: SERVICE_URL missing")
         
-        # If running locally without service_url, we can't really enqueue to ourselves easily unless using ngrok
         # For Cloud Run, SERVICE_URL should be set or derived
         
         # Validate
@@ -164,7 +167,6 @@ async def run_worker_logic(job_id: str, ioc: str):
         await JobManager.update_job(job_id, JobStatus.RUNNING.value)
         
         # Initialize Investigation Logger
-        from backend.logging_config import InvestigationLogger
         inv_logger = InvestigationLogger(job_id, debug_mode=False) # Enable debug via env var if needed
         
         # Initial State
@@ -190,10 +192,6 @@ async def run_worker_logic(job_id: str, ioc: str):
         }
         
         # Run Workflow
-        # Initialize Checkpointer
-        # Initialize Checkpointer
-        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-        from urllib.parse import urlparse, parse_qs, unquote
         
         db_url = os.getenv("DB_URL")
         

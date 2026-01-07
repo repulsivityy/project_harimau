@@ -23,3 +23,6 @@ google-cloud-tasks==2.16.3
 langgraph-checkpoint-postgres==1.0.0
 psycopg[binary]>=3.2.0
 psycopg-pool>=3.2.0
+
+# Phase 3 Dependencies
+kuzu>=0.3.0

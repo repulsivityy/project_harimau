@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  # 1. The Graph Database (Redis with FalkorDB module)
+  falkordb:
+    image: falkordb/falkordb:latest
+    ports:
+      - "6379:6379"
+    volumes:
+      - falkordb_data:/data
+
+  # 2. The Backend (Brain + Embedded MCP)
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8080"
+    environment:
+      - FALKORDB_HOST=falkordb
+      - FALKORDB_PORT=6379
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json
+      - GTI_API_KEY=${GTI_API_KEY}
+    volumes:
+      - ./backend:/app/backend # Hot Reload
+      - ./credentials.json:/app/credentials.json:ro
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8080 --reload
+    depends_on:
+      - falkordb
+
+  # 3. The Frontend (Streamlit UI)
+  frontend:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ./frontend:/app/frontend
+      - ./backend:/app/backend # Sharing types/models if needed
+    environment:
+      - BACKEND_URL=http://backend:8080
+    command: sh -c "pip install streamlit requests && streamlit run frontend/main.py"
+    ports:
+      - "8501:8501"
+    depends_on:
+      - backend
+
+volumes:
+  falkordb_data:

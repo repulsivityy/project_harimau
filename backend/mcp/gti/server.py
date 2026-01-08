@@ -57,7 +57,7 @@ server = FastMCP(
     stateless_http=stateless)
 
 # Load tools.
-from gti_mcp.tools import *
+from .tools import *
 
 # Run the server
 def main():

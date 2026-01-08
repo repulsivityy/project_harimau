@@ -53,6 +53,9 @@ graph TD
 *   **Deployment**: Runs as a **Subprocess** of the Backend.
 *   **Transport**: `stdio` (Standard Input/Output) for zero latency.
 *   **Registry**: Dynamic loading via `mcp_registry.json`.
+*   **Troubleshooting & Integration Notes**:
+    *   **Imports**: When embedding external MCP servers (like `gti`), ensure import paths are relative (e.g., `from .tools import *` instead of `from gti_mcp import *`) to function within the `backend` package structure.
+    *   **Environment**: The internal subprocess must use the correct Python interpreter. We map `"command": "python"` to `sys.executable` in `client.py` to ensure it uses the running venv/container environment (important for `python` vs `python3` discrepancies).
 
 ### 2.4 Graph Engine
 *   **Technology**: FalkorDB (Redis Graph).

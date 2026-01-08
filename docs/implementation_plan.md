@@ -25,24 +25,25 @@ This document tracks the progress of the Harimau V2 rebuild.
     *   *Reasoning*: Reduces cost (1 container), eliminates network latency (`stdio`), and simplifies atomic deployments. To redploy as microservices in the future phases / roadmap. 
 
 ## Phase 2: The Brain (LangGraph)
-- [ ] **State Definition**: Define `AgentState` (Nodes, Edges, History).
-- [ ] **MCP Registry**: Implement `MCPClientManager` using Registry Pattern.
-    - [ ] MVP: `mcp_registry.json` mapping tools to `stdio` commands.
+- [x] **State Definition**: Define `AgentState` (Nodes, Edges, History).
+- [x] **MCP Registry**: Implement `MCPClientManager` using Registry Pattern.
+    - [x] MVP: `mcp_registry.json` mapping tools to `stdio` commands.
     - [ ] Roadmap: Support `sse` for future Serverless Function tools.
-- [ ] **Config Engine**: Implement `agents.yaml` loader.
-- [ ] **Nodes**:
-    - [ ] `Triage Agent` (Gemini Flash)
-    - [ ] `Malware Specialist` (Gemini Pro)
-    - [ ] `Infrastructure Specialist` (Gemini Pro)
-    - [ ] `Librarian` (Async Schema Cleaner)
-- [ ] **Orchestrator**: Build the LangGraph workflow with Recursion Depth checks.
-- [ ] **Verify**:
+- [x] **Config Engine**: Implement `agents.yaml` loader (Basic).
+- [x] **Nodes (MVP)**:
+    - [x] `Triage Agent` (Gemini Flash + Vertex AI).
+- [x] **Orchestrator**: Build the LangGraph workflow (Start -> Triage -> End).
+- [x] **API Integration**: Expose `POST /investigate` endpoint.
+- [x] **Verify**:
+    - [x] **Cloud Verification**: Run `deploy.sh` and test endpoint (`curl -X POST https://.../investigate -d '{"ioc":"1.1.1.1"}'`).
     - [ ] Run `pytest tests/unit/test_agents.py` (Mocked LLM inputs).
     - [ ] Run `pytest tests/integration/test_workflow.py` (Dry-run full graph).
-- [ ] **Documentation**: Update PRD/Architecture/Readme with any changes.
+- [x] **Documentation**: Update PRD/Architecture/Readme with any changes.
 
 ### Phase 2 Challenges & Learnings
-*   *Pending implementation...*
+*   **MCP Integration**:
+    *   **Import Paths**: Code from external repos (e.g., `gti-mcp`) usually assumes it is the root package. When embedding it in a sub-module (`backend.mcp.gti`), imports must be converted to relative paths (e.g., `from .tools import *`).
+    *   **Subprocess Environment**: The `python` command in a subprocess may not resolve to the same environment as the parent process (especially in venvs or containers). Always use `sys.executable` to guarantee the subprocess uses the active interpreter.
 
 ## Phase 3: The Interface (Streamlit)
 - [ ] **API Client**: Implement wrapper to talk to Backend API.
@@ -58,6 +59,11 @@ This document tracks the progress of the Harimau V2 rebuild.
 
 ### Phase 3 Challenges & Learnings
 *   *Pending implementation...*
+
+## Phase 3.5: Specialist Agents (Deep Analysis)
+- [ ] `Malware Specialist` (Gemini Pro, Behavioral Analysis).
+- [ ] `Infrastructure Specialist` (Gemini Pro, Pivot Analysis).
+- [ ] `Librarian` (Async Schema Cleaner).
 
 ## Phase 4: Near-Term Roadmap (Post-MVP)
 - [ ] **Real-Time Streaming**: Refactor Frontend/Backend to use SSE (Server-Sent Events) instead of polling.

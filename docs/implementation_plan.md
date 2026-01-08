@@ -46,24 +46,58 @@ This document tracks the progress of the Harimau V2 rebuild.
     *   **Subprocess Environment**: The `python` command in a subprocess may not resolve to the same environment as the parent process (especially in venvs or containers). Always use `sys.executable` to guarantee the subprocess uses the active interpreter.
 
 ## Phase 3: The Interface (Streamlit)
-- [ ] **API Client**: Implement wrapper to talk to Backend API.
-- [ ] **Polling Logic**: Implement async status checking.
-- [ ] **UI Components**:
-    - [ ] Chat Interface
-    - [ ] Graph Visualization (`streamlit-agraph`)
-    - [ ] "Librarian Approval" Widget.
-- [ ] **Verify**:
-    - [ ] Run `pytest tests/api/test_endpoints.py` (Test FastAPI routes).
-    - [ ] Manual Check: Streamlit UI loads and connects to local backend.
-- [ ] **Documentation**: Update PRD/Architecture/Readme with any changes.
+- [x] **API Client**: Implement wrapper to talk to Backend API.
+- [x] **Polling Logic**: Implement async status checking.
+- [x] **UI Components**:
+    - [x] Chat Interface
+    - [x] Graph Visualization (`streamlit-agraph`)
+    - [x] "Librarian Approval" Widget.
+- [x] **Verify**:
+    - [x] Run `pytest tests/api/test_endpoints.py` (Test FastAPI routes).
+    - [x] Manual Check: Streamlit UI loads and connects to local backend.
+- [x] **Documentation**: Update PRD/Architecture/Readme with any changes.
 
 ### Phase 3 Challenges & Learnings
-*   *Pending implementation...*
+*   **UI/UX**: `streamlit-agraph` is great for simple graphs but can be laggy with large datasets. Ensuring the graph only renders when nodes exist was critical to avoid errors.
 
-## Phase 3.5: Specialist Agents (Deep Analysis)
-- [ ] `Malware Specialist` (Gemini Pro, Behavioral Analysis).
-- [ ] `Infrastructure Specialist` (Gemini Pro, Pivot Analysis).
-- [ ] `Librarian` (Async Schema Cleaner).
+
+### Phase 3.5: Hybrid Triage & Specialist Agents
+**Goal**: Implement a "Hybrid" Triage process that combines deterministic data extraction with agentic reasoning.
+
+#### [MODIFY] [Hybrid Triage Agent](backend/agents/triage.py)
+*   **Step 1: Input & Identification**
+    *   Input: `hash | domain | ip | url`.
+    *   Logic: Use Regex/Heuristics to strictly identify the IOC type.
+*   **Step 2: Fast Facts Extraction (Python)**
+    *   Task: Fetch the "Base Report" immediately.
+    *   Extraction: Manually parse `threat_severity`, `last_analysis_stats` (malicious count), and `verdict` (mapped from fallback if needed).
+    *   Output: Populate `state["metadata"]` for immediate frontend display.
+*   **Step 3: Agentic Reasoning (Tool-Use Loop)**
+    *   Input: "Fast Facts" + "Base Report" JSON + User Prompt.
+    *   Tools: Bind dynamic relationship tools (e.g., `get_entities_related_to_an_ip`, `get_entities_related_to_a_domain`).
+    *   Instructions: "Use tools to validate the verdict and find campaign/actor associations."
+*   **Step 4: Reasoning & Graph Population**
+    *   The Agent iterates:
+        *   "I see a high severity IP. Let me check its communicating files."
+        *   "I see a file hash. Let me check for parent domains."
+    *   State Update: Every tool result enriches the `state["metadata"]["rich_intel"]` and implicitly builds the graph.
+*   **Step 5: Final Report**
+    *   Agent generates a `summary` explaining the verdict and key associations.
+*   **Step 6: Specialist Handoff**
+    *   Agent generates `subtasks` to route to `malware_specialist` or `infrastructure_specialist` for deep dive.
+
+#### [NEW] [Malware Specialist](backend/agents/malware.py)
+*   Receives file hash or suspicious artifact.
+*   Tools: `get_file_report`, `get_entities_related_to_a_file`.
+*   Task: Deep dive into behavior, capabilities, and associated campaigns.
+
+#### [NEW] [Infrastructure Specialist](backend/agents/infrastructure.py)
+*   Receives IP/Domain.
+*   Tools: `get_ip_report`, `get_domain_report`, Passive DNS resolution.
+*   Task: Map infrastructure, find pivoting points.
+
+### Phase 3.5 Challenges & Learnings
+*   **GTI MCP Server**: Needed to go from a full triage agent to a hybrid triage agent as the underlying mechanism for GTI MCP is vt-py. This means the 'gti-assessment' tool is not available in the MCP server's response (as of 9 Jan 2026). 
 
 ## Phase 4: Near-Term Roadmap (Post-MVP)
 - [ ] **Real-Time Streaming**: Refactor Frontend/Backend to use SSE (Server-Sent Events) instead of polling.

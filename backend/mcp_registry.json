@@ -1,0 +1,10 @@
+{
+    "gti": {
+        "transport": "stdio",
+        "command": "python3",
+        "args": [
+            "-m",
+            "backend.mcp.gti.server"
+        ]
+    }
+}

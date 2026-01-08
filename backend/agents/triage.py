@@ -165,7 +165,7 @@ async def triage_node(state: AgentState):
                     res = await session.call_tool(config["rel_tool"], arguments={
                         config["arg"]: ioc, 
                         "relationship_name": relationship_name, 
-                        "descriptors_only": False,
+                        "descriptors_only": True,
                         "limit": 10
                     })
                     if res.content:
@@ -178,6 +178,10 @@ async def triage_node(state: AgentState):
             
             # Setup LLM
             project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
+            if not project_id:
+                logger.error("triage_config_missing", var="GOOGLE_CLOUD_PROJECT")
+                # Try to fall back to default or raise
+                raise ValueError("GOOGLE_CLOUD_PROJECT environment variable is missing. It is required for Vertex AI.")
             location = os.getenv("GOOGLE_CLOUD_REGION", "asia-southeast1")
             llm = ChatVertexAI(
                 model="gemini-2.5-flash", temperature=0.0,
@@ -208,7 +212,6 @@ You have the base report. Now, use tools to fetch relationships to validate the 
                         if tc["name"] == "get_relationships":
                             res_txt = await get_relationships.ainvoke(tc["args"])
                             tool_msg = ToolMessage(content=res_txt, tool_call_id=tc["id"])
-                            # Add to Rich Intel for Graph Pop
                             # Add to Rich Intel for Graph Pop
                             try:
                                 # Ensure relationships dict exists
@@ -244,20 +247,26 @@ You have the base report. Now, use tools to fetch relationships to validate the 
                     final_content = response.content
                     break
             
-            if not final_content and messages[-1].content:
-                 final_content = messages[-1].content
+            if not final_content:
+                # Fallback: Find the last AIMessage that isn't a tool call or empty
+                from langchain_core.messages import AIMessage
+                for msg in reversed(messages):
+                    if isinstance(msg, AIMessage) and msg.content and not msg.tool_calls:
+                         final_content = msg.content
+                         break
             
             # 3. Parse and Update State
             try:
                 final_text = ""
-                if isinstance(response.content, list):
-                    for block in response.content:
+                # Handle cases where content is a list (multimodal models)
+                if isinstance(final_content, list):
+                    for block in final_content:
                         if isinstance(block, dict) and block.get("type") == "text":
                             final_text += block.get("text", "")
                         elif isinstance(block, str):
                             final_text += block
                 else:
-                    final_text = response.content
+                    final_text = str(final_content) # Ensure string
 
                 # Simple cleaning of markdown code blocks
                 clean_content = final_text.replace("```json", "").replace("```", "").strip()
@@ -266,8 +275,8 @@ You have the base report. Now, use tools to fetch relationships to validate the 
                 state["subtasks"] = analysis.get("subtasks", [])
                 state["metadata"]["risk_level"] = analysis.get("risk_level", "Unknown")
                 logger.info("triage_agent_success", risk=state["metadata"]["risk_level"])
-            except:
-                logger.error("triage_parse_fail", raw=final_content)
+            except Exception as e:
+                logger.error("triage_parse_fail", error=str(e), raw=final_content)
                 state["metadata"]["risk_level"] = "Error"
                 
     except Exception as e:

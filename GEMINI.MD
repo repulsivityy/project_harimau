@@ -14,6 +14,7 @@ To build a cloud-native, AI-driven threat hunting platform that leverages **Lang
 3.  **Orchestrator**: LangGraph. Enforce `MAX_DEPTH` for recursion control.
 4.  **Graph Database**: FalkorDB (Ephemeral Sidecar).
 5.  **Compute**: Google Cloud Run (Serverless).
+6.  **Deployment**: Selective updates via `deploy.sh` (Backend/Frontend/All).
 
 ## Agent Strategy
 *   **Tiered Models**: Gemini 3.0 Flash (Triage) vs Gemini 3.0 Pro (Analysis).

@@ -27,7 +27,7 @@
 ### 3.2 Investigation Workflow
 1.  **Input**: User inputs IOC in Streamlit.
 2.  **Async Queue**: Frontend posts job to Backend -> Backend offloads to Cloud Tasks.
-3.  **Triage Agent**: Classifies IOC (Root Node).
+3.  **Hybrid Triage Agent**: Classifies IOC using Fast Facts (Direct API) + Agentic Reasoning (Root Node).
 4.  **Pivot (Recursion)**: Infra Agent / Malware Agent expands the graph.
 5.  **Synthesis**: Lead Hunter writes the report.
 
@@ -55,7 +55,7 @@ The Lead Hunter must produce a **comprehensive narrative report**, not just a ve
 *   **Structure**: `gs://[bucket]/[job_id]/report.md` & `graph.png`.
 
 ## 4. Operational Requirements
-*   **Deployment**: Support `deploy.sh` and `terraform/`.
+*   **Deployment**: Support `deploy.sh` (selective backend/frontend updates) and `terraform/`.
 *   **Security**: Auth (Phased), Secrets (Secret Manager).
 *   **Observability (Logging)**:
     *   **Format**: Structured JSON (compatible with Cloud Logging).

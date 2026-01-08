@@ -3,6 +3,7 @@ set -e
 
 # Configuration
 PROJECT_ID=$(gcloud config get-value project)
+TARGET=${1:-all}
 REGION="asia-southeast1" # Change if needed
 BACKEND_SERVICE="harimau-backend"
 FRONTEND_SERVICE="harimau-frontend"
@@ -64,41 +65,46 @@ else
     echo "✅ Vertex AI Access already granted."
 fi
 
-# 3. Deploy Backend (Monolith)
-echo "🚀 Deploying Backend..."
-gcloud run deploy $BACKEND_SERVICE \
-    --source . \
-    --region $REGION \
-    --allow-unauthenticated \
-    --set-env-vars "LOG_LEVEL=INFO,MAX_DEPTH=2,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_REGION=${REGION}" \
-    --set-secrets "VT_APIKEY=${SECRET_NAME}:latest,GTI_API_KEY=${SECRET_NAME}:latest" \
-    --command "uvicorn" \
-    --args "backend.main:app,--host,0.0.0.0,--port,8080" \
-    --quiet
 
-# Capture Backend URL
-BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE --region $REGION --format 'value(status.url)' --quiet)
-echo "✅ Backend Live at: $BACKEND_URL"
 
-# 4. Deploy Frontend (Streamlit)
-echo "🚀 Deploying Frontend..."
-# Note: Streamlit needs a separate build context or specific Dockerfile instructions.
-# Since our root has the Backend Dockerfile, we need to point to app/Dockerfile.
-# gcloud run deploy --source . uses the root Dockerfile by default.
-# We will submit a Cloud Build to target the correct Dockerfile.
+# 4. Deploy Logic
+if [[ "$TARGET" == "backend" || "$TARGET" == "all" ]]; then
+    echo "🚀 Deploying Backend..."
+    gcloud run deploy $BACKEND_SERVICE \
+        --source . \
+        --region $REGION \
+        --allow-unauthenticated \
+        --set-env-vars "LOG_LEVEL=INFO,MAX_DEPTH=2,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_REGION=${REGION}" \
+        --set-secrets "VT_APIKEY=${SECRET_NAME}:latest,GTI_API_KEY=${SECRET_NAME}:latest" \
+        --command "uvicorn" \
+        --args "backend.main:app,--host,0.0.0.0,--port,8080" \
+        --quiet
+fi
 
-gcloud builds submit --config deploy/cloudbuild_frontend.yaml . --quiet
+# Always fetch Backend URL if deploying Frontend or needed
+if [[ "$TARGET" == "all" || "$TARGET" == "frontend" ]]; then
+     BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE --region $REGION --format 'value(status.url)' --quiet)
+     echo "✅ Backend Live at: $BACKEND_URL"
+fi
 
-gcloud run deploy $FRONTEND_SERVICE \
-    --image gcr.io/$PROJECT_ID/$FRONTEND_SERVICE \
-    --region $REGION \
-    --allow-unauthenticated \
-    --set-env-vars BACKEND_URL=$BACKEND_URL \
-    --port 8501 \
-    --quiet
+if [[ "$TARGET" == "frontend" || "$TARGET" == "all" ]]; then
+    echo "🚀 Deploying Frontend..."
+    gcloud builds submit --config deploy/cloudbuild_frontend.yaml . --quiet
+    
+    gcloud run deploy $FRONTEND_SERVICE \
+        --image gcr.io/$PROJECT_ID/$FRONTEND_SERVICE \
+        --region $REGION \
+        --allow-unauthenticated \
+        --set-env-vars BACKEND_URL=$BACKEND_URL \
+        --port 8501 \
+        --quiet
+    
+    FRONTEND_URL=$(gcloud run services describe $FRONTEND_SERVICE --region $REGION --format 'value(status.url)')
+    echo "➡️  Frontend: $FRONTEND_URL"
+fi
 
-FRONTEND_URL=$(gcloud run services describe $FRONTEND_SERVICE --region $REGION --format 'value(status.url)')
+if [[ "$TARGET" == "backend" || "$TARGET" == "all" ]]; then
+     echo "➡️  Backend:  $BACKEND_URL"
+fi
 
 echo "🎉 Deployment Complete!"
-echo "➡️  Frontend: $FRONTEND_URL"
-echo "➡️  Backend:  $BACKEND_URL"

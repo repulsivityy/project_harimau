@@ -79,7 +79,8 @@ if submit_btn and ioc_input:
             col_a.metric("IOC Type", res.get("ioc_type", "Unknown").upper())
             col_b.metric("Verdict", verdict if verdict else "Unknown")
             col_c.metric("Threat Score", f"{t_score}/100" if t_score else "N/A")
-            col_d.metric("VT Verdict", mal_stats if mal_stats else "0")
+            total_stats = rich_intel.get("total_stats", 0)
+            col_d.metric("VT Verdict", f"{mal_stats}/{total_stats}" if total_stats > 0 else "0/0")
             
             # Row 2: Description
             if desc:

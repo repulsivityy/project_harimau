@@ -116,7 +116,7 @@ async def get_investigation_graph(job_id: str):
     
     # 1. Central Node (The IOC)
     nodes = [
-        {"id": "root", "label": ioc, "color": "#FF4B4B", "size": 25} # Red for IOC
+        {"id": "root", "label": ioc, "color": "#FF4B4B", "size": 30} # Red for IOC
     ]
     edges = []
     
@@ -129,7 +129,7 @@ async def get_investigation_graph(job_id: str):
             "id": node_id,
             "label": agent_name,
             "color": "#0083B8", # Blue for Agents
-            "size": 15
+            "size": 20
         })
         
         edges.append({
@@ -137,5 +137,44 @@ async def get_investigation_graph(job_id: str):
             "target": node_id,
             "label": "assigned_to"
         })
+
+    # 3. Relationship Nodes (From Rich Intel)
+    rich_intel = job.get("rich_intel", {})
+    relationships = rich_intel.get("relationships", {})
+    
+    # Iterate through relationship types (e.g., "resolutions", "communicating_files")
+    for rel_type, entities in relationships.items():
+        if not entities: continue
+        
+        # Add up to 5 entities per relationship type to avoid clutter
+        for idx, entity in enumerate(entities[:5]):
+            # Entity ID
+            ent_id = entity.get("id")
+            if not ent_id: continue
+            
+            # Determine Label
+            attrs = entity.get("attributes", {})
+            label = ent_id
+            if entity.get("type") == "domain":
+                label = attrs.get("host_name") or ent_id
+            elif entity.get("type") == "ip_address":
+                label = attrs.get("ip_address") or ent_id
+
+            # Unique Node ID
+            unique_id = f"{rel_type}_{idx}_{ent_id}"
+            
+            nodes.append({
+                "id": unique_id,
+                "label": label[:20] + "..." if len(str(label)) > 20 else str(label),
+                "color": "#FFA500", # Orange for Infra
+                "size": 15,
+                "title": json.dumps(attrs, indent=2) # Tooltip
+            })
+            
+            edges.append({
+                "source": "root",
+                "target": unique_id,
+                "label": rel_type
+            })
         
     return {"nodes": nodes, "edges": edges}

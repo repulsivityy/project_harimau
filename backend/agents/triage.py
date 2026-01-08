@@ -37,16 +37,23 @@ You have access to "Rich Intelligence Data" from Google Threat Intelligence, inc
    - **IF MALICIOUS/SUSPICIOUS NETWORK (IP/Domain/URL)**: Route to `infrastructure_specialist` to map infrastructure.
    - **IF BENIGN**: Do NOT generate subtasks. Inform the user and recommend to close the alert.
 
+**CRITICAL INSTRUCTION:**
+You **MUST** call the `get_relationships` tool (e.g., for 'resolutions', 'communicating_files', or 'associations') **BEFORE** generating the final JSON output.
+- If you see an IP, check `resolutions` or `communicating_files`.
+- If you see a Domain, check `subdomains` or `referrer_files`.
+- If you see a File, check `contacted_ips`.
+**DO NOT** generate the final JSON until you have gathered this evidence.
+
 **Output Format (JSON ONLY):**
 {
     "ioc_type": "IP|Domain|File|URL",
     "gti_verdict": "Malicious|Suspicious|Undetected|Benign",
     "gti_score": "...",
     "associations": "...", 
-    "summary": "Concise, markdown-formatted assessment. Highlight key evidence (Score, Verdict, Associations). Explain *why* you chose the risk level.",
+    "summary": "Concise, markdown-formatted assessment. START with the verdict. THEN describe key relationships found (e.g., 'Resolves to malicious domain X', 'Downloads file Y'). END with why the specialist agents are needed.",
     "subtasks": [
         {"agent": "malware_specialist", "task": "Analyze behavior..."},
-        {"agent": "infrastructure_specialist", "task": "Check passive DNS..."}
+        {"agent": "infrastructure_specialist", "task": "Map infrastructure..."}
     ]
 }
 """
@@ -77,6 +84,14 @@ def extract_triage_data(data: dict, ioc_type: str) -> dict:
         
     triage_data["id"] = data.get("id")
     triage_data["malicious_stats"] = get_val(data, "attributes.last_analysis_stats.malicious")
+    stats = get_val(data, "attributes.last_analysis_stats") or {}
+    triage_data["total_stats"] = (
+        stats.get("malicious", 0) + 
+        stats.get("harmless", 0) + 
+        stats.get("suspicious", 0) + 
+        stats.get("undetected", 0) + 
+        stats.get("timeout", 0)
+    )
 
     # GTI Assessment (Strict Alignment with User Evidence)
     # User's trace shows gti_assessment is inside "attributes"
@@ -194,13 +209,33 @@ You have the base report. Now, use tools to fetch relationships to validate the 
                             res_txt = await get_relationships.ainvoke(tc["args"])
                             tool_msg = ToolMessage(content=res_txt, tool_call_id=tc["id"])
                             # Add to Rich Intel for Graph Pop
+                            # Add to Rich Intel for Graph Pop
                             try:
-                                entities = json.loads(res_txt)
-                                norm_entities = entities if isinstance(entities, list) else entities.get("data", [])
+                                # Ensure relationships dict exists
                                 if "relationships" not in state["metadata"]["rich_intel"]:
                                     state["metadata"]["rich_intel"]["relationships"] = {}
-                                state["metadata"]["rich_intel"]["relationships"][tc["args"]["relationship_name"]] = norm_entities
-                            except: pass
+
+                                # Try parsing as JSON first
+                                entities = []
+                                try:
+                                    parsed = json.loads(res_txt)
+                                    # Handle {"data": [...]} vs [...]
+                                    if isinstance(parsed, dict):
+                                        entities = parsed.get("data", [])
+                                    elif isinstance(parsed, list):
+                                        entities = parsed
+                                except json.JSONDecodeError:
+                                    logger.warning("triage_tool_output_not_json", raw=res_txt[:100])
+                                    continue # Skip if not JSON
+
+                                # Store normalized entities
+                                state["metadata"]["rich_intel"]["relationships"][tc["args"]["relationship_name"]] = entities
+                                logger.info("triage_stored_relationships", 
+                                            rel=tc["args"]["relationship_name"], 
+                                            count=len(entities))
+                                            
+                            except Exception as e:
+                                logger.error("triage_relationship_storage_failed", error=str(e))
                             
                         if tool_msg:
                              messages.append(tool_msg)

@@ -26,8 +26,11 @@ Project Harimau is an automated threat investigation platform. It uses a graph-b
     ```
 3.  **Run Script**:
     ```bash
-    ./deploy.sh
+    ./deploy.sh [backend|frontend|all]
     ```
+    *   **Default**: Deploys both.
+    *   **Selective API**: `./deploy.sh backend`
+    *   **Selective UI**: `./deploy.sh frontend`
     This script will:
     *   Enable necessary GCP APIs (Cloud Run, Secret Manager, Vertex AI).
     *   Create/Update the `harimau-gti-api-key` secret.
@@ -44,7 +47,8 @@ Project Harimau is an automated threat investigation platform. It uses a graph-b
 - **Phase 1 (Infrastructure)**: ✅ Complete
 - **Phase 2 (The Brain)**: ✅ Complete
 - **Phase 3 (The Interface)**: ✅ Complete
-- **Phase 3.5 (Specialists)**: 🚧 In Progress
+- **Phase 3.5 (Hybrid Triage)**: ✅ Complete
+- **Phase 4 (Specialist Agents)**: 🚧 In Progress
 
 ## Quick Start (Local)
 

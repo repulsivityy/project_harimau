@@ -274,3 +274,294 @@ async def get_investigation_graph(job_id: str):
                       message="No relationship nodes were added. Check if triage agent fetched relationships.")
     
     return {"nodes": nodes, "edges": edges}
+
+##########
+# added for debugging purposes. to consider removing once prod ready. 
+##########
+"""
+Add this to backend/main.py to diagnose the graph issue.
+This endpoint tests each step of the pipeline independently.
+"""
+
+@app.get("/api/diagnostic/pipeline/{ioc}")
+async def diagnostic_pipeline(ioc: str):
+    """
+    Tests each step of the investigation pipeline independently.
+    Returns detailed diagnostics to identify where the failure occurs.
+    """
+    from backend.mcp.client import mcp_manager
+    import backend.tools.gti as gti
+    import re
+    
+    results = {
+        "ioc": ioc,
+        "tests": {}
+    }
+    
+    # Test 1: IOC Type Detection
+    try:
+        ipv4_pattern = r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$"
+        if "http" in ioc or "/" in ioc:
+            detected_type = "URL"
+            rel_tool = "get_entities_related_to_an_url"
+            arg = "url"
+        elif re.match(ipv4_pattern, ioc):
+            detected_type = "IP"
+            rel_tool = "get_entities_related_to_an_ip_address"
+            arg = "ip_address"
+        elif "." in ioc:
+            detected_type = "Domain"
+            rel_tool = "get_entities_related_to_a_domain"
+            arg = "domain"
+        else:
+            detected_type = "File"
+            rel_tool = "get_entities_related_to_a_file"
+            arg = "hash"
+        
+        results["tests"]["ioc_detection"] = {
+            "status": "✅ PASS",
+            "detected_type": detected_type,
+            "rel_tool": rel_tool,
+            "arg_name": arg
+        }
+    except Exception as e:
+        results["tests"]["ioc_detection"] = {
+            "status": "❌ FAIL",
+            "error": str(e)
+        }
+        return results
+    
+    # Test 2: Direct GTI API (Python)
+    try:
+        if detected_type == "IP":
+            base_data = await gti.get_ip_report(ioc)
+        elif detected_type == "Domain":
+            base_data = await gti.get_domain_report(ioc)
+        elif detected_type == "File":
+            base_data = await gti.get_file_report(ioc)
+        else:
+            base_data = await gti.get_url_report(ioc)
+        
+        has_data = bool(base_data and "data" in base_data)
+        
+        results["tests"]["direct_api"] = {
+            "status": "✅ PASS" if has_data else "⚠️ EMPTY",
+            "has_data": has_data,
+            "keys": list(base_data.keys()) if base_data else [],
+            "sample": str(base_data)[:200] if has_data else None
+        }
+    except Exception as e:
+        results["tests"]["direct_api"] = {
+            "status": "❌ FAIL",
+            "error": str(e)
+        }
+    
+    # Test 3: MCP Connection
+    try:
+        async with mcp_manager.get_session("gti") as session:
+            tools = await session.list_tools()
+            tool_names = [t.name for t in tools.tools]
+            
+            results["tests"]["mcp_connection"] = {
+                "status": "✅ PASS",
+                "tools_available": len(tool_names),
+                "has_rel_tool": rel_tool in tool_names,
+                "sample_tools": tool_names[:5]
+            }
+    except Exception as e:
+        results["tests"]["mcp_connection"] = {
+            "status": "❌ FAIL",
+            "error": str(e)
+        }
+        return results
+    
+    # Test 4: Manual MCP Tool Call (Critical Test)
+    try:
+        async with mcp_manager.get_session("gti") as session:
+            # Try to fetch associations
+            res = await session.call_tool(rel_tool, arguments={
+                arg: ioc,
+                "relationship_name": "associations",
+                "descriptors_only": False,
+                "limit": 5
+            })
+            
+            tool_output = res.content[0].text if res.content else ""
+            
+            # Try to parse
+            import json
+            parsed = None
+            entities = []
+            try:
+                parsed = json.loads(tool_output)
+                if isinstance(parsed, dict):
+                    entities = parsed.get("data", [])
+                elif isinstance(parsed, list):
+                    entities = parsed
+            except:
+                pass
+            
+            results["tests"]["mcp_tool_call"] = {
+                "status": "✅ PASS" if entities else "⚠️ EMPTY",
+                "relationship": "associations",
+                "raw_output_length": len(tool_output),
+                "parsed_successfully": parsed is not None,
+                "entities_found": len(entities),
+                "sample_output": tool_output[:300]
+            }
+            
+            # Test another relationship based on type
+            second_rel = None
+            if detected_type == "IP":
+                second_rel = "resolutions"
+            elif detected_type == "Domain":
+                second_rel = "resolutions"
+            elif detected_type == "File":
+                second_rel = "contacted_ips"
+            
+            if second_rel:
+                res2 = await session.call_tool(rel_tool, arguments={
+                    arg: ioc,
+                    "relationship_name": second_rel,
+                    "descriptors_only": False,
+                    "limit": 5
+                })
+                
+                tool_output2 = res2.content[0].text if res2.content else ""
+                
+                parsed2 = None
+                entities2 = []
+                try:
+                    parsed2 = json.loads(tool_output2)
+                    if isinstance(parsed2, dict):
+                        entities2 = parsed2.get("data", [])
+                    elif isinstance(parsed2, list):
+                        entities2 = parsed2
+                except:
+                    pass
+                
+                results["tests"]["mcp_second_relationship"] = {
+                    "status": "✅ PASS" if entities2 else "⚠️ EMPTY",
+                    "relationship": second_rel,
+                    "entities_found": len(entities2),
+                    "sample_output": tool_output2[:300]
+                }
+    except Exception as e:
+        results["tests"]["mcp_tool_call"] = {
+            "status": "❌ FAIL",
+            "error": str(e)
+        }
+    
+    # Test 5: Check if Vertex AI is accessible
+    try:
+        project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
+        location = os.getenv("GOOGLE_CLOUD_REGION", "asia-southeast1")
+        
+        from langchain_google_vertexai import ChatVertexAI
+        llm = ChatVertexAI(
+            model="gemini-2.5-flash",
+            temperature=0.0,
+            project=project_id,
+            location=location
+        )
+        
+        # Simple test
+        from langchain_core.messages import HumanMessage
+        response = await llm.ainvoke([HumanMessage(content="Say 'OK'")])
+        
+        results["tests"]["vertex_ai"] = {
+            "status": "✅ PASS",
+            "project": project_id,
+            "location": location,
+            "response": str(response.content)[:100]
+        }
+    except Exception as e:
+        results["tests"]["vertex_ai"] = {
+            "status": "❌ FAIL",
+            "error": str(e)
+        }
+    
+    # Summary
+    all_passed = all(
+        test.get("status", "").startswith("✅") 
+        for test in results["tests"].values()
+    )
+    
+    results["summary"] = {
+        "all_tests_passed": all_passed,
+        "diagnosis": ""
+    }
+    
+    # Provide diagnosis
+    if not results["tests"]["mcp_connection"].get("status", "").startswith("✅"):
+        results["summary"]["diagnosis"] = "MCP connection is failing. Check VT_APIKEY environment variable."
+    elif results["tests"]["mcp_tool_call"].get("entities_found", 0) == 0:
+        results["summary"]["diagnosis"] = f"MCP tools work, but '{ioc}' has NO relationships in VirusTotal database. Try a different IOC (known malicious hash/IP)."
+    elif not results["tests"]["vertex_ai"].get("status", "").startswith("✅"):
+        results["summary"]["diagnosis"] = "Vertex AI connection failing. Check GOOGLE_CLOUD_PROJECT and IAM permissions."
+    else:
+        results["summary"]["diagnosis"] = "All components working. Issue is in agent logic. Check logs for 'triage_agent_invoking_tool'."
+    
+    return results
+
+
+@app.get("/api/diagnostic/test-iocs")
+async def get_test_iocs():
+    """
+    Returns known malicious IOCs that should have relationships.
+    Use these for testing instead of 1.1.1.1
+    """
+    return {
+        "message": "Use these IOCs for testing - they have known relationships",
+        "test_iocs": {
+            "malicious_ip": "185.220.101.188",  # associated with apt44
+            "malicious_domain": "ggovua.link",  # associated with apt44
+            "malicious_file": "bf458e6b57431f1038e547ab69f28d03e4a33991caaca738997647a450f99a8b",  # associated with apt44
+            "note": "these are associated with APT44."
+        }
+    }
+
+@app.get("/api/diagnostic/tool-test/{ioc}")
+async def test_tool_directly(ioc: str):
+    """Test MCP tool and show actual response structure"""
+    from backend.mcp.client import mcp_manager
+    
+    try:
+        async with mcp_manager.get_session("gti") as session:
+            import re
+            # Only support IP and File for this quick valid test
+            ipv4_pattern = r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$"
+            if re.match(ipv4_pattern, ioc):
+                tool_name = "get_entities_related_to_an_ip_address"
+                arg_name = "ip_address"
+                rel_name = "resolutions"
+            else:
+                 tool_name = "get_entities_related_to_a_file"
+                 arg_name = "hash"
+                 rel_name = "contacted_domains"
+
+            res = await session.call_tool(
+                tool_name,
+                arguments={
+                    arg_name: ioc,
+                    "relationship_name": rel_name,
+                    "descriptors_only": False,
+                    "limit": 5
+                }
+            )
+            
+            raw_output = res.content[0].text if res.content else ""
+            
+            # Try to parse
+            import json
+            parsed = json.loads(raw_output)
+            
+            return {
+                "raw_length": len(raw_output),
+                "raw_sample": raw_output[:500],
+                "parsed_type": type(parsed).__name__,
+                "parsed_keys": list(parsed.keys()) if isinstance(parsed, dict) else None,
+                "parsed_sample": parsed if len(str(parsed)) < 1000 else str(parsed)[:1000]
+            }
+    except Exception as e:
+        return {"error": str(e)}

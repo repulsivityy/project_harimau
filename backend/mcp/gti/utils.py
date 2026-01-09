@@ -95,7 +95,7 @@ async def fetch_object_relationships(
   """Fetches the given relationships descriptors from the given object."""
   rel_futures = {}
   # If true, returns descriptors instead of full objects.
-  descriptors = '/relationship' if descriptors_only else ''
+  descriptors = '/relationships' if descriptors_only else ''
   async with asyncio.TaskGroup() as tg:
     for rel_name in relationships:
       rel_futures[rel_name] = tg.create_task(

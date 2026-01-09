@@ -64,7 +64,7 @@ This document tracks the progress of the Harimau V2 rebuild.
 ### Phase 3.5: Hybrid Triage & Specialist Agents
 **Goal**: Implement a "Hybrid" Triage process that combines deterministic data extraction with agentic reasoning.
 
-#### [IN-PROGRESS] [Hybrid Triage Agent](backend/agents/triage.py)
+#### [COMPLETED] [Hybrid Triage Agent](backend/agents/triage.py)
 *   **Step 1: Input & Identification** [COMPLETED]
     *   Input: `hash | domain | ip | url`.
     *   Logic: Use Regex/Heuristics to strictly identify the IOC type.
@@ -72,18 +72,18 @@ This document tracks the progress of the Harimau V2 rebuild.
     *   Task: Fetch the "Base Report" immediately.
     *   Extraction: Manually parse `threat_severity`, `last_analysis_stats` (malicious count), and `verdict` (mapped from fallback if needed).
     *   Output: Populate `state["metadata"]` for immediate frontend display.
-*   **Step 3: Agentic Reasoning (Tool-Use Loop)** [IN-PROGRESS]
+*   **Step 3: Agentic Reasoning (Tool-Use Loop)** [COMPLETED]
     *   Input: "Fast Facts" + "Base Report" JSON + User Prompt.
     *   Tools: Bind dynamic relationship tools (e.g., `get_entities_related_to_an_ip`, `get_entities_related_to_a_domain`).
     *   Instructions: "Use tools to validate the verdict and find campaign/actor associations."
-*   **Step 4: Reasoning & Graph Population** [IN-PROGRESS]
+*   **Step 4: Reasoning & Graph Population** [COMPLETED]
     *   The Agent iterates:
         *   "I see a high severity IP. Let me check its communicating files."
         *   "I see a file hash. Let me check for parent domains."
-    *   State Update: Every tool result enriches the `state["metadata"]["rich_intel"]` and implicitly builds the graph. [IN-PROGRESS]
-*   **Step 5: Triage Report** [IN-PROGRESS]
+    *   State Update: Every tool result enriches the `state["metadata"]["rich_intel"]` and implicitly builds the graph.
+*   **Step 5: Triage Report** [COMPLETED]
     *   Agent generates a `summary` explaining the verdict and key associations.
-*   **Step 6: Specialist Handoff**
+*   **Step 6: Specialist Handoff** [COMPLETED]
     *   Agent generates `subtasks` to route to `malware_specialist` or `infrastructure_specialist` for deep dive.
 
 #### [NEW] [Malware Specialist](backend/agents/malware.py)
@@ -99,6 +99,8 @@ This document tracks the progress of the Harimau V2 rebuild.
 ### Phase 3.5 Challenges & Learnings
 *   **GTI MCP Server**: Needed to go from a full triage agent to a hybrid triage agent.
 *   **Selective Deployment**: Updated `deploy.sh` to allow deploying only backend or frontend to save time. 
+*   **Graph Population**: The MCP Tool `get_entities_related_to_...` required `descriptors_only=True` to return valid lists for the graph. Without it, the data was empty.
+*   **Agent Loop Logic**: Ensuring the agent loop doesn't silently fail if it exhausts turns without a final answer was critical. Added fallback to `messages` history. 
 
 ## Phase 4: Near-Term Roadmap (Post-MVP)
 - [ ] **Real-Time Streaming**: Refactor Frontend/Backend to use SSE (Server-Sent Events) instead of polling.

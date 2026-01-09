@@ -207,10 +207,13 @@ You have the base report. Now, use tools to fetch relationships to validate the 
                 
                 if response.tool_calls:
                     # Execute Tools
+                    logger.info("triage_executing_tool_calls", count=len(response.tool_calls))
                     for tc in response.tool_calls:
                         tool_msg = None
                         if tc["name"] == "get_relationships":
+                            logger.info("triage_invoking_tool_internal", tool=tc["name"])
                             res_txt = await get_relationships.ainvoke(tc["args"])
+                            logger.info("triage_tool_raw_output", tool=tc["name"], raw_len=len(res_txt), snippet=res_txt[:200])
                             tool_msg = ToolMessage(content=res_txt, tool_call_id=tc["id"])
                             # Add to Rich Intel for Graph Pop
                             try:
@@ -222,11 +225,14 @@ You have the base report. Now, use tools to fetch relationships to validate the 
                                 entities = []
                                 try:
                                     parsed = json.loads(res_txt)
-                                    # Handle {"data": [...]} vs [...]
-                                    if isinstance(parsed, dict):
+                                    # Handle {"data": [...]} vs [...] vs {...}
+                                    if isinstance(parsed, dict) and "data" in parsed:
                                         entities = parsed.get("data", [])
                                     elif isinstance(parsed, list):
                                         entities = parsed
+                                    elif isinstance(parsed, dict):
+                                        # Single object (e.g. from sanitization unwrapping?)
+                                        entities = [parsed]
                                 except json.JSONDecodeError:
                                     logger.warning("triage_tool_output_not_json", raw=res_txt[:100])
                                     continue # Skip if not JSON
@@ -273,6 +279,11 @@ You have the base report. Now, use tools to fetch relationships to validate the 
                 analysis = json.loads(clean_content)
                 state["ioc_type"] = analysis.get("ioc_type")
                 state["subtasks"] = analysis.get("subtasks", [])
+                
+                # Capture Summary for Frontend
+                if "summary" in analysis:
+                    state["metadata"]["rich_intel"]["triage_summary"] = analysis["summary"]
+                
                 state["metadata"]["risk_level"] = analysis.get("risk_level", "Unknown")
                 logger.info("triage_agent_success", risk=state["metadata"]["risk_level"])
             except Exception as e:

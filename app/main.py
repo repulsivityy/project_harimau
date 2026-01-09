@@ -84,7 +84,12 @@ if submit_btn and ioc_input:
             
             # Row 2: Description
             if desc:
-                st.info(f"**Analysis:** {desc}")
+                st.info(f"**Analysis (Automated):** {desc}")
+                
+            t_summary = rich_intel.get("triage_summary")
+            if t_summary:
+                st.markdown("### 🛡️ Analyst Summary")
+                st.markdown(t_summary)
             
             st.divider()
             

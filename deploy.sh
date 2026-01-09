@@ -74,7 +74,7 @@ if [[ "$TARGET" == "backend" || "$TARGET" == "all" ]]; then
         --source . \
         --region $REGION \
         --allow-unauthenticated \
-        --set-env-vars "LOG_LEVEL=INFO,MAX_DEPTH=2,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_REGION=${REGION}" \
+        --set-env-vars "LOG_LEVEL=DEBUG,MAX_DEPTH=2,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_REGION=${REGION}" \
         --set-secrets "VT_APIKEY=${SECRET_NAME}:latest,GTI_API_KEY=${SECRET_NAME}:latest" \
         --command "uvicorn" \
         --args "backend.main:app,--host,0.0.0.0,--port,8080" \

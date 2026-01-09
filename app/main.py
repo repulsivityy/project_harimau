@@ -120,10 +120,7 @@ if submit_btn and ioc_input:
                                     height=500, 
                                     directed=True, 
                                     physics=True, 
-                                    hierarchical=False,
-                                    nodeHighlightBehavior=True, 
-                                    highlightColor="#F7A7A6", 
-                                    collapsible=False)
+                                    hierarchical=False)
                     agraph(nodes=nodes, edges=edges, config=config)
             except Exception as e:
                 st.error(f"Graph Error: {e}")

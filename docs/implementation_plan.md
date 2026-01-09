@@ -76,14 +76,17 @@ This document tracks the progress of the Harimau V2 rebuild.
     *   Input: "Fast Facts" + "Base Report" JSON + User Prompt.
     *   Tools: Bind dynamic relationship tools (e.g., `get_entities_related_to_an_ip`, `get_entities_related_to_a_domain`).
     *   Instructions: "Use tools to validate the verdict and find campaign/actor associations."
-*   **Step 4: Reasoning & Graph Population** [COMPLETED]
+*   **Step 4: Reasoning & Graph Population** [IN-PROGRESS]
     *   The Agent iterates:
+        - [x] UI: Display Rich Intel (Verdict, Score, Desc)
+        - [x] Robustness: Forced Tool Execution Loop (to guarantee graph data)
+        - [x] Debugging: Added `/api/debug/investigation/{job_id}` endpoint
         *   "I see a high severity IP. Let me check its communicating files."
         *   "I see a file hash. Let me check for parent domains."
     *   State Update: Every tool result enriches the `state["metadata"]["rich_intel"]` and implicitly builds the graph.
-*   **Step 5: Triage Report** [COMPLETED]
+*   **Step 5: Triage Report** [IN-PROGRESS]
     *   Agent generates a `summary` explaining the verdict and key associations.
-*   **Step 6: Specialist Handoff** [COMPLETED]
+*   **Step 6: Specialist Handoff** [IN-PROGRESS]
     *   Agent generates `subtasks` to route to `malware_specialist` or `infrastructure_specialist` for deep dive.
 
 #### [NEW] [Malware Specialist](backend/agents/malware.py)
@@ -99,7 +102,7 @@ This document tracks the progress of the Harimau V2 rebuild.
 ### Phase 3.5 Challenges & Learnings
 *   **GTI MCP Server**: Needed to go from a full triage agent to a hybrid triage agent.
 *   **Selective Deployment**: Updated `deploy.sh` to allow deploying only backend or frontend to save time. 
-*   **Graph Population**: The MCP Tool `get_entities_related_to_...` required `descriptors_only=True` to return valid lists for the graph. Without it, the data was empty.
+*   **Graph Population**: The MCP Tool `get_entities_related_to_...` required `descriptors_only=True` to return valid lists for the graph. Without it, the data was empty. [TO VALIDATE AGAIN]
 *   **Agent Loop Logic**: Ensuring the agent loop doesn't silently fail if it exhausts turns without a final answer was critical. Added fallback to `messages` history. 
 
 ## Phase 4: Near-Term Roadmap (Post-MVP)

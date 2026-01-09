@@ -102,22 +102,61 @@ async def get_investigation(job_id: str):
         raise HTTPException(status_code=404, detail="Job not found")
     return job
 
+@app.get("/api/debug/investigation/{job_id}")
+async def debug_investigation(job_id: str):
+    """Debug endpoint to inspect investigation state."""
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    rich_intel = job.get("rich_intel", {})
+    relationships = rich_intel.get("relationships", {})
+    
+    # Count relationship entities
+    rel_summary = {}
+    for rel_type, entities in relationships.items():
+        rel_summary[rel_type] = {
+            "count": len(entities) if isinstance(entities, list) else 0,
+            "sample": entities[0] if entities else None
+        }
+    
+    return {
+        "job_id": job_id,
+        "ioc": job.get("ioc"),
+        "ioc_type": job.get("ioc_type"),
+        "status": job.get("status"),
+        "subtasks_count": len(job.get("subtasks", [])),
+        "rich_intel_keys": list(rich_intel.keys()),
+        "relationships_found": list(relationships.keys()),
+        "relationship_summary": rel_summary,
+        "graph_node_count_estimate": 1 + len(job.get("subtasks", [])) + sum(len(entities[:5]) for entities in relationships.values() if isinstance(entities, list))
+    }
+
 @app.get("/api/investigations/{job_id}/graph")
 async def get_investigation_graph(job_id: str):
     """
     Returns graph data (nodes/edges) for visualization.
-    MVP: Constructs a simple star graph (IOC -> Subtasks).
+    Enhanced with debugging and better error handling.
     """
     job = JOBS.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
+    logger.info("graph_request", job_id=job_id)
+    
     ioc = job.get("ioc", "Unknown")
     subtasks = job.get("subtasks", [])
+    rich_intel = job.get("rich_intel", {})
+    
+    # Debug logging
+    logger.info("graph_data_check", 
+                ioc=ioc,
+                subtasks_count=len(subtasks),
+                rich_intel_keys=list(rich_intel.keys()))
     
     # 1. Central Node (The IOC)
     nodes = [
-        {"id": "root", "label": ioc, "color": "#FF4B4B", "size": 30} # Red for IOC
+        {"id": "root", "label": ioc, "color": "#FF4B4B", "size": 30}
     ]
     edges = []
     
@@ -129,7 +168,7 @@ async def get_investigation_graph(job_id: str):
         nodes.append({
             "id": node_id,
             "label": agent_name,
-            "color": "#0083B8", # Blue for Agents
+            "color": "#0083B8",
             "size": 20
         })
         
@@ -138,44 +177,100 @@ async def get_investigation_graph(job_id: str):
             "target": node_id,
             "label": "assigned_to"
         })
-
-    # 3. Relationship Nodes (From Rich Intel)
-    rich_intel = job.get("rich_intel", {})
-    relationships = rich_intel.get("relationships", {})
     
-    # Iterate through relationship types (e.g., "resolutions", "communicating_files")
+    logger.info("graph_subtasks_added", count=len(subtasks))
+    
+    # 3. Relationship Nodes (From Rich Intel)
+    relationships = rich_intel.get("relationships", {})
+    logger.info("graph_relationships_check", 
+                found=bool(relationships),
+                types=list(relationships.keys()) if relationships else [])
+    
+    if not relationships:
+        logger.warning("graph_no_relationships",
+                      message="No relationships found in rich_intel. Graph will only show root + subtasks.")
+    
+    relationship_nodes_added = 0
+    
     for rel_type, entities in relationships.items():
-        if not entities: continue
+        if not entities:
+            logger.warning("graph_empty_relationship", rel_type=rel_type)
+            continue
         
-        # Add up to 5 entities per relationship type to avoid clutter
+        logger.info("graph_processing_relationship", 
+                   rel_type=rel_type, 
+                   entity_count=len(entities))
+        
+        # Add up to 5 entities per relationship type
         for idx, entity in enumerate(entities[:5]):
+            # Validate entity structure
+            if not isinstance(entity, dict):
+                logger.warning("graph_invalid_entity", 
+                              rel_type=rel_type, 
+                              entity_type=type(entity).__name__)
+                continue
+            
             # Entity ID
             ent_id = entity.get("id")
-            if not ent_id: continue
+            if not ent_id:
+                logger.warning("graph_missing_entity_id", 
+                              rel_type=rel_type, 
+                              entity_keys=list(entity.keys()))
+                continue
             
             # Determine Label
             attrs = entity.get("attributes", {})
+            ent_type = entity.get("type", "unknown")
+            
+            # More robust label extraction
             label = ent_id
-            if entity.get("type") == "domain":
+            if ent_type == "domain":
                 label = attrs.get("host_name") or ent_id
-            elif entity.get("type") == "ip_address":
-                label = attrs.get("ip_address") or ent_id
-
+            elif ent_type == "ip_address":
+                label = ent_id  # IP is already in the id field
+            elif ent_type == "file":
+                # Use meaningful_name if available, else truncate hash
+                label = attrs.get("meaningful_name") or ent_id[:8] + "..."
+            
             # Unique Node ID
             unique_id = f"{rel_type}_{idx}_{ent_id}"
             
+            # Determine color by type
+            color = "#FFA500"  # Default orange
+            if ent_type == "file":
+                color = "#FF6B6B"  # Red for files
+            elif ent_type == "domain":
+                color = "#4ECDC4"  # Teal for domains
+            elif ent_type == "ip_address":
+                color = "#FFD93D"  # Yellow for IPs
+            
             nodes.append({
                 "id": unique_id,
-                "label": label[:20] + "..." if len(str(label)) > 20 else str(label),
-                "color": "#FFA500", # Orange for Infra
+                "label": label[:30] + "..." if len(str(label)) > 30 else str(label),
+                "color": color,
                 "size": 15,
-                "title": json.dumps(attrs, indent=2) # Tooltip
+                "title": json.dumps({
+                    "type": ent_type,
+                    "id": ent_id,
+                    **attrs
+                }, indent=2)
             })
             
             edges.append({
                 "source": "root",
                 "target": unique_id,
-                "label": rel_type
+                "label": rel_type.replace("_", " ")
             })
-        
+            
+            relationship_nodes_added += 1
+    
+    logger.info("graph_generation_complete", 
+                total_nodes=len(nodes),
+                total_edges=len(edges),
+                relationship_nodes=relationship_nodes_added)
+    
+    if relationship_nodes_added == 0:
+        logger.warning("graph_no_relationship_nodes",
+                      message="No relationship nodes were added. Check if triage agent fetched relationships.")
+    
     return {"nodes": nodes, "edges": edges}

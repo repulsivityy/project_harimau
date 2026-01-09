@@ -2,7 +2,6 @@ import os
 import json
 import re
 
-
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_google_vertexai import ChatVertexAI
 from backend.graph.state import AgentState
@@ -12,7 +11,7 @@ import backend.tools.gti as gti
 
 logger = get_logger("agent_triage")
 
-# Triage Prompt (normally loaded from agents.yaml, hardcoded for MVP)
+# Triage Prompt (Enhanced to force tool usage)
 TRIAGE_PROMPT = """
 You are a Senior Threat Intelligence Analyst (Triage) with 15 years of experience in a Security Operations Center (SOC).
 Your goal is to perform an initial assessment of the provided IOC to determine if it warrants deep investigation.
@@ -37,14 +36,17 @@ You have access to "Rich Intelligence Data" from Google Threat Intelligence, inc
    - **IF MALICIOUS/SUSPICIOUS NETWORK (IP/Domain/URL)**: Route to `infrastructure_specialist` to map infrastructure.
    - **IF BENIGN**: Do NOT generate subtasks. Inform the user and recommend to close the alert.
 
-**CRITICAL INSTRUCTION:**
-You **MUST** call the `get_relationships` tool (e.g., for 'resolutions', 'communicating_files', or 'associations') **BEFORE** generating the final JSON output.
-- If you see an IP, check `resolutions` or `communicating_files`.
-- If you see a Domain, check `subdomains` or `referrer_files`.
-- If you see a File, check `contacted_ips`.
-**DO NOT** generate the final JSON until you have gathered this evidence.
+**MANDATORY TOOL USAGE:**
+You **MUST** call the `get_relationships` tool AT LEAST ONCE before generating your final output.
+- For IPs: Check 'resolutions' AND 'communicating_files'
+- For Domains: Check 'resolutions' AND 'referrer_files'  
+- For Files: Check 'contacted_ips' AND 'contacted_domains'
+- For all types: Check 'associations'
+
+Do NOT skip this step. Even if the base verdict seems clear, relationships provide critical context.
 
 **Output Format (JSON ONLY):**
+After gathering relationship data, output ONLY this JSON structure (no preamble):
 {
     "ioc_type": "IP|Domain|File|URL",
     "gti_verdict": "Malicious|Suspicious|Undetected|Benign",
@@ -59,10 +61,6 @@ You **MUST** call the `get_relationships` tool (e.g., for 'resolutions', 'commun
 """
 
 
-from langchain_core.tools import tool
-from langchain_core.messages import ToolMessage
-
-# --- Helpers ---
 def extract_triage_data(data: dict, ioc_type: str) -> dict:
     """
     Deterministically extracts 'Triage Data' for the Frontend.
@@ -93,19 +91,19 @@ def extract_triage_data(data: dict, ioc_type: str) -> dict:
         stats.get("timeout", 0)
     )
 
-    # GTI Assessment (Strict Alignment with User Evidence)
-    # User's trace shows gti_assessment is inside "attributes"
+    # GTI Assessment
     triage_data["threat_score"] = get_val(data, "attributes.gti_assessment.threat_score.value")
     triage_data["verdict"] = get_val(data, "attributes.gti_assessment.verdict.value")
     triage_data["description"] = get_val(data, "attributes.gti_assessment.description")
 
     return triage_data
 
+
 async def triage_node(state: AgentState):
     """
-    Hybrid Triage Agent.
+    Hybrid Triage Agent with guaranteed relationship fetching.
     1. Python Layer: Regex ID + Fetch Base Report + Extract Meta.
-    2. Agent Layer: LLM with Tools (Manual Loop) to fetch relationships.
+    2. Agent Layer: LLM with Tools (Manual Loop with forced execution).
     """
     ioc = state["ioc"]
     logger.info("triage_start", ioc=ioc)
@@ -114,9 +112,7 @@ async def triage_node(state: AgentState):
     ipv4_pattern = r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$"
     config = {}
     
-    # New Config: Direct Tool (Python) + Rel Tool (MCP)
     if "http" in ioc or "/" in ioc:
-        # TODO: URL ID encoding if needed
         config = {"type": "URL", "direct_tool": gti.get_url_report, "rel_tool": "get_entities_related_to_an_url", "arg": "url"}
     elif re.match(ipv4_pattern, ioc):
         config = {"type": "IP", "direct_tool": gti.get_ip_report, "rel_tool": "get_entities_related_to_an_ip_address", "arg": "ip_address"}
@@ -131,34 +127,34 @@ async def triage_node(state: AgentState):
         # --- 2. Fast Facts (Python Direct API) ---
         logger.info("triage_fetching_base_report_direct", type=config["type"])
         
-        # Call Direct API
-        # tools/gti.py returns dict or {}
         base_data = await config["direct_tool"](ioc)
         
         if not base_data or "data" not in base_data:
              logger.warning("triage_direct_api_empty", ioc=ioc)
-             base_data = {"id": ioc} # Fallback skeleton
+             base_data = {"id": ioc}
         else:
-             base_data = base_data["data"] # Unwrap "data" key standard in VT API
+             base_data = base_data["data"]
 
         # Extract Facts
         triage_data = extract_triage_data(base_data, config["type"])
         
-        # Store metadata
+        # Initialize metadata with relationships dict
         state["metadata"]["risk_level"] = "Assessing..." 
         state["metadata"]["gti_score"] = triage_data["threat_score"] or "N/A"
-        state["metadata"]["rich_intel"] = triage_data 
-
+        state["metadata"]["rich_intel"] = triage_data
+        state["metadata"]["rich_intel"]["relationships"] = {}  # Pre-initialize
+        
         async with mcp_manager.get_session("gti") as session:
-            # --- 3. Agentic Loop (LLM using MCP for Relationships) ---
+            # --- 3. Define Relationship Tool ---
+            from langchain_core.tools import tool
+            from langchain_core.messages import ToolMessage
             
-            # Define Tools for LLM (Dynamic Wrappers)
             @tool
             async def get_relationships(relationship_name: str):
                 """
                 Fetches entities related to the current IOC. 
                 Use this to find campaigns, threat actors, communicating files, or resolutions.
-                Valid relationship_names: associations, resolutions, communicating_files, contacted_domains, contacted_ips.
+                Valid relationship_names: associations, resolutions, communicating_files, contacted_domains, contacted_ips, referrer_files, subdomains.
                 """
                 logger.info("triage_agent_invoking_tool", ioc=ioc, rel=relationship_name)
                 try:
@@ -170,22 +166,24 @@ async def triage_node(state: AgentState):
                     })
                     if res.content:
                          return res.content[0].text
-                    return "No results."
+                    return "[]"  # Return empty array instead of "No results"
                 except Exception as e:
-                    return f"Error: {str(e)}"
+                    logger.error("triage_tool_error", rel=relationship_name, error=str(e))
+                    return f'{{"error": "{str(e)}"}}'
 
             llm_tools = [get_relationships]
             
             # Setup LLM
             project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
             if not project_id:
-                logger.error("triage_config_missing", var="GOOGLE_CLOUD_PROJECT")
-                # Try to fall back to default or raise
-                raise ValueError("GOOGLE_CLOUD_PROJECT environment variable is missing. It is required for Vertex AI.")
+                raise ValueError("GOOGLE_CLOUD_PROJECT environment variable is missing.")
+            
             location = os.getenv("GOOGLE_CLOUD_REGION", "asia-southeast1")
             llm = ChatVertexAI(
-                model="gemini-2.5-flash", temperature=0.0,
-                project=project_id, location=location
+                model="gemini-2.5-flash", 
+                temperature=0.0,
+                project=project_id, 
+                location=location
             ).bind_tools(llm_tools)
             
             messages = [
@@ -195,13 +193,21 @@ IOC: {ioc}
 Type: {config['type']}
 Base Report Facts: {json.dumps(triage_data, indent=2)}
 
-You have the base report. Now, use tools to fetch relationships to validate the verdict or find connections.
+NOW: Use the get_relationships tool to fetch related entities BEFORE generating your final JSON.
+For {config['type']}, you should check relationships like:
+- associations (always useful)
+- {'resolutions, communicating_files' if config['type'] in ['IP', 'Domain'] else 'contacted_ips, contacted_domains' if config['type'] == 'File' else 'contacted_domains'}
+
+Start by calling get_relationships now.
                 """)
             ]
             
-            # Manual Loop (Max 3 turns)
+            # --- 4. Manual Tool Execution Loop with Forced Minimum ---
+            tool_calls_made = 0
             final_content = ""
-            for turn in range(3):
+            
+            for turn in range(5):  # Increased to 5 turns
+                logger.info("triage_loop_turn", turn=turn, tools_called=tool_calls_made)
                 response = await llm.ainvoke(messages)
                 messages.append(response)
                 
@@ -209,62 +215,65 @@ You have the base report. Now, use tools to fetch relationships to validate the 
                     # Execute Tools
                     logger.info("triage_executing_tool_calls", count=len(response.tool_calls))
                     for tc in response.tool_calls:
-                        tool_msg = None
                         if tc["name"] == "get_relationships":
-                            logger.info("triage_invoking_tool_internal", tool=tc["name"])
+                            tool_calls_made += 1
+                            logger.info("triage_invoking_tool", tool=tc["name"], args=tc["args"])
+                            
                             res_txt = await get_relationships.ainvoke(tc["args"])
-                            logger.info("triage_tool_raw_output", tool=tc["name"], raw_len=len(res_txt), snippet=res_txt[:200])
+                            logger.info("triage_tool_response", raw_len=len(res_txt))
+                            
                             tool_msg = ToolMessage(content=res_txt, tool_call_id=tc["id"])
-                            # Add to Rich Intel for Graph Pop
+                            messages.append(tool_msg)
+                            
+                            # Store in state
                             try:
-                                # Ensure relationships dict exists
-                                if "relationships" not in state["metadata"]["rich_intel"]:
-                                    state["metadata"]["rich_intel"]["relationships"] = {}
-
-                                # Try parsing as JSON first
+                                rel_name = tc["args"]["relationship_name"]
+                                
+                                # Parse response
                                 entities = []
                                 try:
                                     parsed = json.loads(res_txt)
-                                    # Handle {"data": [...]} vs [...] vs {...}
-                                    if isinstance(parsed, dict) and "data" in parsed:
+                                    if isinstance(parsed, dict):
+                                        if "error" in parsed:
+                                            logger.warning("triage_tool_returned_error", rel=rel_name, error=parsed["error"])
+                                            continue
                                         entities = parsed.get("data", [])
                                     elif isinstance(parsed, list):
                                         entities = parsed
-                                    elif isinstance(parsed, dict):
-                                        # Single object (e.g. from sanitization unwrapping?)
-                                        entities = [parsed]
                                 except json.JSONDecodeError:
-                                    logger.warning("triage_tool_output_not_json", raw=res_txt[:100])
-                                    continue # Skip if not JSON
+                                    logger.warning("triage_tool_output_not_json", raw=res_txt[:200])
+                                    continue
 
-                                # Store normalized entities
-                                state["metadata"]["rich_intel"]["relationships"][tc["args"]["relationship_name"]] = entities
-                                logger.info("triage_stored_relationships", 
-                                            rel=tc["args"]["relationship_name"], 
-                                            count=len(entities))
-                                            
+                                # Store
+                                state["metadata"]["rich_intel"]["relationships"][rel_name] = entities
+                                logger.info("triage_stored_relationships", rel=rel_name, count=len(entities))
+                                    
                             except Exception as e:
                                 logger.error("triage_relationship_storage_failed", error=str(e))
-                            
-                        if tool_msg:
-                             messages.append(tool_msg)
                 else:
-                    # Final Answer
+                    # No more tool calls - check if we've called enough
+                    if tool_calls_made == 0:
+                        # Force at least one tool call
+                        logger.warning("triage_no_tools_called", forcing_prompt=True)
+                        messages.append(HumanMessage(content="You have not used the get_relationships tool yet. Please call it now to fetch related entities before generating your final answer."))
+                        continue
+                    
+                    # Agent provided final answer
                     final_content = response.content
+                    logger.info("triage_final_answer_received", tools_used=tool_calls_made)
                     break
             
             if not final_content:
-                # Fallback: Find the last AIMessage that isn't a tool call or empty
+                # Fallback
                 from langchain_core.messages import AIMessage
                 for msg in reversed(messages):
                     if isinstance(msg, AIMessage) and msg.content and not msg.tool_calls:
                          final_content = msg.content
                          break
             
-            # 3. Parse and Update State
+            # --- 5. Parse Final Response ---
             try:
                 final_text = ""
-                # Handle cases where content is a list (multimodal models)
                 if isinstance(final_content, list):
                     for block in final_content:
                         if isinstance(block, dict) and block.get("type") == "text":
@@ -272,22 +281,27 @@ You have the base report. Now, use tools to fetch relationships to validate the 
                         elif isinstance(block, str):
                             final_text += block
                 else:
-                    final_text = str(final_content) # Ensure string
+                    final_text = str(final_content)
 
-                # Simple cleaning of markdown code blocks
+                # Clean and parse
                 clean_content = final_text.replace("```json", "").replace("```", "").strip()
                 analysis = json.loads(clean_content)
+                
                 state["ioc_type"] = analysis.get("ioc_type")
                 state["subtasks"] = analysis.get("subtasks", [])
                 
-                # Capture Summary for Frontend
                 if "summary" in analysis:
                     state["metadata"]["rich_intel"]["triage_summary"] = analysis["summary"]
                 
-                state["metadata"]["risk_level"] = analysis.get("risk_level", "Unknown")
-                logger.info("triage_agent_success", risk=state["metadata"]["risk_level"])
+                state["metadata"]["risk_level"] = analysis.get("gti_verdict", "Unknown")
+                
+                logger.info("triage_agent_success", 
+                            risk=state["metadata"]["risk_level"], 
+                            subtasks=len(state["subtasks"]),
+                            relationships=len(state["metadata"]["rich_intel"]["relationships"]))
+                            
             except Exception as e:
-                logger.error("triage_parse_fail", error=str(e), raw=final_content)
+                logger.error("triage_parse_fail", error=str(e), raw=str(final_content)[:500])
                 state["metadata"]["risk_level"] = "Error"
                 
     except Exception as e:

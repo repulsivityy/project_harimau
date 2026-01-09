@@ -116,11 +116,15 @@ if submit_btn and ioc_input:
                 if not nodes:
                     st.warning("No graph nodes generated. Triage might have returned no tasks.")
                 else:
-                    config = Config(width=None, 
-                                    height=500, 
+                    config = Config(width=800, 
+                                    height=600, 
                                     directed=True, 
                                     physics=True, 
-                                    hierarchical=False)
+                                    hierarchical=False,
+                                    fit=True,
+                                    nodeHighlightBehavior=True,
+                                    highlightColor="#F7A7A6",
+                                    collapsible=False)
                     agraph(nodes=nodes, edges=edges, config=config)
             except Exception as e:
                 st.error(f"Graph Error: {e}")

@@ -76,6 +76,7 @@ async def run_investigation(request: InvestigationRequest):
         result = {
             "job_id": job_id,
             "status": "completed",
+            "ioc": final_state.get("ioc") or request.ioc,  # ✅ ADD THIS LINE
             "ioc_type": final_state.get("ioc_type"),
             "subtasks": final_state.get("subtasks"),
             "final_report": final_state.get("final_report", "No report generated."),
@@ -132,6 +133,7 @@ async def debug_investigation(job_id: str):
         "graph_node_count_estimate": 1 + len(job.get("subtasks", [])) + sum(len(entities[:5]) for entities in relationships.values() if isinstance(entities, list))
     }
 
+'''
 @app.get("/api/investigations/{job_id}/graph")
 async def get_investigation_graph(job_id: str):
     """
@@ -274,6 +276,226 @@ async def get_investigation_graph(job_id: str):
                       message="No relationship nodes were added. Check if triage agent fetched relationships.")
     
     return {"nodes": nodes, "edges": edges}
+'''
+# Improved Graph Endpoint with Better Naming
+# Replace the get_investigation_graph function in backend/main.py
+
+@app.get("/api/investigations/{job_id}/graph")
+async def get_investigation_graph(job_id: str):
+    """
+    Returns graph data with improved naming conventions for visualization.
+    """
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    logger.info("graph_request", job_id=job_id)
+    
+    ioc = job.get("ioc", "Unknown")
+    ioc_type = job.get("ioc_type", "Unknown")
+    subtasks = job.get("subtasks", [])
+    rich_intel = job.get("rich_intel", {})
+    
+    # 1. Central Node (The IOC) with better label
+    root_label = ioc
+    if ioc_type == "File":
+        root_label = f"File: {ioc[:16]}..." if len(ioc) > 16 else f"File: {ioc}"
+    elif ioc_type == "IP":
+        root_label = f"IP: {ioc}"
+    elif ioc_type == "Domain":
+        root_label = f"Domain: {ioc}"
+    elif ioc_type == "URL":
+        # Extract domain from URL
+        root_label = f"URL: {ioc[:30]}..."
+    
+    nodes = [
+        {
+            "id": "root", 
+            "label": root_label, 
+            "color": "#FF4B4B",  # Red for IOC
+            "size": 35,
+            "title": f"IOC: {ioc}\nType: {ioc_type}"
+        }
+    ]
+    edges = []
+    
+    # 2. Subtask Nodes (The Agents)
+    for i, task in enumerate(subtasks):
+        node_id = f"task_{i}"
+        agent_name = task.get("agent", "Unknown").replace("_", " ").title()
+        
+        nodes.append({
+            "id": node_id,
+            "label": agent_name,
+            "color": "#0083B8",  # Blue for agents
+            "size": 25,
+            "title": f"Agent: {agent_name}\nTask: {task.get('task', '')[:100]}"
+        })
+        
+        edges.append({
+            "source": "root",
+            "target": node_id,
+            "label": "investigate"
+        })
+    
+    logger.info("graph_subtasks_added", count=len(subtasks))
+    
+    # 3. Relationship Nodes with better naming
+    relationships = rich_intel.get("relationships", {})
+    logger.info("graph_relationships_check", 
+                found=bool(relationships),
+                types=list(relationships.keys()) if relationships else [])
+    
+    relationship_nodes_added = 0
+    
+    # Helper function to generate human-readable labels
+    def get_entity_label(entity: dict, rel_type: str) -> str:
+        """Generate human-readable label for entity"""
+        ent_type = entity.get("type", "unknown")
+        ent_id = entity.get("id", "unknown")
+        attrs = entity.get("attributes", {})
+        
+        # Type-specific labeling
+        if ent_type == "domain":
+            return attrs.get("host_name", ent_id)
+        
+        elif ent_type == "ip_address":
+            return ent_id
+        
+        elif ent_type == "file":
+            # Try to get meaningful name
+            meaningful_name = attrs.get("meaningful_name")
+            if meaningful_name:
+                return meaningful_name
+            # Use truncated hash
+            return f"{ent_id[:12]}..."
+        
+        elif ent_type == "url":
+            # Extract domain or truncate
+            from urllib.parse import urlparse
+            try:
+                parsed = urlparse(ent_id)
+                return parsed.netloc or ent_id[:30]
+            except:
+                return ent_id[:30] + "..." if len(ent_id) > 30 else ent_id
+        
+        elif ent_type == "collection":
+            # Collection might be threat actor, malware family, etc.
+            name = attrs.get("name", attrs.get("title", ""))
+            if name:
+                return name
+            # Fallback: extract from ID
+            if "--" in ent_id:
+                parts = ent_id.split("--")
+                return f"{parts[0].title()}"
+            return ent_id[:20] + "..."
+        
+        elif ent_type == "resolution":
+            # Resolution has both IP and hostname
+            ip = attrs.get("ip_address", "")
+            host = attrs.get("host_name", "")
+            if ip and host:
+                return f"{host} → {ip}"
+            return ip or host or ent_id
+        
+        else:
+            # Generic fallback
+            return ent_id[:20] + "..." if len(ent_id) > 20 else ent_id
+    
+    for rel_type, entities in relationships.items():
+        if not entities:
+            logger.warning("graph_empty_relationship", rel_type=rel_type)
+            continue
+        
+        logger.info("graph_processing_relationship", 
+                   rel_type=rel_type, 
+                   entity_count=len(entities))
+        
+        # Add up to 10 entities per relationship type (increased from 5)
+        for idx, entity in enumerate(entities[:10]):
+            # Validate entity
+            if not isinstance(entity, dict):
+                logger.warning("graph_invalid_entity", 
+                              rel_type=rel_type, 
+                              entity_type=type(entity).__name__)
+                continue
+            
+            ent_id = entity.get("id")
+            if not ent_id:
+                logger.warning("graph_missing_entity_id", 
+                              rel_type=rel_type, 
+                              entity_keys=list(entity.keys()))
+                continue
+            
+            ent_type = entity.get("type", "unknown")
+            attrs = entity.get("attributes", {})
+            
+            # Generate readable label
+            label = get_entity_label(entity, rel_type)
+            
+            # Unique Node ID
+            unique_id = f"{rel_type}_{idx}_{ent_id}"
+            
+            # Color by entity type
+            color_map = {
+                "file": "#FF6B6B",           # Red
+                "domain": "#4ECDC4",         # Teal
+                "ip_address": "#FFD93D",     # Yellow
+                "url": "#95E1D3",            # Light teal
+                "collection": "#F38181",     # Salmon (threat actors, malware families)
+                "resolution": "#AA96DA",     # Purple
+            }
+            color = color_map.get(ent_type, "#FFA500")  # Default orange
+            
+            # Build tooltip with key info
+            tooltip_lines = [f"Type: {ent_type}", f"ID: {ent_id}"]
+            
+            # Add relevant attributes to tooltip
+            if ent_type == "collection":
+                if attrs.get("name"):
+                    tooltip_lines.append(f"Name: {attrs['name']}")
+                if attrs.get("description"):
+                    desc = attrs['description'][:100]
+                    tooltip_lines.append(f"Description: {desc}...")
+            
+            elif ent_type == "file":
+                if attrs.get("type_description"):
+                    tooltip_lines.append(f"File Type: {attrs['type_description']}")
+                if attrs.get("size"):
+                    tooltip_lines.append(f"Size: {attrs['size']} bytes")
+            
+            elif ent_type in ["domain", "ip_address"]:
+                if attrs.get("last_analysis_stats"):
+                    stats = attrs["last_analysis_stats"]
+                    mal = stats.get("malicious", 0)
+                    tooltip_lines.append(f"Malicious Detections: {mal}")
+            
+            nodes.append({
+                "id": unique_id,
+                "label": label,
+                "color": color,
+                "size": 20,
+                "title": "\n".join(tooltip_lines)
+            })
+            
+            # Clean relationship label
+            edge_label = rel_type.replace("_", " ").title()
+            
+            edges.append({
+                "source": "root",
+                "target": unique_id,
+                "label": edge_label
+            })
+            
+            relationship_nodes_added += 1
+    
+    logger.info("graph_generation_complete", 
+                total_nodes=len(nodes),
+                total_edges=len(edges),
+                relationship_nodes=relationship_nodes_added)
+    
+    return {"nodes": nodes, "edges": edges}
+
 
 ##########
 # added for debugging purposes. to consider removing once prod ready. 

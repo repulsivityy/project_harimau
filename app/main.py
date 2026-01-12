@@ -5,10 +5,10 @@ from datetime import datetime
 from api_client import HarimauAPIClient
 
 # Config
-st.set_page_config(page_title="Harimau V2", page_icon="🐯", layout="wide")
+st.set_page_config(page_title="Project Harimau", page_icon="🐯", layout="wide")
 api = HarimauAPIClient()
 
-st.title("🐯 Harimau Threat Hunter V2")
+st.title("🐯 Project Harimau - AI Threat Hunter")
 
 # Sidebar Status
 with st.sidebar:
@@ -20,7 +20,11 @@ with st.sidebar:
         st.warning("Ensure backend is running on port 8080")
 
 # Main Interface
+st.write("Project Harimau (Tiger in Malay) is an automated threat hunting platform that uses AI to analyze and investigate IOCs (IPs, Domains, Hashes, URLs). ")
+st.write("Harimau leverages LangGraph with multiple specialised threat hunt agents to mimic the flow of a threat hunting program.")
+st.write("\n")
 st.write("### Investigation Console")
+st.write("\n")
 
 col1, col2 = st.columns([3, 1])
 with col1:
@@ -93,7 +97,7 @@ if submit_btn and ioc_input:
             
             # Row 1: High Level Signal
             col_a, col_b, col_c, col_d = st.columns(4)
-            col_a.metric("IOC Type", res.get("ioc_type", "Unknown").upper())
+            col_a.metric("IOC Type", (res.get("ioc_type") or "Unknown").upper())
             col_b.metric("Verdict", verdict if verdict else "Unknown")
             col_c.metric("Threat Score", f"{t_score}/100" if t_score else "N/A")
             total_stats = rich_intel.get("total_stats", 0)

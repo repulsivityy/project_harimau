@@ -80,7 +80,7 @@ if submit_btn and ioc_input:
         res = api.get_investigation(job_id)
         subtasks = res.get("subtasks", [])
         
-        st.success("Investigation Complete!")
+        #st.success("Investigation Complete!")
         
         # Tabs for different views
         tab1, tab2, tab3, tab4 = st.tabs(["📝 Triage & Plan", "🕸️ Graph", "📄 Final Report", "⏱️ Timeline"])

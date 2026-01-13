@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import asyncio
 
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_google_vertexai import ChatVertexAI
@@ -11,46 +12,157 @@ import backend.tools.gti as gti
 
 logger = get_logger("agent_triage")
 
-TRIAGE_PROMPT = """
-You are a Senior Threat Intelligence Analyst (Triage) with 15 years of experience in a Security Operations Center (SOC).
-Your goal is to perform an initial assessment of the provided IOC to determine if it warrants deep investigation.
+# Graph growth control
+MAX_ENTITIES_PER_RELATIONSHIP = 5
+MAX_TOTAL_ENTITIES = 50
+MIN_THREAT_SCORE = 0
+REQUIRE_MALICIOUS_VERDICT = False
 
-**Your Persona:**
-- You are skeptical, evidence-based, and focused on prioritization.
-- You do not make assumptions; you rely strictly on the provided "Rich Intelligence Data".
-- You are effective: you only recommend subtasks if there is a clear lead to follow.
-
-**Input Data:**
-You have access to "Rich Intelligence Data" from Google Threat Intelligence, including:
-1. Basic Report (Verdict, Scores).
-2. Advanced Attributes (File metadata, IP details).
-3. Relationships (Associations, Resolutions, Communicating entities).
-
-**Analysis Instructions:**
-1. **Analyze Facts:** Look at the Threat Score, Verdict, and Associations.
-2. **Determine Verdict:** Verdicts should be taken from gti_assessment_verdicts
-
-3. **Determine Next Steps (Routing Logic):**
-   - **IF MALICIOUS/SUSPICIOUS FILE**: Route to `malware_specialist` to analyze behavior.
-   - **IF MALICIOUS/SUSPICIOUS NETWORK (IP/Domain/URL)**: Route to `infrastructure_specialist` to map infrastructure.
-   - **IF BENIGN**: Do NOT generate subtasks. Inform the user and recommend to close the alert.
-
-**MANDATORY TOOL USAGE:**
-You **MUST** call the `get_relationships` tool AT LEAST ONCE before generating your final output.
-
-**Output Format (JSON ONLY):**
-After gathering relationship data, output ONLY this JSON structure (no preamble):
-{
-    "ioc_type": "IP|Domain|File|URL",
-    "gti_verdict": "Malicious|Suspicious|Undetected|Benign",
-    "gti_score": "...",
-    "associations": "...", 
-    "summary": "Concise, markdown-formatted assessment. START with the verdict. THEN describe key relationships found.",
-    "subtasks": [
-        {"agent": "malware_specialist", "task": "Analyze behavior..."},
-        {"agent": "infrastructure_specialist", "task": "Map infrastructure..."}
+# Define priority relationships for each IOC type
+PRIORITY_RELATIONSHIPS = {
+    "File": [
+        "associations",
+        "contacted_domains",
+        "contacted_ips",
+        "dropped_files",
+        "embedded_domains",
+        "malware_families",
+        "attack_techniques",
+    ],
+    "IP": [
+        "associations",
+        "resolutions",
+        "communicating_files",
+        "downloaded_files",
+        "malware_families",
+    ],
+    "Domain": [
+        "associations",
+        "resolutions",
+        "communicating_files",
+        "downloaded_files",
+        "subdomains",
+        "malware_families",
+    ],
+    "URL": [
+        "associations",
+        "contacted_domains",
+        "contacted_ips",
+        "communicating_files",
+        "downloaded_files",
+        "network_location",
     ]
 }
+
+TRIAGE_ANALYSIS_PROMPT = """
+You are a Senior Threat Intelligence Analyst performing comprehensive TRIAGE analysis.
+
+**Your Role:**
+You are the FIRST analyst to review this IOC. Your analysis will guide specialist teams.
+You must provide actionable intelligence and clear direction for deep-dive investigations.
+
+**Available Intelligence:**
+You have COMPLETE data from Google Threat Intelligence:
+- Base threat indicators (verdict, score, stats)
+- ALL priority relationships have been fetched and provided
+- Full context about associated threats, infrastructure, and campaigns
+
+**Your Tasks:**
+
+1. **THREAT ASSESSMENT**
+   - Determine overall verdict (Malicious/Suspicious/Undetected/Benign)
+   - Assess confidence level (High/Medium/Low)
+   - Identify threat severity
+
+2. **FIRST-LEVEL ANALYSIS** (This is critical!)
+   - Identify key threat indicators from relationships
+   - Recognize attack patterns (if malicious)
+   - Map threat landscape (campaigns, actors, families)
+   - Identify critical infrastructure elements
+   - Flag high-priority entities for specialist investigation
+
+3. **CONTEXTUALIZATION**
+   - Link to known campaigns/actors from associations
+   - Identify behavioral patterns from relationship data
+   - Assess operational context (is this active? recent?)
+   - Determine attack stage (recon, delivery, exploitation, etc.)
+
+4. **ROUTING & PRIORITIZATION**
+   - Generate specific, actionable subtasks for specialists
+   - Prioritize what specialists should focus on first
+   - Provide context specialists need (don't make them rediscover)
+   - Include key entity IDs specialists should examine
+
+**Analysis Framework:**
+
+For MALICIOUS files:
+- What does it do? (dropped_files, contacted_* relationships)
+- Who made it? (associations → campaigns/actors)
+- How does it work? (attack_techniques)
+- Where is the infrastructure? (contacted_domains/ips)
+
+For MALICIOUS infrastructure (IP/Domain):
+- What's hosted here? (downloaded_files, urls)
+- Who connects to it? (communicating_files)
+- What's the infrastructure map? (resolutions, subdomains)
+- What campaigns use it? (associations)
+
+For SUSPICIOUS/UNDETECTED:
+- What's uncertain? (missing data, conflicting signals)
+- What needs verification? (specific relationships to check)
+- What's the risk if true positive? (potential impact)
+
+**Output Format (JSON):**
+{{
+    "ioc_type": "IP|Domain|File|URL",
+    "verdict": "Malicious|Suspicious|Undetected|Benign",
+    "confidence": "High|Medium|Low",
+    "severity": "Critical|High|Medium|Low",
+    "threat_score": <number>,
+    
+    "executive_summary": "One paragraph: verdict + key findings + recommended action",
+    
+    "key_findings": [
+        "Finding 1 with specific entity IDs/names",
+        "Finding 2 with context from relationships",
+        "Finding 3 with threat actor/campaign attribution"
+    ],
+    
+    "threat_context": {{
+        "campaigns": ["Campaign names from associations"],
+        "threat_actors": ["Actor names from associations"],
+        "malware_families": ["Family names"],
+        "attack_techniques": ["MITRE ATT&CK IDs/names"],
+        "infrastructure_notes": "Brief description of C2/hosting infrastructure"
+    }},
+    
+    "priority_entities": [
+        {{
+            "entity_id": "specific ID from relationships",
+            "entity_type": "file|domain|ip",
+            "reason": "Why this entity is important",
+            "relationship": "Which relationship it came from"
+        }}
+    ],
+    
+    "subtasks": [
+        {{
+            "agent": "malware_specialist|infrastructure_specialist",
+            "priority": "high|medium|low",
+            "task": "Specific task with entity IDs and focus areas",
+            "context": "What you found that makes this task necessary"
+        }}
+    ],
+    
+    "investigation_notes": "Additional context or caveats for specialists"
+}}
+
+**CRITICAL REMINDERS:**
+- You have COMPLETE data - use all of it
+- Be specific - include entity IDs and names
+- Provide context - don't make specialists rediscover your findings
+- Prioritize - what's most important for specialists to examine?
+- Be actionable - subtasks should be concrete and focused
 """
 
 
@@ -87,92 +199,336 @@ def extract_triage_data(data: dict, ioc_type: str) -> dict:
     return triage_data
 
 
+def filter_entities_by_severity(entities: list, rel_name: str) -> list:
+    """Filter entities by threat score and verdict to control graph growth."""
+    if not entities:
+        return []
+    
+    filtered = []
+    for entity in entities:
+        entity_type = entity.get("type", "")
+        if entity_type == "collection":
+            filtered.append(entity)
+            continue
+        
+        attrs = entity.get("attributes", {})
+        
+        if REQUIRE_MALICIOUS_VERDICT:
+            gti_verdict = attrs.get("gti_assessment", {}).get("verdict", {}).get("value", "")
+            if gti_verdict.lower() != "malicious":
+                continue
+        
+        if MIN_THREAT_SCORE > 0:
+            threat_score = attrs.get("gti_assessment", {}).get("threat_score", {}).get("value", 0)
+            if threat_score < MIN_THREAT_SCORE:
+                continue
+        
+        filtered.append(entity)
+    
+    if len(filtered) < len(entities):
+        logger.info("filter_entities_by_severity", 
+                   rel=rel_name,
+                   original=len(entities),
+                   filtered=len(filtered))
+    
+    return filtered
+
+
 def parse_mcp_tool_response(res_txt: str, logger, rel_name: str) -> list:
-    """
-    Liberal parser that handles multiple MCP tool response formats.
-    
-    Handles:
-    1. {"data": [...]}           - Standard wrapped format
-    2. [...]                     - Direct array
-    3. {...}                     - Single entity (wraps in array)
-    4. {"relationship": [...]}   - Relationship-keyed format
-    5. Empty strings, errors, etc.
-    
-    Returns:
-        list: Array of entities (empty list if no valid data)
-    """
+    """Parse MCP tool response into entity list."""
     if not res_txt or not res_txt.strip():
-        logger.warning("parse_mcp_empty_response", rel=rel_name)
+        logger.info("parse_mcp_empty_response", rel=rel_name)
         return []
     
     try:
         parsed = json.loads(res_txt)
     except json.JSONDecodeError as e:
-        logger.error("parse_mcp_json_error", rel=rel_name, error=str(e), sample=res_txt[:200])
+        logger.warning("parse_mcp_json_error", rel=rel_name, error=str(e))
         return []
     
-    # Case 1: Already a list - use directly
     if isinstance(parsed, list):
         logger.info("parse_mcp_format", rel=rel_name, format="direct_array", count=len(parsed))
         return parsed
     
-    # Case 2: Dict - multiple sub-cases
     if isinstance(parsed, dict):
-        # Sub-case 2a: Error response
         if "error" in parsed:
-            logger.warning("parse_mcp_error_response", rel=rel_name, error=parsed["error"])
+            logger.info("parse_mcp_error_response", rel=rel_name, error=parsed["error"])
             return []
         
-        # Sub-case 2b: Standard wrapper {"data": [...]}
         if "data" in parsed:
             data = parsed["data"]
             if isinstance(data, list):
                 logger.info("parse_mcp_format", rel=rel_name, format="wrapped_array", count=len(data))
                 return data
             elif isinstance(data, dict):
-                # Single entity wrapped in data
                 logger.info("parse_mcp_format", rel=rel_name, format="wrapped_single", count=1)
                 return [data]
-            else:
-                logger.warning("parse_mcp_unexpected_data_type", rel=rel_name, type=type(data).__name__)
-                return []
         
-        # Sub-case 2c: Relationship-keyed format {"associations": [...]}
         if rel_name in parsed and isinstance(parsed[rel_name], list):
             logger.info("parse_mcp_format", rel=rel_name, format="relationship_keyed", count=len(parsed[rel_name]))
             return parsed[rel_name]
         
-        # Sub-case 2d: Single entity (has "type" and "id" keys)
         if "type" in parsed and "id" in parsed:
             logger.info("parse_mcp_format", rel=rel_name, format="single_entity", count=1)
             return [parsed]
-        
-        # Sub-case 2e: Unknown dict structure - try to find any array
-        logger.warning("parse_mcp_unknown_dict_format", 
-                      rel=rel_name, 
-                      keys=list(parsed.keys()),
-                      sample=str(parsed)[:200])
         
         for key, value in parsed.items():
             if isinstance(value, list) and len(value) > 0:
                 logger.info("parse_mcp_format", rel=rel_name, format="found_array_in_dict", key=key, count=len(value))
                 return value
-        
-        return []
     
-    # Case 3: Neither list nor dict
-    logger.error("parse_mcp_unexpected_type", rel=rel_name, type=type(parsed).__name__)
+    logger.info("parse_mcp_no_data_found", rel=rel_name)
     return []
+
+
+async def fetch_all_relationships(
+    ioc: str, 
+    ioc_type: str, 
+    rel_tool: str, 
+    arg_name: str, 
+    priority_rels: list,
+    session
+) -> dict:
+    """
+    PHASE 1: Deterministic relationship fetching (Pure Python).
+    Guarantees ALL priority relationships are attempted.
+    """
+    logger.info("phase1_start_deterministic_fetch", 
+                ioc=ioc,
+                ioc_type=ioc_type,
+                total_relationships=len(priority_rels))
+    
+    relationships_data = {}
+    total_entities_stored = 0
+    
+    for idx, rel_name in enumerate(priority_rels, 1):
+        if total_entities_stored >= MAX_TOTAL_ENTITIES:
+            logger.warning("phase1_entity_limit_reached",
+                          at_relationship=rel_name,
+                          progress=f"{idx}/{len(priority_rels)}",
+                          total_stored=total_entities_stored)
+            break
+        
+        logger.info("phase1_fetching_relationship",
+                   rel=rel_name,
+                   progress=f"{idx}/{len(priority_rels)}")
+        
+        try:
+            res = await session.call_tool(rel_tool, arguments={
+                arg_name: ioc,
+                "relationship_name": rel_name,
+                "descriptors_only": False,
+                "limit": MAX_ENTITIES_PER_RELATIONSHIP
+            })
+            
+            if not res.content:
+                logger.info("phase1_empty_response", rel=rel_name)
+                continue
+            
+            res_txt = res.content[0].text
+            entities = parse_mcp_tool_response(res_txt, logger, rel_name)
+            
+            if not entities:
+                logger.info("phase1_no_entities", rel=rel_name)
+                continue
+            
+            filtered_entities = filter_entities_by_severity(entities, rel_name)
+            
+            if not filtered_entities:
+                logger.info("phase1_all_entities_filtered", rel=rel_name)
+                continue
+            
+            remaining_capacity = MAX_TOTAL_ENTITIES - total_entities_stored
+            if len(filtered_entities) > remaining_capacity:
+                logger.warning("phase1_truncating_entities",
+                              rel=rel_name,
+                              would_add=len(filtered_entities),
+                              capacity=remaining_capacity)
+                filtered_entities = filtered_entities[:remaining_capacity]
+            
+            relationships_data[rel_name] = filtered_entities
+            total_entities_stored += len(filtered_entities)
+            
+            logger.info("phase1_stored_relationship",
+                       rel=rel_name,
+                       count=len(filtered_entities),
+                       total_stored=total_entities_stored)
+            
+        except Exception as e:
+            logger.warning("phase1_fetch_error",
+                          rel=rel_name,
+                          error=str(e))
+            continue
+    
+    logger.info("phase1_complete",
+                relationships_attempted=len(priority_rels),
+                relationships_with_data=len(relationships_data),
+                total_entities=total_entities_stored)
+    
+    return relationships_data
+
+
+def prepare_detailed_context_for_llm(relationships_data: dict) -> dict:
+    """
+    Prepare rich context for LLM analysis.
+    Instead of just counts, provide actual entity details for deeper analysis.
+    """
+    detailed_context = {}
+    
+    for rel_name, entities in relationships_data.items():
+        detailed_context[rel_name] = {
+            "count": len(entities),
+            "entities": []
+        }
+        
+        # Provide more detail for analysis
+        for entity in entities:
+            entity_summary = {
+                "id": entity.get("id"),
+                "type": entity.get("type"),
+            }
+            
+            attrs = entity.get("attributes", {})
+            
+            # Add threat assessment if available
+            gti_assessment = attrs.get("gti_assessment", {})
+            if gti_assessment:
+                entity_summary["threat_score"] = gti_assessment.get("threat_score", {}).get("value")
+                entity_summary["verdict"] = gti_assessment.get("verdict", {}).get("value")
+            
+            # Add name/title if available (for collections/campaigns)
+            if attrs.get("name"):
+                entity_summary["name"] = attrs["name"]
+            if attrs.get("title"):
+                entity_summary["title"] = attrs["title"]
+            
+            # Add last analysis stats if available (for files/domains/IPs)
+            if attrs.get("last_analysis_stats"):
+                entity_summary["malicious_count"] = attrs["last_analysis_stats"].get("malicious", 0)
+            
+            # Add meaningful context based on type
+            if entity.get("type") == "file":
+                entity_summary["file_type"] = attrs.get("type_description")
+                entity_summary["size"] = attrs.get("size")
+            elif entity.get("type") in ["domain", "ip_address"]:
+                entity_summary["reputation"] = attrs.get("reputation")
+            
+            detailed_context[rel_name]["entities"].append(entity_summary)
+    
+    return detailed_context
+
+
+async def comprehensive_triage_analysis(
+    ioc: str,
+    ioc_type: str,
+    triage_data: dict,
+    relationships_data: dict
+) -> dict:
+    """
+    PHASE 2: Comprehensive first-level analysis by triage LLM.
+    Provides deep analysis that guides specialist investigations.
+    """
+    logger.info("phase2_start_comprehensive_analysis",
+                ioc=ioc,
+                relationships_found=len(relationships_data),
+                total_entities=sum(len(entities) for entities in relationships_data.values()))
+    
+    project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
+    if not project_id:
+        raise ValueError("GOOGLE_CLOUD_PROJECT environment variable is missing.")
+    
+    location = os.getenv("GOOGLE_CLOUD_REGION", "asia-southeast1")
+    llm = ChatVertexAI(
+        model="gemini-2.5-flash",
+        temperature=0.0,
+        project=project_id,
+        location=location
+    )
+    
+    # Prepare detailed context (not just counts)
+    detailed_context = prepare_detailed_context_for_llm(relationships_data)
+    
+    messages = [
+        SystemMessage(content=TRIAGE_ANALYSIS_PROMPT),
+        HumanMessage(content=f"""
+**IOC Under Investigation:**
+{ioc} ({ioc_type})
+
+**Base Threat Assessment:**
+{json.dumps(triage_data, indent=2)}
+
+**Complete Relationship Data:**
+ALL priority relationships have been fetched. Here is the complete intelligence:
+
+{json.dumps(detailed_context, indent=2)}
+
+**Statistics:**
+- Total relationships checked: {len(PRIORITY_RELATIONSHIPS.get(ioc_type, []))}
+- Relationships with data: {len(relationships_data)}
+- Total entities found: {sum(len(entities) for entities in relationships_data.values())}
+
+Perform comprehensive first-level triage analysis now.
+        """)
+    ]
+    
+    response = await llm.ainvoke(messages)
+    
+    # Parse response
+    try:
+        if isinstance(response.content, list):
+            final_text = "".join([
+                block.get("text", "") if isinstance(block, dict) else str(block)
+                for block in response.content
+            ])
+        else:
+            final_text = str(response.content)
+        
+        clean_content = final_text.replace("```json", "").replace("```", "").strip()
+        analysis = json.loads(clean_content)
+        
+        logger.info("phase2_analysis_complete",
+                   verdict=analysis.get("verdict"),
+                   confidence=analysis.get("confidence"),
+                   severity=analysis.get("severity"),
+                   key_findings=len(analysis.get("key_findings", [])),
+                   priority_entities=len(analysis.get("priority_entities", [])),
+                   subtasks=len(analysis.get("subtasks", [])))
+        
+        return analysis
+        
+    except Exception as e:
+        logger.error("phase2_parse_error", error=str(e), raw=str(response.content)[:500])
+        
+        # Fallback with basic analysis
+        return {
+            "ioc_type": ioc_type,
+            "verdict": triage_data.get("verdict", "Unknown"),
+            "confidence": "Low",
+            "severity": "Medium",
+            "threat_score": triage_data.get("threat_score", "N/A"),
+            "executive_summary": f"Analysis of {ioc} found {len(relationships_data)} relationship types with {sum(len(entities) for entities in relationships_data.values())} entities. Further investigation recommended.",
+            "key_findings": [
+                f"Found {len(entities)} entities in {rel_name}"
+                for rel_name, entities in relationships_data.items()
+            ],
+            "threat_context": {},
+            "priority_entities": [],
+            "subtasks": [],
+            "investigation_notes": "Automated analysis failed. Manual review recommended."
+        }
 
 
 async def triage_node(state: AgentState):
     """
-    Hybrid Triage Agent with robust MCP response parsing.
+    HYBRID APPROACH:
+    - Phase 1: Pure Python fetches ALL relationships (deterministic)
+    - Phase 2: Triage LLM does comprehensive first-level analysis (intelligent)
+    - Result: Complete graph + actionable intelligence for specialists
     """
     ioc = state["ioc"]
-    logger.info("triage_start", ioc=ioc)
+    logger.info("triage_start", ioc=ioc, mode="hybrid_comprehensive")
     
-    # 1. Identification
+    # 1. IOC Identification
     ipv4_pattern = r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$"
     config = {}
     
@@ -191,9 +547,11 @@ async def triage_node(state: AgentState):
          
     logger.info("triage_detected_type", type=config["type"])
     
+    priority_rels = PRIORITY_RELATIONSHIPS.get(config["type"], ["associations"])
+    
     try:
-        # 2. Fast Facts
-        logger.info("triage_fetching_base_report_direct", type=config["type"])
+        # 2. Get base facts
+        logger.info("triage_fetching_base_report")
         base_data = await config["direct_tool"](ioc)
         
         if not base_data or "data" not in base_data:
@@ -210,141 +568,60 @@ async def triage_node(state: AgentState):
         state["metadata"]["rich_intel"] = triage_data
         state["metadata"]["rich_intel"]["relationships"] = {}
         
+        # ========================================
+        # PHASE 1: Deterministic Relationship Fetching
+        # ========================================
         async with mcp_manager.get_session("gti") as session:
-            # 3. Define relationship tool
-            from langchain_core.tools import tool
-            from langchain_core.messages import ToolMessage
-            
-            @tool
-            async def get_relationships(relationship_name: str):
-                """Fetches entities related to the current IOC."""
-                logger.info("triage_agent_invoking_tool", ioc=ioc, rel=relationship_name)
-                try:
-                    res = await session.call_tool(config["rel_tool"], arguments={
-                        config["arg"]: ioc, 
-                        "relationship_name": relationship_name, 
-                        "descriptors_only": True,
-                        "limit": 10
-                    })
-                    if res.content:
-                         return res.content[0].text
-                    return "[]"
-                except Exception as e:
-                    logger.error("triage_tool_error", rel=relationship_name, error=str(e))
-                    return f'{{"error": "{str(e)}"}}'
-
-            llm_tools = [get_relationships]
-            
-            # Setup LLM
-            project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
-            if not project_id:
-                raise ValueError("GOOGLE_CLOUD_PROJECT environment variable is missing.")
-            
-            location = os.getenv("GOOGLE_CLOUD_REGION", "asia-southeast1")
-            llm = ChatVertexAI(
-                model="gemini-2.5-flash", 
-                temperature=0.0,
-                project=project_id, 
-                location=location
-            ).bind_tools(llm_tools)
-            
-            messages = [
-                SystemMessage(content=TRIAGE_PROMPT),
-                HumanMessage(content=f"""
-IOC: {ioc}
-Type: {config['type']}
-Base Report Facts: {json.dumps(triage_data, indent=2)}
-
-Use get_relationships to fetch related entities before generating your final JSON.
-                """)
-            ]
-            
-            # Agent Loop
-            tool_calls_made = 0
-            final_content = ""
-            
-            for turn in range(5):
-                logger.info("triage_loop_turn", turn=turn, tools_called=tool_calls_made)
-                response = await llm.ainvoke(messages)
-                messages.append(response)
-                
-                if response.tool_calls:
-                    logger.info("triage_executing_tool_calls", count=len(response.tool_calls))
-                    for tc in response.tool_calls:
-                        if tc["name"] == "get_relationships":
-                            tool_calls_made += 1
-                            logger.info("triage_invoking_tool", tool=tc["name"], args=tc["args"])
-                            
-                            res_txt = await get_relationships.ainvoke(tc["args"])
-                            logger.info("triage_tool_response", raw_len=len(res_txt))
-                            
-                            tool_msg = ToolMessage(content=res_txt, tool_call_id=tc["id"])
-                            messages.append(tool_msg)
-                            
-                            # ✅ USE ROBUST PARSER
-                            try:
-                                rel_name = tc["args"]["relationship_name"]
-                                entities = parse_mcp_tool_response(res_txt, logger, rel_name)
-                                
-                                if entities:
-                                    state["metadata"]["rich_intel"]["relationships"][rel_name] = entities
-                                    logger.info("triage_stored_relationships", rel=rel_name, count=len(entities))
-                                else:
-                                    logger.info("triage_no_entities_found", rel=rel_name)
-                                    
-                            except Exception as e:
-                                logger.error("triage_relationship_storage_failed", error=str(e))
-                else:
-                    if tool_calls_made == 0:
-                        logger.warning("triage_no_tools_called", forcing_prompt=True)
-                        messages.append(HumanMessage(
-                            content="You have not used the get_relationships tool yet. "
-                                    "Please call it now to fetch related entities."
-                        ))
-                        continue
-                    
-                    final_content = response.content
-                    logger.info("triage_final_answer_received", tools_used=tool_calls_made)
-                    break
-            
-            if not final_content:
-                from langchain_core.messages import AIMessage
-                for msg in reversed(messages):
-                    if isinstance(msg, AIMessage) and msg.content and not msg.tool_calls:
-                         final_content = msg.content
-                         break
-            
-            # Parse final response
-            try:
-                final_text = ""
-                if isinstance(final_content, list):
-                    for block in final_content:
-                        if isinstance(block, dict) and block.get("type") == "text":
-                            final_text += block.get("text", "")
-                        elif isinstance(block, str):
-                            final_text += block
-                else:
-                    final_text = str(final_content)
-
-                clean_content = final_text.replace("```json", "").replace("```", "").strip()
-                analysis = json.loads(clean_content)
-                
-                state["ioc_type"] = analysis.get("ioc_type")
-                state["subtasks"] = analysis.get("subtasks", [])
-                
-                if "summary" in analysis:
-                    state["metadata"]["rich_intel"]["triage_summary"] = analysis["summary"]
-                
-                state["metadata"]["risk_level"] = analysis.get("gti_verdict", "Unknown")
-                
-                logger.info("triage_agent_success", 
-                            risk=state["metadata"]["risk_level"], 
-                            subtasks=len(state["subtasks"]),
-                            relationships=len(state["metadata"]["rich_intel"]["relationships"]))
-                            
-            except Exception as e:
-                logger.error("triage_parse_fail", error=str(e), raw=str(final_content)[:500])
-                state["metadata"]["risk_level"] = "Error"
+            relationships_data = await fetch_all_relationships(
+                ioc=ioc,
+                ioc_type=config["type"],
+                rel_tool=config["rel_tool"],
+                arg_name=config["arg"],
+                priority_rels=priority_rels,
+                session=session
+            )
+        
+        # Store in state for graph building
+        state["metadata"]["rich_intel"]["relationships"] = relationships_data
+        
+        # ========================================
+        # PHASE 2: Comprehensive Triage Analysis
+        # ========================================
+        analysis = await comprehensive_triage_analysis(
+            ioc=ioc,
+            ioc_type=config["type"],
+            triage_data=triage_data,
+            relationships_data=relationships_data
+        )
+        
+        # Update state with comprehensive analysis
+        state["ioc_type"] = analysis.get("ioc_type")
+        state["subtasks"] = analysis.get("subtasks", [])
+        
+        # Store comprehensive triage findings
+        state["metadata"]["rich_intel"]["triage_analysis"] = {
+            "executive_summary": analysis.get("executive_summary"),
+            "key_findings": analysis.get("key_findings", []),
+            "threat_context": analysis.get("threat_context", {}),
+            "priority_entities": analysis.get("priority_entities", []),
+            "confidence": analysis.get("confidence"),
+            "severity": analysis.get("severity"),
+            "investigation_notes": analysis.get("investigation_notes", "")
+        }
+        
+        # Maintain backward compatibility
+        state["metadata"]["rich_intel"]["triage_summary"] = analysis.get("executive_summary")
+        state["metadata"]["risk_level"] = analysis.get("verdict", "Unknown")
+        
+        logger.info("triage_complete",
+                   verdict=state["metadata"]["risk_level"],
+                   confidence=analysis.get("confidence"),
+                   severity=analysis.get("severity"),
+                   key_findings=len(analysis.get("key_findings", [])),
+                   priority_entities=len(analysis.get("priority_entities", [])),
+                   subtasks=len(state["subtasks"]),
+                   relationships=len(relationships_data),
+                   total_entities=sum(len(entities) for entities in relationships_data.values()))
                 
     except Exception as e:
         logger.error("triage_fatal_error", error=str(e))

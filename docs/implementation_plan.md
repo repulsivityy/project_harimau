@@ -85,6 +85,7 @@ This document tracks the progress of the Harimau V2 rebuild.
         *   "I see a high severity IP. Let me check its communicating files."
         *   "I see a file hash. Let me check for parent domains."
     *   State Update: Every tool result enriches the `state["metadata"]["rich_intel"]` and implicitly builds the graph.
+    *   Full expansion of initial IOC relationships, populate the graph, and Triage Agent will do first cut analysis for the specialist agents. 
 *   **Step 5: Triage Report** [IN-PROGRESS]
     *   Agent generates a `summary` explaining the verdict and key associations.
 *   **Step 6: Specialist Handoff** [IN-PROGRESS]

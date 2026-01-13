@@ -80,7 +80,7 @@ if submit_btn and ioc_input:
         res = api.get_investigation(job_id)
         subtasks = res.get("subtasks", [])
         
-        #st.success("Investigation Complete!")
+        st.success("Investigation Complete!")
         
         # Tabs for different views
         tab1, tab2, tab3, tab4 = st.tabs(["📝 Triage & Plan", "🕸️ Graph", "📄 Final Report", "⏱️ Timeline"])
@@ -191,13 +191,24 @@ if submit_btn and ioc_input:
                     if "color" in n:
                         node_color = n["color"]
                     
-                    nodes.append(Node(
-                        id=n["id"], 
-                        label=n["label"], 
-                        size=n.get("size", node_size),  # Use slider value
-                        color=node_color,
-                        title=n.get("title", f"{node_type.title()}: {n['label']}")  # Enhanced tooltip
-                    ))
+                    # Specialized Node Logic
+                    node_kwargs = {
+                        "id": n["id"],
+                        "label": n["label"],
+                        "size": n.get("size", node_size),
+                        "color": node_color,
+                        "title": n.get("title", f"{node_type.title()}: {n['label']}")
+                    }
+                    
+                    # PIN THE ROOT NODE to Center
+                    if n["id"] == "root":
+                        node_kwargs["x"] = 0
+                        node_kwargs["y"] = 0
+                        node_kwargs["fixed"] = True
+                        # Make it slightly larger too
+                        node_kwargs["size"] = 40
+                    
+                    nodes.append(Node(**node_kwargs))
                 
                 # Build edges
                 for e in graph_data.get("edges", []):
@@ -223,6 +234,7 @@ if submit_btn and ioc_input:
                         directed=True,          # Show arrow direction
                         physics=physics_enabled,  # User-controlled physics
                         hierarchical=False,     # Disable hierarchical (too rigid)
+                        fit=True,               # Force fit to screen center
                         
                         # Node interaction
                         nodeHighlightBehavior=True,

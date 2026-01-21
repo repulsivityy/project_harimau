@@ -13,44 +13,72 @@ import backend.tools.gti as gti
 logger = get_logger("agent_triage")
 
 # Graph growth control
-MAX_ENTITIES_PER_RELATIONSHIP = 5
-MAX_TOTAL_ENTITIES = 50
-MIN_THREAT_SCORE = 0
-REQUIRE_MALICIOUS_VERDICT = False
+MAX_ENTITIES_PER_RELATIONSHIP = 10  # Increased from 5 to fetch more entities per relationship
+MAX_TOTAL_ENTITIES = 150  # Increased from 50 to accommodate 52 relationship types
+MIN_THREAT_SCORE = 0  # TODO: Add smart filtering (Option B) - prioritize by threat score
+REQUIRE_MALICIOUS_VERDICT = False  # TODO: Add smart filtering (Option B) - prioritize malicious entities
 
 # Define priority relationships for each IOC type
 PRIORITY_RELATIONSHIPS = {
     "File": [
         "associations",
+        "bundled_files",
         "contacted_domains",
         "contacted_ips",
+        "contacted_urls",
         "dropped_files",
         "embedded_domains",
+        "embedded_ips",
+        "embedded_urls",
+        "email_attachments",
+        "email_parents",
+        "execution_parents",
+        "itw_domains",
+        "itw_ips",
+        "itw_urls",
         "malware_families",
+        "memory_pattern_domains",
+        "memory_pattern_ips",
+        "memory_pattern_urls",
         "attack_techniques",
     ],
     "IP": [
-        "associations",
-        "resolutions",
         "communicating_files",
         "downloaded_files",
-        "malware_families",
+        "historical_whois",
+        "referrer_files",
+        "resolutions",
+        "urls",
     ],
     "Domain": [
         "associations",
-        "resolutions",
+        "caa_records",
+        "cname_records",
         "communicating_files",
         "downloaded_files",
+        "historical_ssl_certificates",
+        "immediate_parent",
+        "parent",
+        "referrer_files",
+        "resolutions",
+        "siblings",
         "subdomains",
+        "urls",
         "malware_families",
     ],
     "URL": [
-        "associations",
+        "communicating_files",
         "contacted_domains",
         "contacted_ips",
-        "communicating_files",
         "downloaded_files",
+        "embedded_js_files",
+        "last_serving_ip_address",
+        "memory_pattern_parents",
         "network_location",
+        "redirecting_urls",
+        "redirects_to",
+        "referrer_files",
+        "referrer_urls",
     ]
 }
 

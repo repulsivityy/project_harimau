@@ -109,9 +109,42 @@ This document tracks the progress of the Harimau V2 rebuild.
 *   **Frontend Configuration**: `streamlit-agraph` requires `width` and `fit=True` to ensure nodes don't fly off-screen during physics simulation.
 *   **Agent Robustness**: LLMs will skip tool calls. Implemented a "Forced Tool Loop" to guarantee at least one relationship fetch per investigation. 
 
+### Phase 3.6: Comprehensive Relationship Mapping & Graph Optimization [COMPLETED]
+**Goal**: Expand relationship coverage and optimize graph visualization for cleaner IOC mapping.
+
+#### [COMPLETED] Comprehensive Relationship Types
+*   **Expanded File Relationships (20 types)**: Added `bundled_files`, `contacted_urls`, `embedded_ips`, `embedded_urls`, `email_attachments`, `email_parents`, `execution_parents`, `itw_domains`, `itw_ips`, `itw_urls`, `memory_pattern_domains`, `memory_pattern_ips`, `memory_pattern_urls`.
+*   **Expanded Domain Relationships (14 types)**: Added `caa_records`, `cname_records`, `historical_ssl_certificates`, `immediate_parent`, `parent`, `referrer_files`, `siblings`, `urls`.
+*   **Expanded IP Relationships (6 types)**: Added `historical_whois`, `referrer_files`, `urls`.
+*   **Expanded URL Relationships (12 types)**: Added `embedded_js_files`, `last_serving_ip_address`, `memory_pattern_parents`, `redirecting_urls`, `redirects_to`, `referrer_files`, `referrer_urls`.
+*   **Total**: 52 relationship types across all IOC types for comprehensive threat intelligence mapping.
+
+#### [COMPLETED] Graph Visualization Improvements
+*   **Removed Agent Task Nodes**: Graph now only displays IOC entities and their relationships, not internal agent workflow (e.g., malware_specialist, infrastructure_specialist nodes removed).
+*   **Filtered Contextual Metadata**: Excluded non-IOC relationships from graph: `attack_techniques`, `malware_families`, `associations`, `campaigns`, `related_threat_actors`. These are still fetched and analyzed but not visualized to keep graphs focused on infrastructure.
+*   **Increased Entity Limits (Option A)**:
+    - `MAX_ENTITIES_PER_RELATIONSHIP`: 5 → 10 (per relationship type from GTI)
+    - `MAX_TOTAL_ENTITIES`: 50 → 150 (total graph capacity)
+    - Graph visualization: 10 → 15 entities per relationship in UI
+*   **Future Enhancement**: Smart filtering (Option B) to prioritize malicious/high-score entities and provide user-configurable filters at investigation start.
+
+#### Phase 3.6 Challenges & Learnings
+*   **Graph Clarity**: Users wanted to see only threat infrastructure relationships, not internal agent routing. Separating visualization from orchestration improved UX.
+*   **Scalability**: With 52 relationship types, the original 5-entity limit was too restrictive. Tripling capacity (150 total) provides room for ~15-20 relationship types to have full coverage.
+*   **Future Work**: Need to implement smart filtering to surface most relevant entities when investigations exceed 150 total entities. 
+
 ## Phase 4: Near-Term Roadmap (Post-MVP)
 - [ ] **Real-Time Streaming**: Refactor Frontend/Backend to use SSE (Server-Sent Events) instead of polling.
 - [ ] **Microservices Split**: *If* scaling requires it, extract the MCP server into a dedicated Cloud Run service (Sidecar).
 - [ ] **Advanced Error Handling**: Implement exponential backoff for GTI API and automatic agent retries.
 - [ ] **Authentication Hardening**: Switch from `--allow-unauthenticated` to IAP/IAM.
 - [ ] **Crash Recovery**: Implement LangGraph Postgres Checkpointing to resume jobs after Cloud Run restarts.
+- [ ] **Smart Entity Filtering (Option B)**: Implement user-configurable filters at investigation start to prioritize malicious/high-score entities by threat score, verdict, and recency.
+
+## Phase 5: Long-Term Enhancements
+- [ ] **Advanced Graph Visualization**: Migrate from `streamlit-agraph` to more professional library:
+    - **Option 1**: Pyvis (quick upgrade, better physics/interactivity)
+    - **Option 2**: Plotly + NetworkX (enterprise-grade, actively maintained)
+    - **Option 3**: Custom D3.js component (ultimate flexibility for threat intel workflows)
+    - **Option 4**: Streamlit-Cytoscape, but haven't been actively maintained. 
+    - Evaluation criteria: performance with 150+ nodes, layout algorithms (hierarchical, timeline), clustering capabilities

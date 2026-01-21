@@ -42,6 +42,20 @@ The Lead Hunter must produce a **comprehensive narrative report**, not just a ve
 ### 3.3 The Knowledge Graph
 *   **Schema**: Hybrid (Fixed Layout Properties + Dynamic Intelligence Properties).
 *   **Edges**: Automatic mapping from MCP response keys.
+*   **Comprehensive Relationship Coverage (52 types)**:
+    - **File IOCs (20 relationships)**: `associations`, `bundled_files`, `contacted_domains`, `contacted_ips`, `contacted_urls`, `dropped_files`, `embedded_domains`, `embedded_ips`, `embedded_urls`, `email_attachments`, `email_parents`, `execution_parents`, `itw_domains`, `itw_ips`, `itw_urls`, `malware_families`, `memory_pattern_domains`, `memory_pattern_ips`, `memory_pattern_urls`, `attack_techniques`
+    - **Domain IOCs (14 relationships)**: `associations`, `caa_records`, `cname_records`, `communicating_files`, `downloaded_files`, `historical_ssl_certificates`, `immediate_parent`, `parent`, `referrer_files`, `resolutions`, `siblings`, `subdomains`, `urls`, `malware_families`
+    - **IP IOCs (6 relationships)**: `communicating_files`, `downloaded_files`, `historical_whois`, `referrer_files`, `resolutions`, `urls`
+    - **URL IOCs (12 relationships)**: `communicating_files`, `contacted_domains`, `contacted_ips`, `downloaded_files`, `embedded_js_files`, `last_serving_ip_address`, `memory_pattern_parents`, `network_location`, `redirecting_urls`, `redirects_to`, `referrer_files`, `referrer_urls`
+*   **Graph Visualization Strategy**:
+    - **Display**: Only IOC-to-IOC relationships (files, domains, IPs, URLs, DNS records, SSL certs, etc.)
+    - **Filter Out**: Contextual metadata (`attack_techniques`, `malware_families`, `associations`, `campaigns`, `related_threat_actors`) - still fetched/analyzed but not visualized
+    - **Agent Nodes**: Internal workflow nodes (e.g., malware_specialist) are NOT shown in graph
+*   **Capacity Limits**:
+    - Fetch up to 10 entities per relationship type from GTI
+    - Maximum 150 total entities across all relationships
+    - Display up to 15 entities per relationship in graph UI
+    - **Future**: Smart filtering to prioritize malicious/high-score entities (Option B)
 
 ### 3.4 The Librarian (Async)
 *   Runs *after* investigation completion.

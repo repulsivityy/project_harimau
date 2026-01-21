@@ -60,7 +60,7 @@ if ! gcloud projects get-iam-policy $PROJECT_ID --format="json(bindings)" | grep
     echo "🤖 Granting Vertex AI Access..."
     gcloud projects add-iam-policy-binding $PROJECT_ID \
         --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
-        --role="roles/aiplatform.user" --quiet > /dev/null
+        --role="roles/aiplatform.user" --condition=None --quiet > /dev/null
 else
     echo "✅ Vertex AI Access already granted."
 fi

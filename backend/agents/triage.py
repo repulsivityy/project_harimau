@@ -316,10 +316,11 @@ async def fetch_all_relationships(
     arg_name: str, 
     priority_rels: list,
     session
-) -> dict:
+) -> tuple[dict, list]:
     """
     PHASE 1: Deterministic relationship fetching (Pure Python).
     Guarantees ALL priority relationships are attempted.
+    Returns: (relationships_data, tool_call_trace)
     """
     logger.info("phase1_start_deterministic_fetch", 
                 ioc=ioc,
@@ -328,6 +329,7 @@ async def fetch_all_relationships(
     
     relationships_data = {}
     total_entities_stored = 0
+    tool_call_trace = []  # Track all tool calls for transparency
     
     for idx, rel_name in enumerate(priority_rels, 1):
         if total_entities_stored >= MAX_TOTAL_ENTITIES:
@@ -351,6 +353,7 @@ async def fetch_all_relationships(
             
             if not res.content:
                 logger.info("phase1_empty_response", rel=rel_name)
+                tool_call_trace.append({"relationship": rel_name, "status": "empty", "entities_found": 0})
                 continue
             
             res_txt = res.content[0].text
@@ -358,12 +361,14 @@ async def fetch_all_relationships(
             
             if not entities:
                 logger.info("phase1_no_entities", rel=rel_name)
+                tool_call_trace.append({"relationship": rel_name, "status": "no_entities", "entities_found": 0})
                 continue
             
             filtered_entities = filter_entities_by_severity(entities, rel_name)
             
             if not filtered_entities:
                 logger.info("phase1_all_entities_filtered", rel=rel_name)
+                tool_call_trace.append({"relationship": rel_name, "status": "filtered", "entities_found": 0, "before_filter": len(entities)})
                 continue
             
             remaining_capacity = MAX_TOTAL_ENTITIES - total_entities_stored
@@ -376,6 +381,14 @@ async def fetch_all_relationships(
             
             relationships_data[rel_name] = filtered_entities
             total_entities_stored += len(filtered_entities)
+            
+            # Track successful tool call
+            tool_call_trace.append({
+                "relationship": rel_name,
+                "status": "success",
+                "entities_found": len(filtered_entities),
+                "sample_entity": {"id": filtered_entities[0].get("id"), "type": filtered_entities[0].get("type")} if filtered_entities else None
+            })
             
             logger.info("phase1_stored_relationship",
                        rel=rel_name,
@@ -393,7 +406,7 @@ async def fetch_all_relationships(
                 relationships_with_data=len(relationships_data),
                 total_entities=total_entities_stored)
     
-    return relationships_data
+    return relationships_data, tool_call_trace
 
 
 def prepare_detailed_context_for_llm(relationships_data: dict) -> dict:
@@ -513,6 +526,7 @@ Perform comprehensive first-level triage analysis now.
         
         clean_content = final_text.replace("```json", "").replace("```", "").strip()
         analysis = json.loads(clean_content)
+        analysis["_llm_reasoning"] = final_text  # Store for transparency
         
         logger.info("phase2_analysis_complete",
                    verdict=analysis.get("verdict"),
@@ -600,7 +614,7 @@ async def triage_node(state: AgentState):
         # PHASE 1: Deterministic Relationship Fetching
         # ========================================
         async with mcp_manager.get_session("gti") as session:
-            relationships_data = await fetch_all_relationships(
+            relationships_data, tool_call_trace = await fetch_all_relationships(
                 ioc=ioc,
                 ioc_type=config["type"],
                 rel_tool=config["rel_tool"],
@@ -611,6 +625,7 @@ async def triage_node(state: AgentState):
         
         # Store in state for graph building
         state["metadata"]["rich_intel"]["relationships"] = relationships_data
+        state["metadata"]["tool_call_trace"] = tool_call_trace  # For transparency
         
         # ========================================
         # PHASE 2: Comprehensive Triage Analysis
@@ -634,7 +649,8 @@ async def triage_node(state: AgentState):
             "priority_entities": analysis.get("priority_entities", []),
             "confidence": analysis.get("confidence"),
             "severity": analysis.get("severity"),
-            "investigation_notes": analysis.get("investigation_notes", "")
+            "investigation_notes": analysis.get("investigation_notes", ""),
+            "_llm_reasoning": analysis.get("_llm_reasoning")
         }
         
         # Maintain backward compatibility

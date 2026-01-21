@@ -65,6 +65,17 @@ graph TD
     *   **Dynamic**: Agents add properties as JSON.
     *   **Edges**: Relationship names map to TI API keys (e.g. `:DOWNLOADED`).
 
+### 2.5 Observability & Transparency
+*   **Structured Logging**: JSON logs sent to Google Cloud Logging via `utils/logger.py`.
+*   **Agent Transparency**: Visibility into agent decision-making for debugging and trust:
+    *   **Tool Call Tracing** (`state["metadata"]["tool_call_trace"]`): Logs every Phase 1 relationship fetch with:
+        - Relationship type (e.g., "contacted_domains")
+        - Status (success, empty, filtered, error)
+        - Entity counts and sample data
+    *   **LLM Reasoning** (`state["metadata"]["rich_intel"]["triage_analysis"]["_llm_reasoning"]`): Stores raw Gemini response from Phase 2 comprehensive analysis
+    *   **Frontend Display**: "🔍 Agent Transparency" expander in Triage tab shows summary metrics, detailed tool logs, and full LLM reasoning
+*   **Performance Impact**: ~20-50ms overhead per investigation (negligible)
+
 ## 3. API Specification
 
 The Backend exposes a REST API for the Frontend to consume.

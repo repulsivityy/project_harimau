@@ -83,6 +83,7 @@ async def run_investigation(request: InvestigationRequest):
             "risk_level": final_state.get("metadata", {}).get("risk_level", "Unknown"),
             "gti_score": final_state.get("metadata", {}).get("gti_score", "N/A"),
             "rich_intel": final_state.get("metadata", {}).get("rich_intel", {}),
+            "metadata": final_state.get("metadata", {}),  # ✅ Added full metadata for frontend transparency
         }
         JOBS[job_id] = result
         return result

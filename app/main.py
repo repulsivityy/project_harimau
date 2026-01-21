@@ -37,7 +37,7 @@ with col2:
 if submit_btn and ioc_input:
     try:
         # 1. Submit Job
-        with st.spinner("The Tiger is hunting..."):
+        with st.spinner("The 🐯 Tiger is hunting..."):
             job_id = api.submit_investigation(ioc_input)
             st.toast(f"Job Initiated: {job_id}", icon="🚀")
             
@@ -79,9 +79,7 @@ if submit_btn and ioc_input:
         # 3. Display Results
         res = api.get_investigation(job_id)
         subtasks = res.get("subtasks", [])
-        
-        st.success("Investigation Complete!")
-        
+                
         # Tabs for different views
         tab1, tab2, tab3, tab4 = st.tabs(["📝 Triage & Plan", "🕸️ Graph", "📄 Final Report", "⏱️ Timeline"])
         
@@ -151,6 +149,57 @@ if submit_btn and ioc_input:
                     <p style="margin: 0; color: #aaa; font-size: 14px;">{task_desc}</p>
                 </div>
                 """, unsafe_allow_html=True)
+        
+            #  Agent Transparency Section
+            st.markdown("---")
+            with st.expander("🔍 Agent Transparency", expanded=False):
+                st.caption("See what the Triage Agent is thinking and doing under the hood")
+                
+                # Tool Call Trace
+                tool_trace = res.get("metadata", {}).get("tool_call_trace", [])
+                if tool_trace:
+                    st.subheader("🛠️ Relationship Fetching (Phase 1)")
+                    
+                    # Summary stats
+                    success_count = sum(1 for t in tool_trace if t.get("status") == "success")
+                    total_entities = sum(t.get("entities_found", 0) for t in tool_trace)
+                    
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Relationships with Data", success_count)
+                    col2.metric("Total Entities Fetched", total_entities)
+                    col3.metric("Relationships Attempted", len(tool_trace))
+                    
+                    # Detailed trace
+                    with st.expander("📋 Detailed Tool Call Log", expanded=False):
+                        for call in tool_trace:
+                            rel = call.get("relationship", "unknown")
+                            status = call.get("status", "unknown")
+                            count = call.get("entities_found", 0)
+                            
+                            if status == "success":
+                                st.success(f"**{rel}**: {count} entities")
+                                if call.get("sample_entity"):
+                                    st.json(call["sample_entity"])
+                            elif status == "empty":
+                                st.info(f"**{rel}**: No response from GTI")
+                            elif status == "no_entities":
+                                st.info(f"**{rel}**: Empty results")
+                            elif status == "filtered":
+                                st.warning(f"**{rel}**: Filtered out ({call.get('before_filter', 0)} → 0)")
+                            elif status == "error":
+                                st.error(f"**{rel}**: Error - {call.get('error', 'Unknown')}")
+                else:
+                    st.info("No tool call trace available")
+                
+                # LLM Reasoning
+                llm_reasoning = res.get("metadata", {}).get("rich_intel", {}).get("triage_analysis", {}).get("_llm_reasoning")
+                if llm_reasoning:
+                    st.subheader("🧠 Triage Agent Reasoning (Phase 2)")
+                    st.markdown("The agent's structured analysis based on fetched data:")
+                    with st.expander("Show full LLM response", expanded=False):
+                        st.code(llm_reasoning, language="json")
+                else:
+                    st.info("LLM reasoning not available")
 
         with tab2:
             st.subheader("Investigation Graph")
@@ -173,7 +222,6 @@ if submit_btn and ioc_input:
                 
                 # Build nodes
                 for n in graph_data.get("nodes", []):
-                    # ✅ FIXED: Use .get() for safe access
                     node_id = n.get("id", "unknown")
                     node_label = n.get("label", "Unknown")
                     node_color = n.get("color", "#9E9E9E")
@@ -210,18 +258,17 @@ if submit_btn and ioc_input:
                     st.warning("No graph nodes generated. Triage might have returned no tasks.")
                 else:
                     # Show graph stats
-                    col1, col2, col3 = st.columns(3)
+                    col1, col2 = st.columns(2)
                     col1.metric("Nodes", len(nodes))
                     col2.metric("Edges", len(edges))
-                    col3.metric("Root", "Centered")
                     
-                    # ✅ CONFIG
                     config = Config(
                         width="100%",
-                        height=600,
+                        height=800,
                         directed=True,
                         physics=physics_enabled,
-                        hierarchical=False,
+                        hierarchical=True,
+                        
                         
                         # Node interaction
                         nodeHighlightBehavior=True,

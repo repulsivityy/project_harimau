@@ -48,6 +48,7 @@ Project Harimau is an automated threat investigation platform. It uses a graph-b
 - **Phase 2 (The Brain)**: ✅ Complete
 - **Phase 3 (The Interface)**: ✅ Complete
 - **Phase 3.5 (Hybrid Triage)**: ✅ Complete
+- **Phase 3.6 (Relationship Mapping & Transparency)**: ✅ Complete
 - **Phase 4 (Specialist Agents)**: 🚧 In Progress
 
 ## Quick Start (Local)

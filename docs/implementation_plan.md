@@ -140,8 +140,18 @@ This document tracks the progress of the Harimau V2 rebuild.
 #### Phase 3.6 Challenges & Learnings
 *   **Graph Clarity**: Users wanted to see only threat infrastructure relationships, not internal agent routing. Separating visualization from orchestration improved UX.
 *   **Scalability**: With 52 relationship types, the original 5-entity limit was too restrictive. Tripling capacity (150 total) provides room for ~15-20 relationship types to have full coverage.
-*   **Future Work**: Need to implement smart filtering to surface most relevant entities when investigations exceed 150 total entities. 
+*   **Future Work**: Need to implement smart filtering to surface most relevant entities when investigations exceed 150 total entities.
 
+#### Phase 3.7: Triage Performance Optimization [IN PROGRESS]
+**Goal**: Reduce investigation latency by parallelizing relationship fetching.
+*   **Parallel Execution**: Refactor `triage.py` to fetch relationship types concurrently using `asyncio.gather` with a semaphore (limit ~10).
+*   **Expected Impact**: API response time reduction from ~20-30s to ~3-5s.
+
+### Phase 4: Specialist Agents [TODO]
+
+#### Phase 4.1: Malware Specialist Agent [TODO]
+*   **YARA Integration**: Add YARA rule matching capability.
+*   **Code Analysis**: Add static analysis for scripts (PowerShell, Python, JS).
 ## Phase 4: Near-Term Roadmap (Post-MVP)
 - [ ] **Real-Time Streaming**: Refactor Frontend/Backend to use SSE (Server-Sent Events) instead of polling.
 - [ ] **Microservices Split**: *If* scaling requires it, extract the MCP server into a dedicated Cloud Run service (Sidecar).

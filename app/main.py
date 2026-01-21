@@ -37,7 +37,7 @@ with col2:
 if submit_btn and ioc_input:
     try:
         # 1. Submit Job
-        with st.spinner("Submitting job to Brain..."):
+        with st.spinner("The Tiger is hunting..."):
             job_id = api.submit_investigation(ioc_input)
             st.toast(f"Job Initiated: {job_id}", icon="🚀")
             
@@ -168,54 +168,42 @@ if submit_btn and ioc_input:
                 graph_data = api.get_graph_data(job_id)
                 from streamlit_agraph import agraph, Node, Edge, Config
                 
-                # Node Coloring by Type
-                color_map = {
-                    "root": "#FF4B4B",           # Red for root IOC
-                    "agent": "#4B9FFF",          # Blue for agent tasks
-                    "malware": "#FF6B6B",        # Light red for malware entities
-                    "infrastructure": "#FFB74D", # Orange for infrastructure
-                    "indicator": "#AB47BC",      # Purple for indicators
-                    "relationship": "#26C6DA",   # Cyan for relationships
-                    "default": "#9E9E9E"         # Gray for others
-                }
-                
                 nodes = []
                 edges = []
                 
-                # Build nodes with type-based coloring
+                # Build nodes
                 for n in graph_data.get("nodes", []):
-                    node_type = n.get("type", "default")
-                    node_color = color_map.get(node_type, color_map["default"])
+                    # ✅ FIXED: Use .get() for safe access
+                    node_id = n.get("id", "unknown")
+                    node_label = n.get("label", "Unknown")
+                    node_color = n.get("color", "#9E9E9E")
+                    node_title = n.get("title", node_label)
                     
-                    # Override with custom color if provided
-                    if "color" in n:
-                        node_color = n["color"]
-                    
-                    # Specialized Node Logic
+                    # Build node properties
                     node_kwargs = {
-                        "id": n["id"],
-                        "label": n["label"],
+                        "id": node_id,
+                        "label": node_label,
                         "size": n.get("size", node_size),
                         "color": node_color,
-                        "title": n.get("title", f"{node_type.title()}: {n['label']}")
+                        "title": node_title
                     }
                     
-                    # PIN THE ROOT NODE to Center
-                    if n["id"] == "root":
-                        node_kwargs["x"] = 0
-                        node_kwargs["y"] = 0
-                        node_kwargs["fixed"] = True
-                        # Make it slightly larger too
-                        node_kwargs["size"] = 40
+                    # ✅ FIXED: Center root node (but keep it moveable)
+                    if node_id == "root":
+                        node_kwargs["x"] = 0      # Start at center X
+                        node_kwargs["y"] = 0      # Start at center Y
+                        node_kwargs["size"] = 40  # Make it larger
+                        # Note: NO "fixed" property - that doesn't exist!
+                        # Just x/y makes it start centered but stay draggable
                     
                     nodes.append(Node(**node_kwargs))
                 
                 # Build edges
                 for e in graph_data.get("edges", []):
                     edges.append(Edge(
-                        source=e["source"], 
-                        target=e["target"], 
-                        label=e.get("label", "") if show_labels else ""  # Conditional labels
+                        source=e.get("source", "unknown"),
+                        target=e.get("target", "unknown"),
+                        label=e.get("label", "") if show_labels else ""
                     ))
                 
                 if not nodes:
@@ -225,22 +213,21 @@ if submit_btn and ioc_input:
                     col1, col2, col3 = st.columns(3)
                     col1.metric("Nodes", len(nodes))
                     col2.metric("Edges", len(edges))
-                    col3.metric("Relationships", len(nodes) - 1 - len(res.get("subtasks", [])))
+                    col3.metric("Root", "Centered")
                     
-                    # ✅ ENHANCED CONFIG with User Controls
+                    # ✅ CONFIG
                     config = Config(
-                        width="100%",           # Use full container width
-                        height=600,             # Fixed height for consistency
-                        directed=True,          # Show arrow direction
-                        physics=physics_enabled,  # User-controlled physics
-                        hierarchical=False,     # Disable hierarchical (too rigid)
-                        fit=True,               # Force fit to screen center
+                        width="100%",
+                        height=600,
+                        directed=True,
+                        physics=physics_enabled,
+                        hierarchical=False,
                         
                         # Node interaction
                         nodeHighlightBehavior=True,
                         highlightColor="#F7A7A6",
                         
-                        # Layout physics (makes graph more readable)
+                        # Node styling
                         node={
                             'labelProperty': 'label',
                             'renderLabel': True
@@ -249,15 +236,15 @@ if submit_btn and ioc_input:
                         # Edge styling
                         link={
                             'labelProperty': 'label',
-                            'renderLabel': show_labels,  # User-controlled labels
+                            'renderLabel': show_labels,
                             'color': '#999'
                         },
                         
-                        # Initial zoom/fit with user controls
+                        # Physics
                         d3={
                             'alphaTarget': 0,
-                            'gravity': -100,      # Spread nodes apart
-                            'linkLength': link_distance,  # User-controlled distance
+                            'gravity': -100,
+                            'linkLength': link_distance,
                             'linkStrength': 1
                         }
                     )
@@ -265,7 +252,7 @@ if submit_btn and ioc_input:
                     # Render graph
                     agraph(nodes=nodes, edges=edges, config=config)
                     
-                    # ✅ ENHANCED LEGEND with Color Coding
+                    # Legend
                     st.markdown("---")
                     st.markdown("**Legend:**")
                     leg_col1, leg_col2, leg_col3, leg_col4, leg_col5 = st.columns(5)

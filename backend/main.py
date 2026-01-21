@@ -319,32 +319,29 @@ async def get_investigation_graph(job_id: str):
     ]
     edges = []
     
-    # 2. Subtask Nodes (The Agents)
-    for i, task in enumerate(subtasks):
-        node_id = f"task_{i}"
-        agent_name = task.get("agent", "Unknown").replace("_", " ").title()
-        
-        nodes.append({
-            "id": node_id,
-            "label": agent_name,
-            "color": "#0083B8",  # Blue for agents
-            "size": 25,
-            "title": f"Agent: {agent_name}\nTask: {task.get('task', '')[:100]}"
-        })
-        
-        edges.append({
-            "source": "root",
-            "target": node_id,
-            "label": "investigate"
-        })
-    
-    logger.info("graph_subtasks_added", count=len(subtasks))
+    # Note: Agent subtasks are NOT added to graph - only IOC relationships
+    logger.info("graph_config", agent_nodes_disabled=True, reason="only_show_ioc_relationships")
     
     # 3. Relationship Nodes with better naming
     relationships = rich_intel.get("relationships", {})
+    
+    # Filter: Only show IOC-to-IOC relationships, not contextual metadata
+    # Exclude: attack_techniques, malware_families, associations, campaigns, threat actors (collections)
+    EXCLUDE_RELATIONSHIPS = ["attack_techniques", "malware_families", "associations", "campaigns", "related_threat_actors"]
+    
+    filtered_relationships = {
+        rel_type: entities 
+        for rel_type, entities in relationships.items() 
+        if rel_type not in EXCLUDE_RELATIONSHIPS
+    }
+    
     logger.info("graph_relationships_check", 
                 found=bool(relationships),
-                types=list(relationships.keys()) if relationships else [])
+                total_types=len(relationships),
+                filtered_types=len(filtered_relationships),
+                excluded=EXCLUDE_RELATIONSHIPS,
+                showing_types=list(filtered_relationships.keys()),
+                total_entities_in_state=sum(len(v) if isinstance(v, list) else 0 for v in filtered_relationships.values()))
     
     relationship_nodes_added = 0
     
@@ -402,7 +399,7 @@ async def get_investigation_graph(job_id: str):
             # Generic fallback
             return ent_id[:20] + "..." if len(ent_id) > 20 else ent_id
     
-    for rel_type, entities in relationships.items():
+    for rel_type, entities in filtered_relationships.items():
         if not entities:
             logger.warning("graph_empty_relationship", rel_type=rel_type)
             continue
@@ -411,8 +408,8 @@ async def get_investigation_graph(job_id: str):
                    rel_type=rel_type, 
                    entity_count=len(entities))
         
-        # Add up to 10 entities per relationship type (increased from 5)
-        for idx, entity in enumerate(entities[:10]):
+        # Add up to 15 entities per relationship type (increased from 10)
+        for idx, entity in enumerate(entities[:15]):
             # Validate entity
             if not isinstance(entity, dict):
                 logger.warning("graph_invalid_entity", 

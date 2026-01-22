@@ -6,7 +6,6 @@ import asyncio
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_google_vertexai import ChatVertexAI
 from backend.graph.state import AgentState
-from backend.mcp.client import mcp_manager
 from backend.utils.logger import get_logger
 import backend.tools.gti as gti
 
@@ -232,182 +231,6 @@ def extract_triage_data(data: dict, ioc_type: str) -> dict:
 
     return triage_data
 
-
-def filter_entities_by_severity(entities: list, rel_name: str) -> list:
-    """Filter entities by threat score and verdict to control graph growth."""
-    if not entities:
-        return []
-    
-    filtered = []
-    for entity in entities:
-        entity_type = entity.get("type", "")
-        if entity_type == "collection":
-            filtered.append(entity)
-            continue
-        
-        attrs = entity.get("attributes", {})
-        
-        if REQUIRE_MALICIOUS_VERDICT:
-            gti_verdict = attrs.get("gti_assessment", {}).get("verdict", {}).get("value", "")
-            if gti_verdict.lower() != "malicious":
-                continue
-        
-        if MIN_THREAT_SCORE > 0:
-            threat_score = attrs.get("gti_assessment", {}).get("threat_score", {}).get("value", 0)
-            if threat_score < MIN_THREAT_SCORE:
-                continue
-        
-        filtered.append(entity)
-    
-    if len(filtered) < len(entities):
-        logger.info("filter_entities_by_severity", 
-                   rel=rel_name,
-                   original=len(entities),
-                   filtered=len(filtered))
-    
-    return filtered
-
-
-def parse_mcp_tool_response(res_txt: str, logger, rel_name: str) -> list:
-    """Parse MCP tool response into entity list."""
-    if not res_txt or not res_txt.strip():
-        logger.info("parse_mcp_empty_response", rel=rel_name)
-        return []
-    
-    try:
-        parsed = json.loads(res_txt)
-    except json.JSONDecodeError as e:
-        logger.warning("parse_mcp_json_error", rel=rel_name, error=str(e))
-        return []
-    
-    if isinstance(parsed, list):
-        logger.info("parse_mcp_format", rel=rel_name, format="direct_array", count=len(parsed))
-        return parsed
-    
-    if isinstance(parsed, dict):
-        if "error" in parsed:
-            logger.info("parse_mcp_error_response", rel=rel_name, error=parsed["error"])
-            return []
-        
-        if "data" in parsed:
-            data = parsed["data"]
-            if isinstance(data, list):
-                logger.info("parse_mcp_format", rel=rel_name, format="wrapped_array", count=len(data))
-                return data
-            elif isinstance(data, dict):
-                logger.info("parse_mcp_format", rel=rel_name, format="wrapped_single", count=1)
-                return [data]
-        
-        if rel_name in parsed and isinstance(parsed[rel_name], list):
-            logger.info("parse_mcp_format", rel=rel_name, format="relationship_keyed", count=len(parsed[rel_name]))
-            return parsed[rel_name]
-        
-        if "type" in parsed and "id" in parsed:
-            logger.info("parse_mcp_format", rel=rel_name, format="single_entity", count=1)
-            return [parsed]
-        
-        for key, value in parsed.items():
-            if isinstance(value, list) and len(value) > 0:
-                logger.info("parse_mcp_format", rel=rel_name, format="found_array_in_dict", key=key, count=len(value))
-                return value
-    
-    logger.info("parse_mcp_no_data_found", rel=rel_name)
-    return []
-
-
-async def fetch_all_relationships(
-    ioc: str, 
-    ioc_type: str, 
-    rel_tool: str, 
-    arg_name: str, 
-    priority_rels: list,
-    session
-) -> tuple[dict, list]:
-    """
-    PHASE 1: Parallel relationship fetching.
-    Uses asyncio.gather to fetch relationships concurrently for high performance.
-    Returns: (relationships_data, tool_call_trace)
-    """
-    logger.info("phase1_start_parallel_fetch", 
-                ioc=ioc,
-                ioc_type=ioc_type,
-                total_relationships=len(priority_rels))
-    
-    # Concurrency control
-    sem = asyncio.Semaphore(10)  # limit concurrent calls
-    
-    async def fetch_single_relationship(rel_name: str):
-        async with sem:
-            try:
-                # logger.info("phase1_fetching", rel=rel_name) # noisy
-                res = await session.call_tool(rel_tool, arguments={
-                    arg_name: ioc,
-                    "relationship_name": rel_name,
-                    "descriptors_only": False,
-                    "limit": MAX_ENTITIES_PER_RELATIONSHIP
-                })
-                
-                if not res.content:
-                    return {"relationship": rel_name, "status": "empty", "entities_found": 0}, None
-                
-                res_txt = res.content[0].text
-                entities = parse_mcp_tool_response(res_txt, logger, rel_name)
-                
-                if not entities:
-                     return {"relationship": rel_name, "status": "no_entities", "entities_found": 0}, None
-                
-                filtered_entities = filter_entities_by_severity(entities, rel_name)
-                
-                if not filtered_entities:
-                     return {"relationship": rel_name, "status": "filtered", "entities_found": 0, "before_filter": len(entities)}, None
-                
-                # Success
-                trace = {
-                    "relationship": rel_name,
-                    "status": "success",
-                    "entities_found": len(filtered_entities),
-                    "sample_entity": {"id": filtered_entities[0].get("id"), "type": filtered_entities[0].get("type")} if filtered_entities else None
-                }
-                return trace, (rel_name, filtered_entities)
-
-            except Exception as e:
-                logger.warning("phase1_fetch_error", rel=rel_name, error=str(e))
-                return {"relationship": rel_name, "status": "error", "error": str(e)}, None
-
-    # Execute all fetches in parallel
-    tasks = [fetch_single_relationship(rel) for rel in priority_rels]
-    results = await asyncio.gather(*tasks)
-    
-    # Aggregate results
-    relationships_data = {}
-    tool_call_trace = []
-    total_entities_stored = 0
-    
-    for trace, data in results:
-        tool_call_trace.append(trace)
-        if data:
-            rel_name, entities = data
-            
-            # Global Limit Check
-            remaining_capacity = MAX_TOTAL_ENTITIES - total_entities_stored
-            if remaining_capacity <= 0:
-                logger.info("phase1_global_limit_reached", rel=rel_name)
-                continue
-                
-            if len(entities) > remaining_capacity:
-                entities = entities[:remaining_capacity]
-                
-            relationships_data[rel_name] = entities
-            total_entities_stored += len(entities)
-    
-    logger.info("phase1_complete",
-                relationships_attempted=len(priority_rels),
-                relationships_with_data=len(relationships_data),
-                total_entities=total_entities_stored)
-    
-    return relationships_data, tool_call_trace
-
-
 def prepare_detailed_context_for_llm(relationships_data: dict) -> dict:
     """
     Prepare rich context for LLM analysis.
@@ -591,9 +414,11 @@ async def triage_node(state: AgentState):
     priority_rels = PRIORITY_RELATIONSHIPS.get(config["type"], ["associations"])
     
     try:
-        # 2. Get base facts
-        logger.info("triage_fetching_base_report")
-        base_data = await config["direct_tool"](ioc)
+        # 2. Get base facts AND relationships in one Super-Bundle call
+        logger.info("triage_fetching_super_bundle", ioc=ioc, rel_count=len(priority_rels))
+        
+        # Pass priority_rels to the tool to trigger bundling
+        base_data = await config["direct_tool"](ioc, relationships=priority_rels)
         
         if not base_data or "data" not in base_data:
              logger.warning("triage_direct_api_empty", ioc=ioc)
@@ -607,24 +432,48 @@ async def triage_node(state: AgentState):
         state["metadata"]["risk_level"] = "Assessing..." 
         state["metadata"]["gti_score"] = triage_data["threat_score"] or "N/A"
         state["metadata"]["rich_intel"] = triage_data
-        state["metadata"]["rich_intel"]["relationships"] = {}
         
         # ========================================
-        # PHASE 1: Deterministic Relationship Fetching
+        # PHASE 1: Super-Bundle Relationship Parsing
         # ========================================
-        async with mcp_manager.get_session("gti") as session:
-            relationships_data, tool_call_trace = await fetch_all_relationships(
-                ioc=ioc,
-                ioc_type=config["type"],
-                rel_tool=config["rel_tool"],
-                arg_name=config["arg"],
-                priority_rels=priority_rels,
-                session=session
-            )
+        relationships_data = {}
+        tool_call_trace = []
         
+        raw_relationships = base_data.get("relationships", {})
+        
+        for rel_name, rel_content in raw_relationships.items():
+            # Check if relationship has actual data (list of entities)
+            entities_list = rel_content.get("data")
+            
+            if entities_list and isinstance(entities_list, list) and len(entities_list) > 0:
+                # Sanitize and parse
+                parsed_entities = []
+                for entity in entities_list:
+                    parsed = {
+                        "id": entity.get("id"),
+                        "type": entity.get("type"),
+                        "attributes": entity.get("attributes", {})
+                    }
+                    parsed_entities.append(parsed)
+                
+                # Apply severity filter if needed (reuse existing logic if possible or keep simple)
+                relationships_data[rel_name] = parsed_entities
+                
+                # Add to trace
+                tool_call_trace.append({
+                    "relationship": rel_name,
+                    "status": "success",
+                    "entities_found": len(parsed_entities),
+                    "sample_entity": {"id": parsed_entities[0]["id"], "type": parsed_entities[0]["type"]}
+                })
+        
+        logger.info("phase1_super_bundle_complete", 
+                    relationships_found=len(relationships_data),
+                    total_entities=sum(len(e) for e in relationships_data.values()))
+
         # Store in state for graph building
         state["metadata"]["rich_intel"]["relationships"] = relationships_data
-        state["metadata"]["tool_call_trace"] = tool_call_trace  # For transparency
+        state["metadata"]["tool_call_trace"] = tool_call_trace
         
         # ========================================
         # PHASE 2: Comprehensive Triage Analysis

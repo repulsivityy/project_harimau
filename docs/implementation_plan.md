@@ -31,7 +31,7 @@ This document tracks the progress of the Harimau V2 rebuild.
     - [ ] Roadmap: Support `sse` for future Serverless Function tools.
 - [x] **Config Engine**: Implement `agents.yaml` loader (Basic).
 - [x] **Nodes (MVP)**:
-    - [x] `Triage Agent` (Gemini Flash + Vertex AI).
+    - [x] `Triage Agent` (Gemini 2.5 Flash + Vertex AI).
 - [x] **Orchestrator**: Build the LangGraph workflow (Start -> Triage -> End).
 - [x] **API Integration**: Expose `POST /investigate` endpoint.
 - [x] **Verify**:
@@ -142,25 +142,52 @@ This document tracks the progress of the Harimau V2 rebuild.
 *   **Scalability**: With 52 relationship types, the original 5-entity limit was too restrictive. Tripling capacity (150 total) provides room for ~15-20 relationship types to have full coverage.
 *   **Future Work**: Need to implement smart filtering to surface most relevant entities when investigations exceed 150 total entities.
 
-#### Phase 3.7: Triage Performance Optimization [IN PROGRESS]
-**Goal**: Reduce investigation latency by parallelizing relationship fetching.
-*   **Parallel Execution**: Refactor `triage.py` to fetch relationship types concurrently using `asyncio.gather` with a semaphore (limit ~10).
-*   **Expected Impact**: API response time reduction from ~20-30s to ~3-5s.
+#### Phase 3.7: Graph Visualization Enhancements [COMPLETED]
+**Goal**: Improve graph readability, user experience, and interactivity.
 
-### Phase 4: Specialist Agents [TODO]
+*   **Node Label Formatting** (`backend/main.py`):
+    - **URLs**: Extract full URL from `attributes.url` instead of displaying hash ID
+    - **Files**: Display format `SHA256\n(truncated_name.ext)` to show both hash and filename
+    - Smart truncation: Preserve file extensions (e.g., `long_malicious_file....exe` instead of `long_malicious_file...`)
+    
+*   **Visual Hierarchy & Clustering** (`backend/main.py`):
+    - Auto-create group nodes when relationship has multiple entities (e.g., `group_contacted_domains`)
+    - Dynamic node sizing: Root (1.1x), Groups (0.75x), Entities (1.0x) based on slider
+    - Updated color palette: Infrastructure (Orange), Files (Purple), URLs (Cyan), Context (Blue)
+    
+*   **Graph Interactivity Fixes** (`app/main.py`):
+    - **Recenter Graph**: Fixed via `_recenter_key` injection into physics config (changes config hash on button click)
+    - **Initial Centering**: Added stabilization config with `fit: true` to auto-center viewport on load
+    - **State Persistence**: Job state persists across slider interactions (no investigation reset)
+
+#### Phase 3.8: Triage Performance Optimization [ROADMAP]
+**Goal**: Reduce investigation latency by parallelizing relationship fetching.
+
+*   **Status**: REVERTED (Option A was unstable).
+*   **Parallel Execution**: Refactored `triage.py` to fetch relationship types concurrently using `asyncio.gather`.
+*   **Performance Bottleneck**: Identified that MCP `session.call_tool()` blocks the event loop.
+*   **Attempted Fix (Reverted)**: `asyncio.to_thread` wrapper caused runtime errors (`'coroutine' object has no attribute 'content'`).
+*   **Resolution**: Performance optimization deferred to Phase 5 (Option B: Async HTTP client migration).
+
+## Phase 4: Specialist Agents [TODO]
 
 #### Phase 4.1: Malware Specialist Agent [TODO]
 *   **YARA Integration**: Add YARA rule matching capability.
 *   **Code Analysis**: Add static analysis for scripts (PowerShell, Python, JS).
-## Phase 4: Near-Term Roadmap (Post-MVP)
+
+#### Phase 4.2: Infrastructure Specialist Agent [TODO]
+
+
+## Phase 5: Near-Term Roadmap (Post-MVP)
 - [ ] **Real-Time Streaming**: Refactor Frontend/Backend to use SSE (Server-Sent Events) instead of polling.
 - [ ] **Microservices Split**: *If* scaling requires it, extract the MCP server into a dedicated Cloud Run service (Sidecar).
 - [ ] **Advanced Error Handling**: Implement exponential backoff for GTI API and automatic agent retries.
 - [ ] **Authentication Hardening**: Switch from `--allow-unauthenticated` to IAP/IAM.
 - [ ] **Crash Recovery**: Implement LangGraph Postgres Checkpointing to resume jobs after Cloud Run restarts.
 - [ ] **Smart Entity Filtering (Option B)**: Implement user-configurable filters at investigation start to prioritize malicious/high-score entities by threat score, verdict, and recency.
+- [ ] **Async HTTP Client Migration (Perf Option B)**: Replace MCP's synchronous HTTP with `httpx.AsyncClient` for true async I/O (eliminates thread pool overhead from Option A).
 
-## Phase 5: Long-Term Enhancements
+## Phase 6: Long-Term Enhancements
 - [ ] **Advanced Graph Visualization**: Migrate from `streamlit-agraph` to more professional library:
     - **Option 1**: Pyvis (quick upgrade, better physics/interactivity)
     - **Option 2**: Plotly + NetworkX (enterprise-grade, actively maintained)

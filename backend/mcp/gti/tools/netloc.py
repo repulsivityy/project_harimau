@@ -111,7 +111,7 @@ async def get_domain_report(domain: str, ctx: Context) -> typing.Dict[str, typin
 @server.tool()
 async def get_entities_related_to_a_domain(
     domain: str, relationship_name: str, descriptors_only: bool, ctx: Context, limit: int = 10
-) -> list[dict[str, typing.Any]]:
+) -> dict[str, typing.Any]:
   """Retrieve entities related to the the given domain.
 
     The following table shows a summary of available relationships for domain objects.
@@ -171,7 +171,9 @@ async def get_entities_related_to_a_domain(
         relationships=[relationship_name],
         descriptors_only=descriptors_only,
         limit=limit)
-  return utils.sanitize_response(res.get(relationship_name, []))
+  
+  result = utils.sanitize_response(res.get(relationship_name, []))
+  return {"data": result}
 
 
 @server.tool()
@@ -196,7 +198,7 @@ async def get_ip_address_report(ip_address: str, ctx: Context) -> typing.Dict[st
 @server.tool()
 async def get_entities_related_to_an_ip_address(
     ip_address: str, relationship_name: str, descriptors_only: bool, ctx: Context, limit: int = 10
-) -> list[dict[str, typing.Any]]:
+) -> dict[str, typing.Any]:
   """Retrieve entities related to the the given IP Address.
 
     The following table shows a summary of available relationships for IP Address objects.
@@ -248,4 +250,6 @@ async def get_entities_related_to_an_ip_address(
         relationships=[relationship_name],
         descriptors_only=descriptors_only,
         limit=limit)
-  return utils.sanitize_response(res.get(relationship_name, []))
+  
+  result = utils.sanitize_response(res.get(relationship_name, []))
+  return {"data": result}

@@ -22,7 +22,7 @@ import vt
 
 from mcp.server.fastmcp import FastMCP, Context
 
-logging.basicConfig(level=logging.ERROR)
+logging.basicConfig(level=logging.INFO)
 
 # If True, creates a completely fresh transport for each request
 # with no session tracking or state persistence between requests.

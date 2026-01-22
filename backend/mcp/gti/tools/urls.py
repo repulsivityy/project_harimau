@@ -93,7 +93,7 @@ async def get_url_report(url: str, ctx: Context) -> typing.Dict[str, typing.Any]
 @server.tool()
 async def get_entities_related_to_an_url(
     url: str, relationship_name: str, descriptors_only: bool, ctx: Context, limit: int = 10
-) -> list[dict[str, typing.Any]]:
+) -> dict[str, typing.Any]:
   """Retrieve entities related to the the given URL.
 
     The following table shows a summary of available relationships for URL objects.
@@ -156,4 +156,6 @@ async def get_entities_related_to_an_url(
         relationships=[relationship_name],
         descriptors_only=descriptors_only,
         limit=limit)
-  return utils.sanitize_response(res.get(relationship_name, []))
+  
+  result = utils.sanitize_response(res.get(relationship_name, []))
+  return {"data": result}

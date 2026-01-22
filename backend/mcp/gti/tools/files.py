@@ -110,7 +110,7 @@ async def get_file_report(hash: str, ctx: Context) -> typing.Dict[str, typing.An
 @server.tool()
 async def get_entities_related_to_a_file(
     hash: str, relationship_name: str, descriptors_only: bool, ctx: Context, limit: int = 10, 
-) -> list[dict[str, typing.Any]]:
+) -> dict[str, typing.Any]:
     """Retrieve entities related to the the given file hash.
 
     The following table shows a summary of available relationships for file objects.
@@ -179,6 +179,8 @@ async def get_entities_related_to_a_file(
             f"Available relationships are: {','.join(FILE_RELATIONSHIPS)}"
         }
 
+    logging.info(f"[DEBUG] get_entities_related_to_a_file called: hash={hash[:16]}..., rel={relationship_name}, limit={limit}, descriptors_only={descriptors_only}")
+    
     async with vt_client(ctx) as client:
       res = await utils.fetch_object_relationships(
           client, 
@@ -187,7 +189,10 @@ async def get_entities_related_to_a_file(
           relationships=[relationship_name],
           descriptors_only=descriptors_only,
           limit=limit)
-    return utils.sanitize_response(res.get(relationship_name, []))
+    
+    result = utils.sanitize_response(res.get(relationship_name, []))
+    logging.info(f"[DEBUG] Returning {len(result) if isinstance(result, list) else 'non-list'} items for {relationship_name}")
+    return {"data": result}
 
 
 @server.tool()

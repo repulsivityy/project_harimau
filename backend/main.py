@@ -361,21 +361,34 @@ async def get_investigation_graph(job_id: str):
             return ent_id
         
         elif ent_type == "file":
-            # Try to get meaningful name
-            meaningful_name = attrs.get("meaningful_name")
-            if meaningful_name:
-                return meaningful_name
-            # Use truncated hash
-            return f"{ent_id[:12]}..."
+            # Show SHA256 and Name (truncated nicely)
+            name = attrs.get("meaningful_name") or ""
+            
+            def truncate_filename(s, max_len=20):
+                if len(s) <= max_len: return s
+                # Keep extension if possible
+                if "." in s:
+                    base, ext = s.rsplit(".", 1)
+                    if len(ext) < 5:
+                        keep_base = max_len - len(ext) - 4 # 4 for ... and .
+                        if keep_base > 1:
+                            return f"{base[:keep_base]}....{ext}"
+                return f"{s[:max_len-3]}..."
+            
+            if name:
+                # User wants FULL SHA256 and truncated name
+                # "extension logic": show first 20 char before extension
+                trunc_name = truncate_filename(name, max_len=25) # 20 base + dots + ext ~ 25
+                return f"{ent_id}\n({trunc_name})"
+            return ent_id
         
         elif ent_type == "url":
-            # Extract domain or truncate
-            from urllib.parse import urlparse
-            try:
-                parsed = urlparse(ent_id)
-                return parsed.netloc or ent_id[:30]
-            except:
-                return ent_id[:30] + "..." if len(ent_id) > 30 else ent_id
+            # Show Full URL if available, otherwise ID (hash)
+            # GTI typically provides 'url' in attributes
+            full_url = attrs.get("url")
+            if full_url:
+                return full_url
+            return ent_id
         
         elif ent_type == "collection":
             # Collection might be threat actor, malware family, etc.
@@ -409,7 +422,34 @@ async def get_investigation_graph(job_id: str):
                    rel_type=rel_type, 
                    entity_count=len(entities))
         
-        # Add up to 15 entities per relationship type (increased from 10)
+        # Clustering Logic: If multiple entities, create a group node
+        use_group_node = len(entities) > 1
+        source_id = "root"
+        
+        if use_group_node:
+            group_id = f"group_{rel_type}"
+            group_label = rel_type.replace("_", " ").title()
+            
+            nodes.append({
+                "id": group_id,
+                "label": group_label,
+                "color": "#E0E0E0",  # Light Grey for structural nodes
+                "size": 15,
+                "title": f"Group: {group_label} ({len(entities)} items)",
+                # "shape": "box" # agraph supports shapes? Vis.js does.
+            })
+            
+            edges.append({
+                "source": "root",
+                "target": group_id,
+                "label": "", # Label is on the node
+                "color": "#CCCCCC"
+            })
+            
+            source_id = group_id
+
+        # Add up to 15 entities per relationship type
+        logger.info(f"Processing relationship {rel_type}, found {len(entities)} entities")
         for idx, entity in enumerate(entities[:15]):
             # Validate entity
             if not isinstance(entity, dict):
@@ -434,16 +474,28 @@ async def get_investigation_graph(job_id: str):
             # Unique Node ID
             unique_id = f"{rel_type}_{idx}_{ent_id}"
             
-            # Color by entity type
+            # Color by entity type (Updated Palette)
             color_map = {
-                "file": "#FF6B6B",           # Red
-                "domain": "#4ECDC4",         # Teal
-                "ip_address": "#FFD93D",     # Yellow
-                "url": "#95E1D3",            # Light teal
-                "collection": "#F38181",     # Salmon (threat actors, malware families)
-                "resolution": "#AA96DA",     # Purple
+                # Infrastructure (Orange)
+                "domain": "#FF9F1C",         # Orange
+                "ip_address": "#FFBF69",     # Light Orange
+                "resolution": "#FFD93D",     # Yellow-Orange
+                "network_location": "#FF9F1C",
+                
+                # Indicators (Purple/Teal)
+                "file": "#9B5DE5",           # Purple
+                "url": "#00BBF9",            # Azure/Cyan (High Contrast)
+                
+                # Context/Attribution (Blue/Pink/Red)
+                "collection": "#118AB2",     # Blue (Campaigns/Actors)
+                "campaign": "#118AB2",
+                "threat_actor": "#F15BB5",   # Pink
+                "malware_family": "#F15BB5",
+                
+                # Other
+                "unknown": "#99AAB5"         # Grey
             }
-            color = color_map.get(ent_type, "#FFA500")  # Default orange
+            color = color_map.get(ent_type, "#00BBF9")  # Default to Cyan/Azure
             
             # Build tooltip with key info
             tooltip_lines = [f"Type: {ent_type}", f"ID: {ent_id}"]
@@ -476,11 +528,11 @@ async def get_investigation_graph(job_id: str):
                 "title": "\n".join(tooltip_lines)
             })
             
-            # Clean relationship label
-            edge_label = rel_type.replace("_", " ").title()
+            # Clean relationship label (Only show on edge if NOT using a group node)
+            edge_label = rel_type.replace("_", " ").title() if not use_group_node else ""
             
             edges.append({
-                "source": "root",
+                "source": source_id,
                 "target": unique_id,
                 "label": edge_label
             })

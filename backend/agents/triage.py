@@ -119,11 +119,6 @@ You have COMPLETE data from Google Threat Intelligence:
    - Prioritize what specialists should focus on first
    - Provide context specialists need (don't make them rediscover)
    - Include key entity IDs specialists should examine
-   - YOU MUST ONLY ASSIGN TASKS TO AVAILABLE AGENTS.
-   - **AVAILABLE AGENTS:**
-     * `malware_specialist`: For file analysis, YARA scanning, and code reverse engineering.
-   - **DO NOT** invent other agents (e.g., NO "threat_intelligence_specialist", NO "infrastructure_specialist").
-   - If no specialist is needed, leave "subtasks" empty.
 
 **Analysis Framework:**
 
@@ -132,7 +127,6 @@ For MALICIOUS files:
 - Who made it? (associations → campaigns/actors)
 - How does it work? (attack_techniques)
 - Where is the infrastructure? (contacted_domains/ips)
-- **ACTION**: Assign to `malware_specialist` if file analysis is needed.
 
 For MALICIOUS infrastructure (IP/Domain):
 - What's hosted here? (downloaded_files, urls)
@@ -146,7 +140,7 @@ For SUSPICIOUS/UNDETECTED:
 - What's the risk if true positive? (potential impact)
 
 **Output Format (JSON):**
-{
+{{
     "ioc_type": "IP|Domain|File|URL",
     "verdict": "Malicious|Suspicious|Undetected|Benign",
     "confidence": "High|Medium|Low",

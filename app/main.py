@@ -27,75 +27,54 @@ st.write("### Investigation Console")
 st.write("\n")
 
 col1, col2 = st.columns([3, 1])
-# Initialize session state
-if "job_id" not in st.session_state:
-    st.session_state.job_id = None
-if "job_ioc" not in st.session_state:
-    st.session_state.job_ioc = ""
-
-# ... (UI Layout Code) ...
-
-col1, col2 = st.columns([3, 1])
 with col1:
-    ioc_input = st.text_input("Enter IOC (IP, Domain, Hash, URL)", 
-                              placeholder="e.g., 1.1.1.1",
-                              value=st.session_state.job_ioc if not st.session_state.job_ioc else "") 
-
-    pass # Replaced by below
-    
+    ioc_input = st.text_input("Enter IOC (IP, Domain, Hash, URL)", placeholder="e.g., 1.1.1.1")
 with col2:
     st.write("") # Spacer
     st.write("") # Spacer
     submit_btn = st.button("Start Investigation", type="primary", use_container_width=True)
 
-# Logic: New Submission
 if submit_btn and ioc_input:
     try:
+        # 1. Submit Job
         with st.spinner("The 🐯 Tiger is hunting..."):
             job_id = api.submit_investigation(ioc_input)
-            st.session_state.job_id = job_id
-            st.session_state.job_ioc = ioc_input
             st.toast(f"Job Initiated: {job_id}", icon="🚀")
-            st.rerun() # Force rerun to switch to "View Mode"
-    except Exception as e:
-        st.error(f"Failed to submit job: {str(e)}")
-
-# Logic: View Active/Completed Job
-if st.session_state.job_id:
-    job_id = st.session_state.job_id
-    
-    # Poll for Completion with Progress Bar
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    progress_details = st.empty()
-    
-    complete = False
-    poll_count = 0
-    max_polls = 150  # 5 minutes with 2s intervals
-    
-    while not complete and poll_count < max_polls:
-        data = api.get_investigation(job_id)
-        status = data.get("status")
+            
+        # 2. Poll for Completion with Progress Bar
+        st.write("### 🔍 Investigation Progress")
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        progress_details = st.empty()
         
-        # Calculate progress (you can enhance this based on actual backend progress)
-        progress = min(poll_count * 2, 95) if status == "running" else 100
-        progress_bar.progress(progress)
+        complete = False
+        poll_count = 0
+        max_polls = 150  # 5 minutes with 2s intervals
         
-        if status == "completed":
-            progress_bar.progress(100)
-            status_text.success("✅ Investigation Complete!")
-            complete = True
-        elif status == "failed":
-            progress_bar.empty()
-            status_text.error("❌ Investigation Failed")
-            st.error("The investigation failed on the backend.")
-            st.stop()
-            # Show active agents if available
-            active_agent = data.get("current_agent", "Processing")
-            status_text.info(f"🤖 Status: {status} | Agent: {active_agent}")
-            progress_details.caption(f"Poll #{poll_count + 1} | Elapsed: {poll_count * 2}s")
-            time.sleep(2)
-            poll_count += 1
+        while not complete and poll_count < max_polls:
+            data = api.get_investigation(job_id)
+            status = data.get("status")
+            
+            # Calculate progress (you can enhance this based on actual backend progress)
+            progress = min(poll_count * 2, 95) if status == "running" else 100
+            progress_bar.progress(progress)
+            
+            if status == "completed":
+                progress_bar.progress(100)
+                status_text.success("✅ Investigation Complete!")
+                complete = True
+            elif status == "failed":
+                progress_bar.empty()
+                status_text.error("❌ Investigation Failed")
+                st.error("The investigation failed on the backend.")
+                st.stop()
+            else:
+                # Show active agents if available
+                active_agent = data.get("current_agent", "Processing")
+                status_text.info(f"🤖 Status: {status} | Agent: {active_agent}")
+                progress_details.caption(f"Poll #{poll_count + 1} | Elapsed: {poll_count * 2}s")
+                time.sleep(2)
+                poll_count += 1
                 
         # 3. Display Results
         res = api.get_investigation(job_id)
@@ -231,16 +210,8 @@ if st.session_state.job_id:
                 st.subheader("🎛️ Graph Controls")
                 physics_enabled = st.checkbox("Enable Physics", value=True, help="Dynamic node positioning")
                 show_labels = st.checkbox("Show Edge Labels", value=True, help="Display relationship types")
-                node_size = st.slider("Node Size", 10, 50, 15, help="Adjust node diameter")
-                link_distance = st.slider("Link Distance", 50, 1000, 200, help="Space between nodes")
-                
-                # Recenter Logic
-                if "graph_key" not in st.session_state:
-                    st.session_state.graph_key = 0
-                
-                if st.button("🔄 Recenter Graph"):
-                    st.session_state.graph_key += 1
-                    st.rerun()  # Force full refresh to reset graph
+                node_size = st.slider("Node Size", 15, 50, 25, help="Adjust node diameter")
+                link_distance = st.slider("Link Distance", 50, 200, 100, help="Space between nodes")
             
             try:
                 graph_data = api.get_graph_data(job_id)
@@ -260,23 +231,18 @@ if st.session_state.job_id:
                     node_kwargs = {
                         "id": node_id,
                         "label": node_label,
+                        "size": n.get("size", node_size),
+                        "color": node_color,
                         "title": node_title
                     }
                     
-                    # Logic: Scale sizes based on slider `node_size`
-                    # Root is 1.1x, Groups are 0.75x, Normal is 1.0x
-                    
-                    final_size = node_size # Default (from slider)
-                    
+                    # ✅ FIXED: Center root node (but keep it moveable)
                     if node_id == "root":
-                        final_size = int(node_size * 1.1)
-                        node_kwargs["x"] = 0
-                        node_kwargs["y"] = 0
-                    elif str(node_id).startswith("group_"):
-                        final_size = int(node_size * 0.75)
-                    
-                    node_kwargs["size"] = final_size
-                    node_kwargs["color"] = node_color
+                        node_kwargs["x"] = 0      # Start at center X
+                        node_kwargs["y"] = 0      # Start at center Y
+                        node_kwargs["size"] = 40  # Make it larger
+                        # Note: NO "fixed" property - that doesn't exist!
+                        # Just x/y makes it start centered but stay draggable
                     
                     nodes.append(Node(**node_kwargs))
                 
@@ -300,7 +266,9 @@ if st.session_state.job_id:
                         width="100%",
                         height=800,
                         directed=True,
-                        hierarchical=False,
+                        physics=physics_enabled,
+                        hierarchical=True,
+                        
                         
                         # Node interaction
                         nodeHighlightBehavior=True,
@@ -319,46 +287,27 @@ if st.session_state.job_id:
                             'color': '#999'
                         },
                         
-                        # Physics (Vis.js style)
-                        physics={
-                            'solver': 'forceAtlas2Based',
-                            'forceAtlas2Based': {
-                                'theta': 0.5,
-                                'gravitationalConstant': -50,
-                                'centralGravity': 0.5,
-                                'springConstant': 0.08,
-                                'springLength': link_distance, # Slider controls this
-                                'damping': 0.4,
-                                'avoidOverlap': 0.01
-                            },
-                            'stabilization': {
-                                'enabled': True,
-                                'iterations': 100,  # Run physics sim before display
-                                'fit': True  # Center viewport on graph
-                            },
-                            # Inject recenter trigger - changes config hash on button click
-                            '_recenter_key': st.session_state.graph_key
-                        } if physics_enabled else {'enabled': False, '_recenter_key': st.session_state.graph_key}
+                        # Physics
+                        d3={
+                            'alphaTarget': 0,
+                            'gravity': -100,
+                            'linkLength': link_distance,
+                            'linkStrength': 1
+                        }
                     )
                     
                     # Render graph
-                    agraph(nodes=nodes, 
-                           edges=edges, 
-                           config=config)
+                    agraph(nodes=nodes, edges=edges, config=config)
                     
                     # Legend
                     st.markdown("---")
                     st.markdown("**Legend:**")
                     leg_col1, leg_col2, leg_col3, leg_col4, leg_col5 = st.columns(5)
                     leg_col1.markdown("🔴 **Root IOC**")
-                    leg_col2.markdown("🔵 **Context**") # Was Agent Tasks
+                    leg_col2.markdown("🔵 **Agent Tasks**")
                     leg_col3.markdown("🟠 **Infrastructure**")
-                    leg_col4.markdown("🟣 **Files** / 🔵 **URLs**")
-                    leg_col5.markdown("⚪ **Groups**")
-
-                    # Debug: Graph Data
-                    with st.expander("🛠️ Debug: Graph Data (JSON)", expanded=False):
-                        st.json(graph_data)
+                    leg_col4.markdown("🟣 **Indicators**")
+                    leg_col5.markdown("💡 *Hover for details*")
                     
             except requests.exceptions.ConnectionError:
                 st.error("🔌 Cannot connect to backend to fetch graph data.")
@@ -399,7 +348,7 @@ if st.session_state.job_id:
                 
                 for idx, task in enumerate(subtasks, 1):
                     agent = task.get('agent', 'Unknown Agent')
-                    task_desc = task.get('task', 'No description')[:120] + "..."
+                    task_desc = task.get('task', 'No description')[:80] + "..."
                     timestamp = task.get('timestamp', 'Unknown time')
                     duration = task.get('duration', 'N/A')
                     
@@ -419,3 +368,23 @@ if st.session_state.job_id:
                         st.markdown("<div style='border-left: 2px solid #444; height: 10px; margin-left: 20px;'></div>", unsafe_allow_html=True)
             else:
                 st.info("No timeline data available for this investigation.")
+
+    except requests.exceptions.ConnectionError:
+        st.error("🔌 Cannot connect to backend server")
+        st.warning("**Solution:** Ensure backend is running on port 8080")
+        st.code("cd backend && python main.py", language="bash")
+    except requests.exceptions.Timeout:
+        st.error("⏱️ Request timed out")
+        st.info("The backend may be overloaded or the investigation is taking too long.")
+    except requests.exceptions.HTTPError as e:
+        st.error(f"🌐 HTTP Error: {e.response.status_code}")
+        st.write(f"**Details:** {e.response.text}")
+    except ValueError as e:
+        st.error(f"📝 Invalid input or response format")
+        with st.expander("Error details"):
+            st.exception(e)
+    except Exception as e:
+        st.error(f"❌ Unexpected error: {type(e).__name__}")
+        with st.expander("🔍 Full error traceback"):
+            st.exception(e)
+        st.info("**Tip:** Check browser console (F12) for additional details")

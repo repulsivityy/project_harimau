@@ -17,7 +17,7 @@ To build a cloud-native, AI-driven threat hunting platform that leverages **Lang
 6.  **Deployment**: Selective updates via `deploy.sh` (Backend/Frontend/All).
 
 ## Agent Strategy
-*   **Tiered Models**: Gemini 2.5 Flash (Triage) vs Gemini 2.5 Pro (Analysis).
+*   **Tiered Models**: Gemini 3.0 Flash (Triage) vs Gemini 3.0 Pro (Analysis).
 *   **Config-Driven**: Define agent behaviors in `agents.yaml`.
 *   **Tool Registry**: Load tools dynamically via `mcp_registry.json`.
 

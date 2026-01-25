@@ -14,7 +14,7 @@
 *   **Backend (`/backend`)**: FastAPI + LangGraph (Cloud Run Service B).
 *   **Database**: FalkorDB (Sidecar or Docker).
 *   **MCP Server**: Google Threat Intelligence (Embedded Python Subprocess).
-*   **Models**: Gemini 2.0 Flash (Triage) / Pro (Analysis).
+*   **Models**: Gemini 3.0 Flash (Triage) / Pro (Analysis).
 
 ## 3. Core Features
 
@@ -23,16 +23,12 @@
 *   **Embedded MCP**: The GTI MCP server runs inside the Backend container via `stdio`.
 *   **Config-Driven Agents**: Agents added via `agents.yaml`.
 *   **MCP Registry**: Tools loaded dynamically from `mcp_registry.json`.
-*   **Agentic Workflow**: The investigation workflow is agentic, with each step being a separate agent.
-*   **Multiple Specalist Agents**: Uses different agents to handle different types of work
 
 ### 3.2 Investigation Workflow
 1.  **Input**: User inputs IOC in Streamlit.
 2.  **Async Queue**: Frontend posts job to Backend -> Backend offloads to Cloud Tasks.
 3.  **Hybrid Triage Agent**: Classifies IOC using Fast Facts (Direct API) + Agentic Reasoning (Root Node).
-4.  **Pivot (Recursion)**
-4.1 **Infra Agent**: Investigates based on network indicators. It searches for potential C2 servers, exfil servers, malware hosting sites, etc
-4.2 **Malware Agent**: Investigates based on malware / file indicators. It looks at the sandbox results to find potentially new indicators of compromise, and a deep understanding of the TTPs used by the malware.
+4.  **Pivot (Recursion)**: Infra Agent / Malware Agent expands the graph.
 5.  **Synthesis**: Lead Hunter writes the report.
 
 **Report Format Requirements:**
@@ -55,17 +51,11 @@ The Lead Hunter must produce a **comprehensive narrative report**, not just a ve
     - **Display**: Only IOC-to-IOC relationships (files, domains, IPs, URLs, DNS records, SSL certs, etc.)
     - **Filter Out**: Contextual metadata (`attack_techniques`, `malware_families`, `associations`, `campaigns`, `related_threat_actors`) - still fetched/analyzed but not visualized
     - **Agent Nodes**: Internal workflow nodes (e.g., malware_specialist) are NOT shown in graph
-    - **Node Label Formatting**: 
-        - URLs: Full URL text (from attributes)
-        - Files: `SHA256\n(truncated_name.ext)` format
-    - **Clustering**: Group nodes automatically created for relationships with >1 entity
-    - **Visual Palette**: Infrastructure (Orange), Files (Purple), URLs (Cyan), Context (Blue). Root is Red.
 *   **Capacity Limits**:
     - Fetch up to 10 entities per relationship type from GTI
     - Maximum 150 total entities across all relationships
     - Display up to 15 entities per relationship in graph UI
     - **Future**: Smart filtering to prioritize malicious/high-score entities (Option B)
-    - **Note**: Currently uses `asyncio.to_thread` for parallel performance (Option A)
 
 ### 3.4 The Librarian (Async)
 *   Runs *after* investigation completion.
@@ -93,6 +83,12 @@ The Lead Hunter must produce a **comprehensive narrative report**, not just a ve
     *   **Roadmap**: Migrate to SSE for sub-second updates.
 
 ## 5. Testing Strategy
-We adopt a "Deploy-Verify-Update" approach.
-*   **Cloud Deployment**: Deploy to GCP and verify functionality.
-
+We adopt a "Verify-as-we-Build" approach.
+*   **Unit Tests (`pytest`)**:
+    *   **Agents**: Test logic with *Mocked* LLM outputs (don't waste money).
+    *   **Tools**: Test MCP Client parsing logic (Mocked MCP responses).
+*   **Integration Tests**:
+    *   **Workflow**: Run a full "Dry Run" investigation with a Mocked Graph to ensure edges traverse correctly.
+*   **Infrastructure Tests**:
+    *   **MCP**: Script to spin up the subprocess and verify it responds to `list_tools` via stdio.
+    *   **DB**: Simple connection/write/read check.

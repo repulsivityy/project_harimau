@@ -49,8 +49,6 @@ Project Harimau is an automated threat investigation platform. It uses a graph-b
 - **Phase 3 (The Interface)**: ✅ Complete
 - **Phase 3.5 (Hybrid Triage)**: ✅ Complete
 - **Phase 3.6 (Relationship Mapping & Transparency)**: ✅ Complete
-- **Phase 3.7 (Graph Visualization & UI Fixes)**: ✅ Complete
-- **Phase 3.8 (Performance Optimization)**: 🚧 In Progress
 - **Phase 4 (Specialist Agents)**: 🚧 In Progress
 
 ## Quick Start (Local)
@@ -68,7 +66,7 @@ Project Harimau is an automated threat investigation platform. It uses a graph-b
 
 3.  **Run Backend (API):**
     ```bash
-    cd backend && uvicorn main:app --reload
+    cd backend && uvicorn app.main:app --reload
     ```
 
 4.  **Run Frontend (UI):**

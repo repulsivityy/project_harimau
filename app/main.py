@@ -20,9 +20,8 @@ with st.sidebar:
         st.warning("Ensure backend is running on port 8080")
 
 # Main Interface
-st.write("Project Harimau (Tiger in Malay) is an automated threat hunting platform that uses AI to analyze and investigate IOCs (IPs, Domains, Hashes, URLs). ")
+st.write("Harimau (Tiger in Malay) is an automated threat hunting platform that uses AI to analyze and investigate IOCs (IPs, Domains, Hashes, URLs). ")
 st.write("Harimau leverages LangGraph with multiple specialised threat hunt agents to mimic the flow of a threat hunting program.")
-st.write("\n")
 st.write("### Investigation Console")
 st.write("\n")
 
@@ -96,10 +95,10 @@ if submit_btn and ioc_input:
             # Row 1: High Level Signal
             col_a, col_b, col_c, col_d = st.columns(4)
             col_a.metric("IOC Type", (res.get("ioc_type") or "Unknown").upper())
-            col_b.metric("Verdict", verdict if verdict else "Unknown")
-            col_c.metric("Threat Score", f"{t_score}/100" if t_score else "N/A")
+            col_b.metric("GTI Verdict", verdict if verdict else "Unknown")
+            col_c.metric("GTI Threat Score", f"{t_score}/100" if t_score else "N/A")
             total_stats = rich_intel.get("total_stats", 0)
-            col_d.metric("VT Verdict", f"{mal_stats}/{total_stats}" if total_stats > 0 else "0/0")
+            col_d.metric("VT Detections", f"{mal_stats}/{total_stats}" if total_stats > 0 else "0/0")
             
             # Row 2: Description
             if desc:

@@ -119,6 +119,11 @@ You have COMPLETE data from Google Threat Intelligence:
    - Prioritize what specialists should focus on first
    - Provide context specialists need (don't make them rediscover)
    - Include key entity IDs specialists should examine
+   - YOU MUST ONLY ASSIGN TASKS TO AVAILABLE AGENTS.
+   - **AVAILABLE AGENTS:**
+     * `malware_specialist`: For file analysis, YARA scanning, and code reverse engineering.
+   - **DO NOT** invent other agents (e.g., NO "threat_intelligence_specialist", NO "infrastructure_specialist").
+   - If no specialist is needed, leave "subtasks" empty.
 
 **Analysis Framework:**
 
@@ -127,6 +132,7 @@ For MALICIOUS files:
 - Who made it? (associations → campaigns/actors)
 - How does it work? (attack_techniques)
 - Where is the infrastructure? (contacted_domains/ips)
+- **ACTION**: Assign to `malware_specialist` if file analysis is needed.
 
 For MALICIOUS infrastructure (IP/Domain):
 - What's hosted here? (downloaded_files, urls)
@@ -140,7 +146,7 @@ For SUSPICIOUS/UNDETECTED:
 - What's the risk if true positive? (potential impact)
 
 **Output Format (JSON):**
-{{
+{
     "ioc_type": "IP|Domain|File|URL",
     "verdict": "Malicious|Suspicious|Undetected|Benign",
     "confidence": "High|Medium|Low",
@@ -357,14 +363,17 @@ Perform comprehensive first-level triage analysis now.
     except Exception as e:
         logger.error("phase2_parse_error", error=str(e), raw=str(response.content)[:500])
         
-        # Fallback with basic analysis
+        # Fallback with error visibility
+        import traceback
+        tb = traceback.format_exc()
+        
         return {
             "ioc_type": ioc_type,
             "verdict": triage_data.get("verdict", "Unknown"),
             "confidence": "Low",
             "severity": "Medium",
             "threat_score": triage_data.get("threat_score", "N/A"),
-            "executive_summary": f"Analysis of {ioc} found {len(relationships_data)} relationship types with {sum(len(entities) for entities in relationships_data.values())} entities. Further investigation recommended.",
+            "executive_summary": f"Analysis failed: {str(e)}",
             "key_findings": [
                 f"Found {len(entities)} entities in {rel_name}"
                 for rel_name, entities in relationships_data.items()
@@ -372,7 +381,8 @@ Perform comprehensive first-level triage analysis now.
             "threat_context": {},
             "priority_entities": [],
             "subtasks": [],
-            "investigation_notes": "Automated analysis failed. Manual review recommended."
+            "investigation_notes": f"System Error: {str(e)}",
+            "_llm_reasoning": f"## Parsing Error\n\nThe LLM output could not be parsed:\n\n```\n{str(e)}\n```\n\n### Raw Output\n```\n{final_text if 'final_text' in locals() else str(response.content)}\n```\n\n### Traceback\n```\n{tb}\n```"
         }
 
 
@@ -451,6 +461,10 @@ async def triage_node(state: AgentState):
                     parsed_entities.append(parsed)
                 
                 # Apply severity filter if needed (reuse existing logic if possible or keep simple)
+                # SAFETY SLICE: Prevent token overflow by limiting entities
+                if len(parsed_entities) > MAX_ENTITIES_PER_RELATIONSHIP:
+                    parsed_entities = parsed_entities[:MAX_ENTITIES_PER_RELATIONSHIP]
+                    
                 relationships_data[rel_name] = parsed_entities
                 
                 # Add to trace
@@ -512,5 +526,13 @@ async def triage_node(state: AgentState):
     except Exception as e:
         logger.error("triage_fatal_error", error=str(e))
         state["metadata"]["risk_level"] = "Error"
+        
+        # Fatal error visibility
+        import traceback
+        tb = traceback.format_exc()
+        state["metadata"]["rich_intel"]["triage_analysis"] = {
+            "executive_summary": f"Fatal System Error: {str(e)}",
+            "_llm_reasoning": f"## Fatal Error\n\nA critical system error occurred:\n\n```\n{str(e)}\n```\n\n### Traceback\n```\n{tb}\n```"
+        }
         
     return state

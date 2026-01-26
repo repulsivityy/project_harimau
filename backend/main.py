@@ -323,175 +323,172 @@ async def get_investigation_graph(job_id: str):
     # Note: Agent subtasks are NOT added to graph - only IOC relationships
     logger.info("graph_config", agent_nodes_disabled=True, reason="only_show_ioc_relationships")
     
-    # 3. Relationship Nodes with better naming
+    # 3. Relationship Nodes with Visual Enhancements
     relationships = rich_intel.get("relationships", {})
     
-    # Filter: Only show IOC-to-IOC relationships, not contextual metadata
-    # Exclude: attack_techniques, malware_families, associations, campaigns, threat actors (collections)
+    # Exclude non-graph relationships
     EXCLUDE_RELATIONSHIPS = ["attack_techniques", "malware_families", "associations", "campaigns", "related_threat_actors"]
-    
     filtered_relationships = {
-        rel_type: entities 
-        for rel_type, entities in relationships.items() 
-        if rel_type not in EXCLUDE_RELATIONSHIPS
+        k: v for k, v in relationships.items() 
+        if k not in EXCLUDE_RELATIONSHIPS and v
     }
     
-    logger.info("graph_relationships_check", 
-                found=bool(relationships),
-                total_types=len(relationships),
-                filtered_types=len(filtered_relationships),
-                excluded=EXCLUDE_RELATIONSHIPS,
-                showing_types=list(filtered_relationships.keys()),
-                total_entities_in_state=sum(len(v) if isinstance(v, list) else 0 for v in filtered_relationships.values()))
-    
-    relationship_nodes_added = 0
-    
-    # Helper function to generate human-readable labels
-    def get_entity_label(entity: dict, rel_type: str) -> str:
-        """Generate human-readable label for entity"""
+    logger.info("graph_building", 
+                total_rels=len(relationships),
+                showing_rels=len(filtered_relationships))
+
+    # Helper: Entity Labeler
+    def get_entity_label(entity: dict) -> str:
         ent_type = entity.get("type", "unknown")
         ent_id = entity.get("id", "unknown")
         attrs = entity.get("attributes", {})
         
-        # Type-specific labeling
-        if ent_type == "domain":
+        if ent_type == "url":
+            # 1. Try attributes.last_final_url (Best)
+            if attrs.get("last_final_url"):
+                return attrs.get("last_final_url")
+
+            # 2. Try attributes.url
+            if attrs.get("url"):
+                return attrs.get("url")
+            
+            # 3. Try context_attributes (Backup)
+            context_attrs = entity.get("context_attributes", {})
+            if context_attrs.get("url"):
+                return context_attrs.get("url")
+            
+            # 4. Fallback: Full ID (Hash)
+            # Remove base64 decoding as attributes should be populated
+            return ent_id
+            
+            # 4. Fallback: Full ID (Hash)
+            return ent_id
+            
+        elif ent_type == "file":
+            # Format: Full SHA256\n(truncated_filename.ext)
+            
+            # 1. meaningful_name
+            name = attrs.get("meaningful_name")
+            
+            # 2. names list (take first)
+            if not name and attrs.get("names"):
+                name = attrs.get("names")[0]
+                
+            if name:
+                # Smart truncation: Keep first 24 chars + extension
+                import os
+                base, ext = os.path.splitext(name)
+                if len(base) > 24:
+                    # Truncate to 24 chars, keep extension
+                    truncated = base[:24] + "..." + ext
+                else:
+                    truncated = name
+                return f"{ent_id}\n({truncated})"  # Full hash + truncated filename
+            
+            return ent_id  # Full hash if no filename
+            
+        elif ent_type == "domain":
             return attrs.get("host_name", ent_id)
-        
+            
         elif ent_type == "ip_address":
             return ent_id
-        
-        elif ent_type == "file":
-            # Try to get meaningful name
-            meaningful_name = attrs.get("meaningful_name")
-            if meaningful_name:
-                return meaningful_name
-            # Use truncated hash
-            return f"{ent_id[:12]}..."
-        
-        elif ent_type == "url":
-            # Extract domain or truncate
-            from urllib.parse import urlparse
-            try:
-                parsed = urlparse(ent_id)
-                return parsed.netloc or ent_id[:30]
-            except:
-                return ent_id[:30] + "..." if len(ent_id) > 30 else ent_id
-        
-        elif ent_type == "collection":
-            # Collection might be threat actor, malware family, etc.
-            name = attrs.get("name", attrs.get("title", ""))
-            if name:
-                return name
-            # Fallback: extract from ID
-            if "--" in ent_id:
-                parts = ent_id.split("--")
-                return f"{parts[0].title()}"
-            return ent_id[:20] + "..."
-        
-        elif ent_type == "resolution":
-            # Resolution has both IP and hostname
-            ip = attrs.get("ip_address", "")
-            host = attrs.get("host_name", "")
-            if ip and host:
-                return f"{host} → {ip}"
-            return ip or host or ent_id
-        
-        else:
-            # Generic fallback
-            return ent_id[:20] + "..." if len(ent_id) > 20 else ent_id
+            
+        return ent_id  # Default: show full ID
+
+    # Process Relationships with Clustering
+    node_registry = set(["root"]) # Track existing nodes to prevent dups
     
     for rel_type, entities in filtered_relationships.items():
-        if not entities:
-            logger.warning("graph_empty_relationship", rel_type=rel_type)
-            continue
-        
         logger.info("graph_processing_relationship", 
                    rel_type=rel_type, 
                    entity_count=len(entities))
         
-        # Add up to 15 entities per relationship type (increased from 10)
-        for idx, entity in enumerate(entities[:15]):
-            # Validate entity
-            if not isinstance(entity, dict):
-                logger.warning("graph_invalid_entity", 
-                              rel_type=rel_type, 
-                              entity_type=type(entity).__name__)
-                continue
-            
-            ent_id = entity.get("id")
-            if not ent_id:
-                logger.warning("graph_missing_entity_id", 
-                              rel_type=rel_type, 
-                              entity_keys=list(entity.keys()))
-                continue
-            
-            ent_type = entity.get("type", "unknown")
-            attrs = entity.get("attributes", {})
-            
-            # Generate readable label
-            label = get_entity_label(entity, rel_type)
-            
-            # Unique Node ID
-            unique_id = f"{rel_type}_{idx}_{ent_id}"
-            
-            # Color by entity type
-            color_map = {
-                "file": "#FF6B6B",           # Red
-                "domain": "#4ECDC4",         # Teal
-                "ip_address": "#FFD93D",     # Yellow
-                "url": "#95E1D3",            # Light teal
-                "collection": "#F38181",     # Salmon (threat actors, malware families)
-                "resolution": "#AA96DA",     # Purple
-            }
-            color = color_map.get(ent_type, "#FFA500")  # Default orange
-            
-            # Build tooltip with key info
-            tooltip_lines = [f"Type: {ent_type}", f"ID: {ent_id}"]
-            
-            # Add relevant attributes to tooltip
-            if ent_type == "collection":
-                if attrs.get("name"):
-                    tooltip_lines.append(f"Name: {attrs['name']}")
-                if attrs.get("description"):
-                    desc = attrs['description'][:100]
-                    tooltip_lines.append(f"Description: {desc}...")
-            
-            elif ent_type == "file":
-                if attrs.get("type_description"):
-                    tooltip_lines.append(f"File Type: {attrs['type_description']}")
-                if attrs.get("size"):
-                    tooltip_lines.append(f"Size: {attrs['size']} bytes")
-            
-            elif ent_type in ["domain", "ip_address"]:
-                if attrs.get("last_analysis_stats"):
-                    stats = attrs["last_analysis_stats"]
-                    mal = stats.get("malicious", 0)
-                    tooltip_lines.append(f"Malicious Detections: {mal}")
+        # Clustering Logic: If multiple entities, create a group node
+        use_clustering = len(entities) > 1
+        source_id = "root"
+        
+        if use_clustering:
+            group_id = f"group_{rel_type}"
+            group_label = rel_type.replace("_", " ").title()
             
             nodes.append({
-                "id": unique_id,
-                "label": label,
-                "color": color,
-                "size": 20,
-                "title": "\n".join(tooltip_lines)
+                "id": group_id,
+                "label": group_label,
+                "color": "#2C3E50",  # Dark BlueGrey (Matches 'Black' in Legend)
+                "size": 25,  # Larger than entities, smaller than root
+                "shape": "box",  # Box shape for groups
+                "title": f"{group_label}\n{len(entities)} entities"
             })
-            
-            # Clean relationship label
-            edge_label = rel_type.replace("_", " ").title()
             
             edges.append({
                 "source": "root",
-                "target": unique_id,
-                "label": edge_label
+                "target": group_id,
+                "label": "",  # No label on this edge (label is on the group node)
             })
             
-            relationship_nodes_added += 1
-    
-    logger.info("graph_generation_complete", 
-                total_nodes=len(nodes),
-                total_edges=len(edges),
-                relationship_nodes=relationship_nodes_added)
-    
+            source_id = group_id
+            
+        # Add entities (limit to 15 to prevent graph overload)
+        display_entities = entities[:15]
+        
+        for idx, entity in enumerate(display_entities):
+            ent_id = entity.get("id")
+            if not ent_id: continue
+            
+            unique_id = f"{rel_type}_{ent_id}"
+            
+            # Skip if already added
+            if unique_id in node_registry: continue
+            node_registry.add(unique_id)
+            
+            ent_type = entity.get("type", "unknown")
+            
+            # Color Palette
+            color_map = {
+                "file": "#9B59B6",           # Purple
+                "domain": "#E67E22",         # Orange
+                "ip_address": "#E67E22",     # Orange
+                "url": "#2ECC71",            # Green (Matches Legend)
+                "collection": "#3498DB",     # Blue
+            }
+            color = color_map.get(ent_type, "#95A5A6") # Grey default
+            
+            nodes.append({
+                "id": unique_id,
+                "label": get_entity_label(entity),
+                "color": color,
+                "size": 20, # Standard entity size
+                "title": json.dumps(entity.get("attributes", {}), indent=2)
+            })
+            
+            edges.append({
+                "source": source_id,  # Either root or group
+                "target": unique_id,
+                "label": "" if use_clustering else rel_type.replace("_", " ")
+            })
+        
+        # If truncated, add "+X more" indicator node
+        if len(entities) > 15:
+            remaining = len(entities) - 15
+            overflow_id = f"overflow_{rel_type}"
+            
+            nodes.append({
+                "id": overflow_id,
+                "label": f"+{remaining} more",
+                "color": "#BDC3C7",  # Light grey
+                "size": 15,
+                "shape": "box",
+                "title": f"{remaining} additional {rel_type} entities not shown"
+            })
+            
+            edges.append({
+                "source": source_id,
+                "target": overflow_id,
+                "label": "",
+                "dashes": True
+            })
+
+
     return {"nodes": nodes, "edges": edges}
 
 

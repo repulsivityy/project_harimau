@@ -11,6 +11,13 @@ api = HarimauAPIClient()
 st.title("🐯 Project Harimau - AI Threat Hunter")
 
 # Sidebar Status
+# State Management for Persistence
+if "current_job_id" not in st.session_state:
+    st.session_state.current_job_id = None
+if "graph_recenter_key" not in st.session_state:
+    st.session_state.graph_recenter_key = 0
+
+# Sidebar Controls (Moved up for better flow)
 with st.sidebar:
     st.header("System Status")
     if api.health_check():
@@ -18,6 +25,22 @@ with st.sidebar:
     else:
         st.error("Backend Offline")
         st.warning("Ensure backend is running on port 8080")
+        
+    st.markdown("---")
+    st.subheader("🎛️ Graph Controls")
+    
+    # Recenter Logic
+    if "graph_key" not in st.session_state:
+        st.session_state.graph_key = 0
+    
+    if st.button("🔄 Recenter Graph", use_container_width=True):
+        st.session_state.graph_key += 1
+        st.rerun()  # Force full refresh to reset graph
+        
+    physics_enabled = st.checkbox("Enable Physics", value=True, help="Dynamic node positioning")
+    show_labels = st.checkbox("Show Edge Labels", value=True, help="Display relationship types")
+    node_size = st.slider("Node Size", 10, 50, 15, help="Adjust node diameter")
+    link_distance = st.slider("Link Distance", 50, 1000, 200, help="Space between nodes")
 
 # Main Interface
 st.write("Harimau (Tiger in Malay) is an automated threat hunting platform that uses AI to analyze and investigate IOCs (IPs, Domains, Hashes, URLs). ")
@@ -33,48 +56,60 @@ with col2:
     st.write("") # Spacer
     submit_btn = st.button("Start Investigation", type="primary", use_container_width=True)
 
+# Logic: New Submission or Persistent State
 if submit_btn and ioc_input:
+    # New Job
+    with st.spinner("The 🐯 Tiger is hunting..."):
+        job_id = api.submit_investigation(ioc_input)
+        st.session_state.current_job_id = job_id # Persist
+        st.toast(f"Job Initiated: {job_id}", icon="🚀")
+
+# Render if we have a job
+if st.session_state.current_job_id:
+    job_id = st.session_state.current_job_id
+    
     try:
-        # 1. Submit Job
-        with st.spinner("The 🐯 Tiger is hunting..."):
-            job_id = api.submit_investigation(ioc_input)
-            st.toast(f"Job Initiated: {job_id}", icon="🚀")
-            
-        # 2. Poll for Completion with Progress Bar
-        st.write("### 🔍 Investigation Progress")
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        progress_details = st.empty()
+        # 2. Poll for Completion (Only if just submitted or running)
+        # Check status once first to decide if we need to poll
+        current_status = api.get_investigation(job_id).get("status")
         
-        complete = False
-        poll_count = 0
-        max_polls = 150  # 5 minutes with 2s intervals
-        
-        while not complete and poll_count < max_polls:
-            data = api.get_investigation(job_id)
-            status = data.get("status")
+        if current_status == "running":
+            st.write("### 🔍 Investigation Progress")
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            progress_details = st.empty()
             
-            # Calculate progress (you can enhance this based on actual backend progress)
-            progress = min(poll_count * 2, 95) if status == "running" else 100
-            progress_bar.progress(progress)
+            complete = False
+            poll_count = 0
+            max_polls = 150
             
-            if status == "completed":
-                progress_bar.progress(100)
-                status_text.success("✅ Investigation Complete!")
-                complete = True
-            elif status == "failed":
-                progress_bar.empty()
-                status_text.error("❌ Investigation Failed")
-                st.error("The investigation failed on the backend.")
-                st.stop()
-            else:
-                # Show active agents if available
-                active_agent = data.get("current_agent", "Processing")
-                status_text.info(f"🤖 Status: {status} | Agent: {active_agent}")
-                progress_details.caption(f"Poll #{poll_count + 1} | Elapsed: {poll_count * 2}s")
-                time.sleep(2)
-                poll_count += 1
+            while not complete and poll_count < max_polls:
+                data = api.get_investigation(job_id)
+                status = data.get("status")
                 
+                # Calculate progress
+                progress = min(poll_count * 2, 95) if status == "running" else 100
+                progress_bar.progress(progress)
+                
+                if status == "completed":
+                    progress_bar.progress(100)
+                    status_text.success("✅ Investigation Complete!")
+                    complete = True
+                elif status == "failed":
+                    progress_bar.empty()
+                    status_text.error("❌ Investigation Failed")
+                    st.error("The investigation failed on the backend.")
+                    st.stop()
+                else:
+                    active_agent = data.get("current_agent", "Processing")
+                    status_text.info(f"🤖 Status: {status} | Agent: {active_agent}")
+                    progress_details.caption(f"Poll #{poll_count + 1} | Elapsed: {poll_count * 2}s")
+                    time.sleep(2)
+                    poll_count += 1
+            
+            # Use rerun to clear polling UI and show results clean
+            # but st.rerun() might be too aggressive, let's just fall through
+        
         # 3. Display Results
         res = api.get_investigation(job_id)
         subtasks = res.get("subtasks", [])
@@ -203,15 +238,6 @@ if submit_btn and ioc_input:
         with tab2:
             st.subheader("Investigation Graph")
             
-            # Enhanced Graph Interactivity - Sidebar Controls
-            with st.sidebar:
-                st.markdown("---")
-                st.subheader("🎛️ Graph Controls")
-                physics_enabled = st.checkbox("Enable Physics", value=True, help="Dynamic node positioning")
-                show_labels = st.checkbox("Show Edge Labels", value=True, help="Display relationship types")
-                node_size = st.slider("Node Size", 15, 50, 25, help="Adjust node diameter")
-                link_distance = st.slider("Link Distance", 50, 200, 100, help="Space between nodes")
-            
             try:
                 graph_data = api.get_graph_data(job_id)
                 from streamlit_agraph import agraph, Node, Edge, Config
@@ -219,44 +245,47 @@ if submit_btn and ioc_input:
                 nodes = []
                 edges = []
                 
-                # Build nodes
+                # Build nodes with scaling logic
                 for n in graph_data.get("nodes", []):
-                    node_id = n.get("id", "unknown")
-                    node_label = n.get("label", "Unknown")
-                    node_color = n.get("color", "#9E9E9E")
-                    node_title = n.get("title", node_label)
+                    node_id = n.get("id")
+                    node_label = n.get("label")
+                    node_color = n.get("color")
+                    node_title = n.get("title")
                     
-                    # Build node properties
+                    # Logic: Scale sizes based on slider `node_size`
+                    # Root is 1.1x, Groups are 0.75x, Normal is 1.0x
+                    final_size = node_size  # Default (from slider)
+                    
                     node_kwargs = {
                         "id": node_id,
                         "label": node_label,
-                        "size": n.get("size", node_size),
-                        "color": node_color,
                         "title": node_title
                     }
                     
-                    # ✅ FIXED: Center root node (but keep it moveable)
                     if node_id == "root":
-                        node_kwargs["x"] = 0      # Start at center X
-                        node_kwargs["y"] = 0      # Start at center Y
-                        node_kwargs["size"] = 40  # Make it larger
-                        # Note: NO "fixed" property - that doesn't exist!
-                        # Just x/y makes it start centered but stay draggable
+                        final_size = int(node_size * 1.1)
+                        node_kwargs["x"] = 0
+                        node_kwargs["y"] = 0
+                    elif str(node_id).startswith("group_") or str(node_id).startswith("overflow_"):
+                        final_size = int(node_size * 0.75)
+                    
+                    node_kwargs["size"] = final_size
+                    node_kwargs["color"] = node_color
                     
                     nodes.append(Node(**node_kwargs))
                 
                 # Build edges
                 for e in graph_data.get("edges", []):
                     edges.append(Edge(
-                        source=e.get("source", "unknown"),
-                        target=e.get("target", "unknown"),
-                        label=e.get("label", "") if show_labels else ""
+                        source=e.get("source"),
+                        target=e.get("target"),
+                        label=e.get("label") if show_labels else "",
+                        dashes=e.get("dashes", False)
                     ))
                 
                 if not nodes:
-                    st.warning("No graph nodes generated. Triage might have returned no tasks.")
+                    st.warning("No graph nodes generated.")
                 else:
-                    # Show graph stats
                     col1, col2 = st.columns(2)
                     col1.metric("Nodes", len(nodes))
                     col2.metric("Edges", len(edges))
@@ -265,9 +294,7 @@ if submit_btn and ioc_input:
                         width="100%",
                         height=800,
                         directed=True,
-                        physics=physics_enabled,
-                        hierarchical=True,
-                        
+                        hierarchical=False,
                         
                         # Node interaction
                         nodeHighlightBehavior=True,
@@ -286,27 +313,39 @@ if submit_btn and ioc_input:
                             'color': '#999'
                         },
                         
-                        # Physics
-                        d3={
-                            'alphaTarget': 0,
-                            'gravity': -100,
-                            'linkLength': link_distance,
-                            'linkStrength': 1
-                        }
+                        # Physics (Vis.js style)
+                        physics={
+                            'solver': 'forceAtlas2Based',
+                            'forceAtlas2Based': {
+                                'theta': 0.5,
+                                'gravitationalConstant': -50,
+                                'centralGravity': 0.5,
+                                'springConstant': 0.08,
+                                'springLength': link_distance,  # Slider controls this
+                                'damping': 0.4,
+                                'avoidOverlap': 0.01
+                            },
+                            'stabilization': {
+                                'enabled': True,
+                                'iterations': 100,  # Run physics sim before display
+                                'fit': True  # Center viewport on graph
+                            },
+                            # Inject recenter trigger - changes config hash on button click
+                            '_recenter_key': st.session_state.graph_key
+                        } if physics_enabled else {'enabled': False, '_recenter_key': st.session_state.graph_key}
                     )
                     
                     # Render graph
                     agraph(nodes=nodes, edges=edges, config=config)
                     
-                    # Legend
-                    st.markdown("---")
                     st.markdown("**Legend:**")
-                    leg_col1, leg_col2, leg_col3, leg_col4, leg_col5 = st.columns(5)
-                    leg_col1.markdown("🔴 **Root IOC**")
-                    leg_col2.markdown("🔵 **Agent Tasks**")
-                    leg_col3.markdown("🟠 **Infrastructure**")
-                    leg_col4.markdown("🟣 **Indicators**")
-                    leg_col5.markdown("💡 *Hover for details*")
+                    leg_cols = st.columns(6)
+                    leg_cols[0].markdown("🔴 **IOC**")
+                    leg_cols[1].markdown("🟣 **File**")
+                    leg_cols[2].markdown("🟠 **Infra**")
+                    leg_cols[3].markdown("🔵 **Context**")
+                    leg_cols[4].markdown("⚫ **Group**")
+                    leg_cols[5].markdown("🟢 **URL**")
                     
             except requests.exceptions.ConnectionError:
                 st.error("🔌 Cannot connect to backend to fetch graph data.")

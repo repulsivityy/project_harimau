@@ -14,7 +14,7 @@
 *   **Backend (`/backend`)**: FastAPI + LangGraph (Cloud Run Service B).
 *   **Database**: FalkorDB (Sidecar or Docker).
 *   **MCP Server**: Google Threat Intelligence (Embedded Python Subprocess).
-*   **Models**: Gemini 3.0 Flash (Triage) / Pro (Analysis).
+*   **Models**: Gemini 2.5 Flash (Triage) / Pro (Analysis).
 
 ## 3. Core Features
 
@@ -27,7 +27,7 @@
 ### 3.2 Investigation Workflow
 1.  **Input**: User inputs IOC in Streamlit.
 2.  **Async Queue**: Frontend posts job to Backend -> Backend offloads to Cloud Tasks.
-3.  **Hybrid Triage Agent**: Classifies IOC using Fast Facts (Direct API) + Agentic Reasoning (Root Node).
+3.  **Hybrid Triage Agent**: Classifies IOC using Fast Facts (Direct API Super-Bundle) + Agentic Reasoning (Root Node).
 4.  **Pivot (Recursion)**: Infra Agent / Malware Agent expands the graph.
 5.  **Synthesis**: Lead Hunter writes the report.
 
@@ -48,14 +48,11 @@ The Lead Hunter must produce a **comprehensive narrative report**, not just a ve
     - **IP IOCs (6 relationships)**: `communicating_files`, `downloaded_files`, `historical_whois`, `referrer_files`, `resolutions`, `urls`
     - **URL IOCs (12 relationships)**: `communicating_files`, `contacted_domains`, `contacted_ips`, `downloaded_files`, `embedded_js_files`, `last_serving_ip_address`, `memory_pattern_parents`, `network_location`, `redirecting_urls`, `redirects_to`, `referrer_files`, `referrer_urls`
 *   **Graph Visualization Strategy**:
-    - **Display**: Only IOC-to-IOC relationships (files, domains, IPs, URLs, DNS records, SSL certs, etc.)
-    - **Filter Out**: Contextual metadata (`attack_techniques`, `malware_families`, `associations`, `campaigns`, `related_threat_actors`) - still fetched/analyzed but not visualized
-    - **Agent Nodes**: Internal workflow nodes (e.g., malware_specialist) are NOT shown in graph
-*   **Capacity Limits**:
-    - Fetch up to 10 entities per relationship type from GTI
-    - Maximum 150 total entities across all relationships
-    - Display up to 15 entities per relationship in graph UI
-    - **Future**: Smart filtering to prioritize malicious/high-score entities (Option B)
+    - **Display**: IOC-to-IOC relationships (files, domains, IPs, URLs).
+    - **Clustering**: Hierarchical clustering for high-volume nodes (e.g., "Contacted Domains").
+    - **Smart Truncation**: Filenames are truncated (24 chars + ext) to preserve SHA256 hashes.
+    - **Filtering**: Contextual metadata (`attack_techniques`, etc.) analyzed but not visualized.
+    - **Capacity**: 15 entities per relationship, 150 total.
 
 ### 3.4 The Librarian (Async)
 *   Runs *after* investigation completion.

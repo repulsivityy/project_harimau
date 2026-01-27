@@ -9,15 +9,15 @@ To build a cloud-native, AI-driven threat hunting platform that leverages **Lang
     *   **Frontend (`/app`)**: Streamlit. Pure UI, communicates with Backend via API.
 2.  **MCP Strategy**:
     *   **Deployment**: Embedded within the Backend container (Monolith).
-    *   **Transport**: `stdio` (Standard Input/Output) for zero-latency local communication.
-    *   **Source**: Reuse official GTI server from `elevate_2025`.
+    *   **Transport**: `stdio` + Direct `aiohttp` (Parallel Super-Bundle) for zero-latency communication.
+    *   **Source**: Reuse official GTI server from `elevate_2025` + Optimized Direct Fast-Path.
 3.  **Orchestrator**: LangGraph. Enforce `MAX_DEPTH` for recursion control.
 4.  **Graph Database**: FalkorDB (Ephemeral Sidecar).
 5.  **Compute**: Google Cloud Run (Serverless).
 6.  **Deployment**: Selective updates via `deploy.sh` (Backend/Frontend/All).
 
 ## Agent Strategy
-*   **Tiered Models**: Gemini 3.0 Flash (Triage) vs Gemini 3.0 Pro (Analysis).
+*   **Tiered Models**: Gemini 2.x Flash (Triage) vs Gemini 2.x Pro (Analysis).
 *   **Config-Driven**: Define agent behaviors in `agents.yaml`.
 *   **Tool Registry**: Load tools dynamically via `mcp_registry.json`.
 

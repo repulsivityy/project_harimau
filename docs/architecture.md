@@ -14,6 +14,7 @@ graph TD
         subgraph "Backend Container"
             BackendAPI[API Layer] <-->|Invokes| LG[LangGraph Orchestrator]
             LG <-->|stdio| MCP[Embedded GTI MCP Server]
+            LG <-->|aiohttp| DirectAPI[Direct GTI Fast-Path]
         end
     end
     
@@ -23,6 +24,7 @@ graph TD
     
     subgraph "External"
         MCP <-->|HTTPS| GoogleTI[Google Threat Intel API]
+        DirectAPI <-->|Parallel HTTPS| GoogleTI
     end
 ```
 
@@ -66,15 +68,16 @@ graph TD
     *   **Edges**: Relationship names map to TI API keys (e.g. `:DOWNLOADED`).
 
 ### 2.5 Observability & Transparency
-*   **Structured Logging**: JSON logs sent to Google Cloud Logging via `utils/logger.py`.
-*   **Agent Transparency**: Visibility into agent decision-making for debugging and trust:
-    *   **Tool Call Tracing** (`state["metadata"]["tool_call_trace"]`): Logs every Phase 1 relationship fetch with:
-        - Relationship type (e.g., "contacted_domains")
-        - Status (success, empty, filtered, error)
-        - Entity counts and sample data
-    *   **LLM Reasoning** (`state["metadata"]["rich_intel"]["triage_analysis"]["_llm_reasoning"]`): Stores raw Gemini response from Phase 2 comprehensive analysis
-    *   **Frontend Display**: "🔍 Agent Transparency" expander in Triage tab shows summary metrics, detailed tool logs, and full LLM reasoning
-*   **Performance Impact**: ~20-50ms overhead per investigation (negligible)
+*   **Observability & Transparency**:
+    - **Structured Logging**: JSON logs sent to Google Cloud Logging.
+    - **Agent Transparency**: 
+        - **Tool Call Tracing**: Logs every direct API and MCP fetch with status and sample data.
+        - **LLM Reasoning**: Captures raw Gemini responses for debugging.
+    - **Performance**: Sub-3s latency for typical investigations due to parallel "Super-Bundle" enrichment.
+*   **Graph Optimization**:
+    - **Hierarchical Clustering**: Collapses dense relationships (e.g., 20+ IPs) into interactive group nodes.
+    - **Smart Truncation**: Balances readability (truncated filenames) with precision (full SHA256 hashes).
+    - **Legend Alignment**: Node colors (Purple: File, Orange: Infra, Green: URL) strictly match the UI legend.
 
 ## 3. API Specification
 

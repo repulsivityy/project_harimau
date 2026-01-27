@@ -7,8 +7,8 @@ Project Harimau is an automated threat investigation platform. It uses a graph-b
 ## Architecture V2
 *   **Frontend**: Streamlit (Cloud Run Service).
 *   **Backend**: FastAPI + LangGraph (Cloud Run Service).
-*   **MCP**: Embedded GTI Server (stdio).
-*   **Brain**: Gemini 3.0 Pro / Flash.
+*   **MCP**: Embedded GTI Server (stdio/Direct API).
+*   **Brain**: Gemini 2.5 Flash / Pro.
 *   **Memory**: FalkorDB (GraphRAG).
 
 ## Features
@@ -47,9 +47,9 @@ Project Harimau is an automated threat investigation platform. It uses a graph-b
 - **Phase 1 (Infrastructure)**: ✅ Complete
 - **Phase 2 (The Brain)**: ✅ Complete
 - **Phase 3 (The Interface)**: ✅ Complete
-- **Phase 3.5 (Hybrid Triage)**: ✅ Complete
-- **Phase 3.6 (Relationship Mapping & Transparency)**: ✅ Complete
-- **Phase 4 (Specialist Agents)**: 🚧 In Progress
+- **Phase 4 (Hybrid Fast Triage)**: ✅ Complete
+- **Phase 5 (Enhanced Visualization)**: ✅ Complete (Clustering, Legend Alignment)
+- **Phase 6 (Agent Specialist Expansion)**: 🚧 In Progress
 
 ## Quick Start (Local)
 

@@ -343,6 +343,8 @@ async def get_investigation_graph(job_id: str):
         ent_id = entity.get("id", "unknown")
         attrs = entity.get("attributes", {})
         
+
+        
         if ent_type == "url":
             # 1. Try attributes.last_final_url (Best)
             if attrs.get("last_final_url"):

@@ -200,14 +200,17 @@ This document tracks the progress of the Harimau V2 rebuild.
 *   **Dual-Purpose Data**: Entities now serve both LLM analysis and graph display by filtering at query time.
 *   **User Experience**: Graph tooltips are critical for investigation - users need filenames, not hashes.
 
-### Phase 4: Specialist Agents [IN PROGRESS]
+### Phase 4: Specialist Agents [PARTIALLY COMPLETE]
 - [x] **Routing Fix**: Strictly limited the orchestrator to valid specialists (`malware_specialist`).
 - [ ] **Malware Specialist Agent**: Deep dive into behavior, capabilities, and associated campaigns.
 - [ ] **Infrastructure Specialist**: Map infrastructure, find pivoting points.
-- [ ] **NetworkX Investigation Cache**: 
-  - [ ] Add `investigation_graph: nx.MultiDiGraph` to `AgentState`.
-  - [ ] Refactor triage to store full entities in NetworkX graph.
-  - [ ] Update specialists to pull from cache instead of re-fetching.
+- [x] **NetworkX Investigation Cache** ✅ **Deployed: Jan 28, 2026**
+  - [x] Add `investigation_graph: nx.MultiDiGraph` to `AgentState`.
+  - [x] Refactor triage to store full entities in NetworkX graph.
+  - [x] Update specialists to pull from cache instead of re-fetching.
+  - [x] Created `InvestigationCache` helper class (`backend/utils/graph_cache.py`).
+  - [x] Added `networkx==3.6.1` to production dependencies.
+  - [x] Deployed to Cloud Run with full entity caching.
   
 **NetworkX Cache Benefits**:
 - Full entity attributes cached in-memory per investigation

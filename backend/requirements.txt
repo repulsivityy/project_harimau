@@ -10,5 +10,6 @@ mcp
 vt-py
 structlog
 graphviz
+networkx
 python-dotenv
 requests

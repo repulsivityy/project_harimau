@@ -27,3 +27,7 @@ class AgentState(TypedDict):
     
     # Metadata: Timing, errors, etc.
     metadata: Dict[str, Any]
+    
+    # Investigation Graph: NetworkX cache for full entity storage
+    # Stores complete GTI attributes for all entities and relationships
+    investigation_graph: Optional[Any]  # nx.MultiDiGraph (using Any to avoid import)

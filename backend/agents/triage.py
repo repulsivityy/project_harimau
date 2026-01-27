@@ -8,6 +8,7 @@ from langchain_google_vertexai import ChatVertexAI
 from backend.graph.state import AgentState
 from backend.utils.logger import get_logger
 import backend.tools.gti as gti
+from backend.utils.graph_cache import InvestigationCache
 
 logger = get_logger("agent_triage")
 
@@ -426,6 +427,17 @@ async def triage_node(state: AgentState):
         # ========================================
         # PHASE 1: Super-Bundle Relationship Parsing
         # ========================================
+        # Initialize NetworkX cache from state or create new
+        cache = InvestigationCache(state.get("investigation_graph"))
+        
+        # Store root IOC in cache with full base_data attributes
+        cache.add_entity(
+            entity_id=ioc,
+            entity_type=config["type"].lower(),
+            attributes=base_data.get("attributes", {})
+        )
+        logger.info("networkx_cached_root", ioc=ioc, type=config["type"])
+        
         relationships_data = {}
         tool_call_trace = []
         
@@ -436,22 +448,34 @@ async def triage_node(state: AgentState):
             entities_list = rel_content.get("data")
             
             if entities_list and isinstance(entities_list, list) and len(entities_list) > 0:
-                # [TOKEN OPTIMIZATION] Extract minimal fields only (not full attributes)
-                # Alpha pattern: Store ID + type + essential verdict fields only
-                # Token savings: ~95% per entity (1000 tokens → 50 tokens)
+                # [NETWORKX] Store FULL entities in cache (all attributes)
+                # [LLM] Extract minimal fields for token optimization
                 parsed_entities = []
                 for entity in entities_list:
-                    attrs = entity.get("attributes", {})
+                    entity_id = entity.get("id")
+                    entity_type = entity.get("type")
+                    full_attrs = entity.get("attributes", {})
+                    
+                    # STORE FULL ENTITY IN NETWORKX CACHE
+                    cache.add_entity(
+                        entity_id=entity_id,
+                        entity_type=entity_type,
+                        attributes=full_attrs
+                    )
+                    # Add relationship edge
+                    cache.add_relationship(ioc, entity_id, rel_name)
+                    
+                    # Now parse minimal + display fields for LLM and graph UI
+                    attrs = full_attrs
                     
                     # Base entity (always include)
                     parsed = {
-                        "id": entity.get("id"),
-                        "type": entity.get("type"),
+                        "id": entity_id,
+                        "type": entity_type,
                     }
                     
                     # [GRAPH VIZ] Add display fields for visualization
                     # Store fields needed for display AND mouseover
-                    entity_type = entity.get("type")
                     
                     # URL entities
                     if entity_type == "url":
@@ -460,7 +484,7 @@ async def triage_node(state: AgentState):
                             parsed["url"] = url_value  # Store full URL
                             parsed["display_name"] = url_value
                         else:
-                            parsed["display_name"] = entity.get("id")
+                            parsed["display_name"] = entity_id
                         
                         # Add categories for mouseover
                         if attrs.get("categories"):
@@ -476,7 +500,7 @@ async def triage_node(state: AgentState):
                             parsed["names"] = attrs["names"][:3]  # Store up to 3 names
                             parsed["display_name"] = attrs["names"][0]
                         else:
-                            parsed["display_name"] = entity.get("id", "")[:16] + "..."
+                            parsed["display_name"] = entity_id[:16] + "..."
                         
                         # Store size and file type for mouseover
                         if attrs.get("size"):
@@ -486,7 +510,7 @@ async def triage_node(state: AgentState):
                     
                     # Domain/IP entities
                     elif entity_type in ["domain", "ip_address"]:
-                        parsed["display_name"] = entity.get("id")
+                        parsed["display_name"] = entity_id
                         if attrs.get("reputation"):
                             parsed["reputation"] = attrs["reputation"]
                     
@@ -497,11 +521,11 @@ async def triage_node(state: AgentState):
                             parsed["name"] = name
                             parsed["display_name"] = name
                         else:
-                            parsed["display_name"] = entity.get("id")
+                            parsed["display_name"] = entity_id
                     
                     # Default for other types
                     else:
-                        parsed["display_name"] = entity.get("id")
+                        parsed["display_name"] = entity_id
                     
                     # Add GTI verdict fields (for all entity types)
                     gti_data = attrs.get("gti_assessment", {})
@@ -532,13 +556,17 @@ async def triage_node(state: AgentState):
                     "sample_entity": {"id": parsed_entities[0]["id"], "type": parsed_entities[0]["type"]}
                 })
         
+        # Log cache statistics
+        cache_stats = cache.get_stats()
         logger.info("phase1_super_bundle_complete", 
                     relationships_found=len(relationships_data),
-                    total_entities=sum(len(e) for e in relationships_data.values()))
+                    total_entities=sum(len(e) for e in relationships_data.values()),
+                    networkx_cache=cache_stats)
 
         # Store in state for graph building
         state["metadata"]["rich_intel"]["relationships"] = relationships_data
         state["metadata"]["tool_call_trace"] = tool_call_trace
+        state["investigation_graph"] = cache.graph  # Persist cache in state
         
         # ========================================
         # PHASE 2: Comprehensive Triage Analysis

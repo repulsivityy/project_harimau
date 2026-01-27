@@ -455,12 +455,52 @@ async def get_investigation_graph(job_id: str):
             }
             color = color_map.get(ent_type, "#95A5A6") # Grey default
             
+            # Build human-readable mouseover tooltip
+            tooltip_lines = []
+            
+            # 1. Threat Score
+            if entity.get("threat_score"):
+                tooltip_lines.append(f"Threat Score: {entity['threat_score']}")
+            
+            # 2. Vendor Detections
+            if entity.get("malicious_count"):
+                count = entity["malicious_count"]
+                tooltip_lines.append(f"{count} vendor{'s' if count != 1 else ''} detected as malicious")
+            
+            # 3. File-specific info
+            if ent_type == "file":
+                if entity.get("meaningful_name"):
+                    tooltip_lines.append(f"Filename: {entity['meaningful_name']}")
+                elif entity.get("names"):
+                    tooltip_lines.append(f"Filename: {entity['names'][0]}")
+                if entity.get("file_type"):
+                    tooltip_lines.append(f"Type: {entity['file_type']}")
+                if entity.get("size"):
+                    size_mb = entity["size"] / (1024 * 1024)
+                    tooltip_lines.append(f"Size: {size_mb:.2f} MB")
+            
+            # 4. URL categories
+            elif ent_type == "url":
+                if entity.get("categories"):
+                    cats = entity["categories"]
+                    if isinstance(cats, dict):
+                        cat_list = ", ".join(cats.values())
+                    else:
+                        cat_list = ", ".join(cats) if isinstance(cats, list) else str(cats)
+                    tooltip_lines.append(f"Categories: {cat_list}")
+            
+            # 5. Verdict
+            if entity.get("verdict"):
+                tooltip_lines.append(f"Verdict: {entity['verdict']}")
+            
+            tooltip_text = "\n".join(tooltip_lines) if tooltip_lines else f"{ent_type}: {ent_id}"
+            
             nodes.append({
                 "id": unique_id,
                 "label": get_entity_label(entity),
                 "color": color,
                 "size": 20, # Standard entity size
-                "title": json.dumps(entity.get("attributes", {}), indent=2)
+                "title": tooltip_text
             })
             
             edges.append({

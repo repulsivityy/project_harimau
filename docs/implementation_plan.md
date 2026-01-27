@@ -143,16 +143,79 @@ This document tracks the progress of the Harimau V2 rebuild.
 *   **Future Work**: Need to implement smart filtering to surface most relevant entities when investigations exceed 150 total entities.
 
 #### Phase 3.7: Performance & UX Polish [COMPLETED]
-- [x] **Sub-3s Triage**: Migrated to Direct API Super-Bundle with parallel `aiohttp` enrichment.
+- [x] **Sub-3s Triage**: Migrated to Direct API Bundle with parallel `aiohttp` enrichment.
 - [x] **Graph Visibility**: Hierarchical clustering for high-volume nodes.
 - [x] **State Persistence**: Fixed UI reset bug using `st.session_state`.
 - [x] **Smart Labels**: Implemented filename truncation and attribute-first URL labeling.
+
+#### Phase 3.8: Token Optimization [COMPLETED]
+**Goal**: Reduce LLM token consumption for file IOC investigations from 200K-2M to <30K.
+
+**Problem**: File IOC investigations were exceeding Gemini token limits and incurring high costs.
+
+**Solution - Dual-Layer Data Model**:
+- [x] **Reduced Relationships**: File IOCs now fetch 11 critical types instead of 20 (-45%):
+  - `associations`, `malware_families`, `attack_techniques`
+  - `contacted_domains`, `contacted_ips`
+  - `dropped_files`, `embedded_domains`, `embedded_ips`
+  - `execution_parents`, `itw_domains`, `itw_ips`
+- [x] **Minimal Entity Storage**: Extract only essential fields for LLM analysis (9 fields: id, type, display_name, verdict, threat_score, malicious_count, file_type, reputation, name).
+- [x] **Display Field Separation**: Store rich fields (url, meaningful_name, names, size, categories) for graph visualization separately.
+- [x] **LLM Context Filtering**: `prepare_detailed_context_for_llm()` filters entities to LLM-relevant fields only.
+
+**Results**:
+- Token usage: 200K-2M → <30K (-90%+)
+- Analysis depth: Maintained ✅
+- Graph visualization: Enhanced with display fields ✅
+
+#### Phase 3.8 Challenges & Learnings
+*   **Storage vs Context**: Storage size doesn't matter for tokens - only what's sent to LLM matters.
+*   **Separation of Concerns**: Store everything, send minimal summaries, query on-demand.
+*   **Alpha Pattern**: Inspired by `ai_threathunter` project's approach of full fetch + minimal LLM context.
+
+#### Phase 3.9: Visualization Enhancements & Bug Fixes [COMPLETED]
+**Goal**: Fix graph visualization issues and improve tooltip quality.
+
+**Enhancements**:
+- [x] **Full URLs**: Display complete URL strings instead of truncated versions.
+- [x] **File Names**: Show `meaningful_name` or first filename instead of truncated hash.
+- [x] **Rich Tooltips**: Human-readable format showing:
+  - Threat score (e.g., "Threat Score: 85")
+  - Vendor detections (e.g., "42 vendors detected as malicious")
+  - File metadata (filename, type, size in MB)
+  - URL categories
+  - Verdict
+- [x] **URL Categories**: Added extraction and display for URL entities.
+
+**Bug Fixes (Jan 2026)**:
+- [x] **UnboundLocalError**: Fixed variable shadowing in `triage.py` line 464 (`gti` → `gti_data`).
+  - **Issue**: Local variable `gti = attrs.get("gti_assessment", {})` shadowed imported `gti` module.
+  - **Impact**: 500 Internal Server Error in Cloud Run deployment.
+  - **Fix**: Renamed local variable to `gti_data`.
+- [x] **Empty Tooltips**: Added display fields to entity extraction (was showing `{}`).
+- [x] **Tooltip Formatting**: Changed from JSON dump to human-readable multi-line text.
+
+#### Phase 3.9 Challenges & Learnings
+*   **Over-Optimization**: Initial token optimization removed fields needed for visualization.
+*   **Dual-Purpose Data**: Entities now serve both LLM analysis and graph display by filtering at query time.
+*   **User Experience**: Graph tooltips are critical for investigation - users need filenames, not hashes.
 
 ### Phase 4: Specialist Agents [IN PROGRESS]
 - [x] **Routing Fix**: Strictly limited the orchestrator to valid specialists (`malware_specialist`).
 - [ ] **Malware Specialist Agent**: Deep dive into behavior, capabilities, and associated campaigns.
 - [ ] **Infrastructure Specialist**: Map infrastructure, find pivoting points.
-## Phase 4: Near-Term Roadmap (Post-MVP)
+- [ ] **NetworkX Investigation Cache**: 
+  - [ ] Add `investigation_graph: nx.MultiDiGraph` to `AgentState`.
+  - [ ] Refactor triage to store full entities in NetworkX graph.
+  - [ ] Update specialists to pull from cache instead of re-fetching.
+  
+**NetworkX Cache Benefits**:
+- Full entity attributes cached in-memory per investigation
+- LLM queries minimal fields (token-efficient)
+- Specialists get full context without API re-fetch
+- Future migration path: NetworkX (MVP) → FalkorDB (Production)
+
+## Phase 5: Near-Term Roadmap (Post-MVP)
 - [ ] **Real-Time Streaming**: Refactor Frontend/Backend to use SSE (Server-Sent Events) instead of polling.
 - [ ] **Microservices Split**: *If* scaling requires it, extract the MCP server into a dedicated Cloud Run service (Sidecar).
 - [ ] **Advanced Error Handling**: Implement exponential backoff for GTI API and automatic agent retries.
@@ -160,7 +223,7 @@ This document tracks the progress of the Harimau V2 rebuild.
 - [ ] **Crash Recovery**: Implement LangGraph Postgres Checkpointing to resume jobs after Cloud Run restarts.
 - [ ] **Smart Entity Filtering (Option B)**: Implement user-configurable filters at investigation start to prioritize malicious/high-score entities by threat score, verdict, and recency.
 
-## Phase 5: Long-Term Enhancements
+## Phase 6: Long-Term Enhancements
 - [ ] **Advanced Graph Visualization**: Migrate from `streamlit-agraph` to more professional library:
     - **Option 1**: Pyvis (quick upgrade, better physics/interactivity)
     - **Option 2**: Plotly + NetworkX (enterprise-grade, actively maintained)

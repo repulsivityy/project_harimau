@@ -91,10 +91,11 @@ This document tracks the progress of the Harimau rebuild.
 *   **Step 6: Specialist Handoff** [IN-PROGRESS]
     *   Agent generates `subtasks` to route to `malware_specialist` or `infrastructure_specialist` for deep dive.
 
-#### [NEW] [Malware Specialist](backend/agents/malware.py)
-*   Receives file hash or suspicious artifact.
-*   Tools: `get_file_report`, `get_entities_related_to_a_file`.
-*   Task: Deep dive into behavior, capabilities, and associated campaigns.
+#### [COMPLETED] [Malware Specialist](backend/agents/malware.py)
+*   **Behavior Analysis**: Deep dive into dropped files, C2 communications, and execution patterns using GTI sandbox reports.
+*   **Programmatic Reporting**: Generates structured Markdown reports outside the LLM context for 100% stability.
+*   **Automatic Indicator Sync**: Discovered indicators (C2s, dropped files) are automatically pushed to both the NetworkX cache and LangGraph state for immediate frontend visibility.
+*   **Source-Aware Graphing**: Links shared infrastructure (e.g., common C2 IPs) back to the specific malware hash that contacted them.
 
 #### [NEW] [Infrastructure Specialist](backend/agents/infrastructure.py)
 *   Receives IP/Domain.
@@ -201,23 +202,17 @@ This document tracks the progress of the Harimau rebuild.
 *   **Dual-Purpose Data**: Entities now serve both LLM analysis and graph display by filtering at query time.
 *   **User Experience**: Graph tooltips are critical for investigation - users need filenames, not hashes.
 
-### Phase 4: Specialist Agents [PARTIALLY COMPLETE]
+### Phase 4: Specialist Agents [COMPLETE]
 - [x] **Routing Fix**: Strictly limited the orchestrator to valid specialists (`malware_specialist`).
-- [ ] **Malware Specialist Agent**: Deep dive into behavior, capabilities, and associated campaigns.
+- [x] **Malware Specialist Agent**: Deep dive into behavior, capabilities, and associated campaigns (Deployed: Jan 29, 2026).
 - [ ] **Infrastructure Specialist**: Map infrastructure, find pivoting points.
 - [x] **NetworkX Investigation Cache** ✅ **Deployed: Jan 28, 2026**
-  - [x] Add `investigation_graph: nx.MultiDiGraph` to `AgentState`.
-  - [x] Refactor triage to store full entities in NetworkX graph.
-  - [x] Update specialists to pull from cache instead of re-fetching.
-  - [x] Created `InvestigationCache` helper class (`backend/utils/graph_cache.py`).
-  - [x] Added `networkx==3.6.1` to production dependencies.
-  - [x] Deployed to Cloud Run with full entity caching.
+- [x] **Enhanced Visualization**: Mouseover tooltips, root node hashes, and centering logic.
   
 **NetworkX Cache Benefits**:
 - Full entity attributes cached in-memory per investigation
 - LLM queries minimal fields (token-efficient)
 - Specialists get full context without API re-fetch
-- Future migration path: NetworkX (MVP) → FalkorDB (Production)
 
 ## Phase 5: Near-Term Roadmap (Post-MVP)
 - [ ] **Real-Time Streaming**: Refactor Frontend/Backend to use SSE (Server-Sent Events) instead of polling.

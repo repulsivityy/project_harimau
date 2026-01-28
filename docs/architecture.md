@@ -270,12 +270,18 @@ Verdict: {entity['verdict']}
 - **Token Budget**: <30K
 
 **Specialist Agents** (Depth-First):
-- Query full enrichment from NetworkX cache
-- Pull sandbox reports, PCAP data, attribution chains
-- Investigate pivots identified by triage
-- **Token Budget**: No limits (focused analysis on 5-10 entities)
+- Query full enrichment from NetworkX cache.
+- Pull sandbox reports, PCAP data, attribution chains.
+- Investigate pivots identified by triage.
+- **Reporting Strategy**: Specialist Agents generate structured Python reports instead of embedding Markdown in JSON. This prevents parsing errors and ensures 100% stability.
+- **Data Sync**: Findings are "Double Committed" to the NetworkX cache (Data Layer) and the LangGraph state (Control Layer) for immediate frontend rendering.
+- **Token Budget**: No limits (focused analysis on 5-10 entities).
 
-### 4.3 Asynchronous Reliability
+### 4.3 Specialist Handoff & Visualization
+1. **Dynamic Routing**: Triage identifies specialists (e.g., `malware_specialist`) based on IOC properties.
+2. **Specialist Results Tab**: A dedicated Streamlit tab renders individual markdown reports for each specialist.
+3. **Graph Integration**: Specialist findings (Dropped Files, C2 IPs) appear as new nodes in the graph with unique 🚩 specialist tooltips.
+4. **Centering Logic**: The graph is explicitly forced to re-center when specialized findings are added.
 Investigations can take >5 minutes. HTTP times out in 60s.
 * **Solution**: Frontend submits job, gets `job_id`, polls for updates.
 * **Backend**: Runs LangGraph workflow synchronously (Cloud Run timeout: 60m).

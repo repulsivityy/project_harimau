@@ -144,8 +144,15 @@ if st.session_state.current_job_id:
             markdown_report = triage_analysis.get("markdown_report", "")
             
             if markdown_report:
-                st.markdown("### 🛡️ Triage Analysis Report")
-                st.markdown(markdown_report)
+                # Show summary first (if available)
+                t_summary = rich_intel.get("triage_summary")
+                if t_summary:
+                    st.markdown("### 🛡️ Analyst Summary")
+                    st.markdown(t_summary)
+                
+                # Show full report in expander
+                with st.expander("📄 View Full Triage Report", expanded=False):
+                    st.markdown(markdown_report)
             else:
                 # Fallback to old summary format if markdown report not available
                 t_summary = rich_intel.get("triage_summary")

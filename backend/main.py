@@ -37,7 +37,7 @@ async def health_check():
 
 @app.get("/")
 async def root():
-    return {"message": "Harimau V2 Backend Online"}
+    return {"message": "Harimau Threat Hunter Backend Online"}
 
 # Simple In-Memory Persistence for MVP
 JOBS = {}
@@ -65,25 +65,25 @@ async def run_investigation(request: InvestigationRequest):
         "job_id": job_id,
         "status": "running",
         "ioc": request.ioc,
-        "created_at": "now" # Placeholder
+        "created_at": "now"
     }
     
     try:
-        # Run the Graph (Blocking for MVP)
         final_state = await app_graph.ainvoke(initial_state)
         
         # Update Job
         result = {
             "job_id": job_id,
             "status": "completed",
-            "ioc": final_state.get("ioc") or request.ioc,  # ✅ ADD THIS LINE
+            "ioc": final_state.get("ioc") or request.ioc, 
             "ioc_type": final_state.get("ioc_type"),
             "subtasks": final_state.get("subtasks"),
             "final_report": final_state.get("final_report", "No report generated."),
             "risk_level": final_state.get("metadata", {}).get("risk_level", "Unknown"),
             "gti_score": final_state.get("metadata", {}).get("gti_score", "N/A"),
             "rich_intel": final_state.get("metadata", {}).get("rich_intel", {}),
-            "metadata": final_state.get("metadata", {}),  # ✅ Added full metadata for frontend transparency
+            "specialist_results": final_state.get("specialist_results", {}),
+            "metadata": final_state.get("metadata", {}),
         }
         JOBS[job_id] = result
         return result
@@ -278,8 +278,6 @@ async def get_investigation_graph(job_id: str):
     
     return {"nodes": nodes, "edges": edges}
 '''
-# Improved Graph Endpoint with Better Naming
-# Replace the get_investigation_graph function in backend/main.py
 
 @app.get("/api/investigations/{job_id}/graph")
 async def get_investigation_graph(job_id: str):
@@ -300,14 +298,13 @@ async def get_investigation_graph(job_id: str):
     # 1. Central Node (The IOC) with better label
     root_label = ioc
     if ioc_type == "File":
-        root_label = f"File: {ioc[:16]}..." if len(ioc) > 16 else f"File: {ioc}"
+        root_label = f"File: {ioc}"
     elif ioc_type == "IP":
         root_label = f"IP: {ioc}"
     elif ioc_type == "Domain":
         root_label = f"Domain: {ioc}"
     elif ioc_type == "URL":
-        # Extract domain from URL
-        root_label = f"URL: {ioc[:30]}..."
+        root_label = f"URL: {ioc[:32]}..."
     
     nodes = [
         {

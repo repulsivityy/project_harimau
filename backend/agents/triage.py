@@ -191,30 +191,19 @@ For SUSPICIOUS/UNDETECTED:
     
     "subtasks": [
         {{
-            "agent": "malware_specialist|infrastructure_specialist",
+            "agent": "malware_specialist",
             "priority": "high|medium|low",
             "task": "Specific task with entity IDs and focus areas",
             "context": "What you found that makes this task necessary"
-        }}
+        }
     ],
     
-    "investigation_notes": "Additional context or caveats for specialists",
-    
-    "markdown_report": "STRING - A comprehensive markdown-formatted report as a single string field (not a separate section). Include sections: IOC Summary (type/verdict/confidence/severity/score), Executive Summary, Key Findings (with entity IDs), Threat Context (campaigns/actors/families/techniques), Infrastructure Analysis, Priority Entities table, Recommended Next Steps, and Investigation Notes. This should be a complete standalone report in markdown format."
-}}
+    "investigation_notes": "Additional context or caveats for specialists"
+}
 
 **OUTPUT INSTRUCTIONS:**
 - Return ONLY valid JSON (no additional text before or after)
-- The markdown_report field must be a STRING containing markdown-formatted text
-- Do NOT output markdown separately - it must be INSIDE the JSON as a field value
-- Use \\n for line breaks in the markdown_report string
-
-**CRITICAL REMINDERS:**
-- You have COMPLETE data - use all of it
-- Be specific - include entity IDs and names
-- Provide context - don't make specialists rediscover your findings
-- Prioritize - what's most important for specialists to examine?
-- Be actionable - subtasks should be concrete and focused
+- Do not include markdown formatting in the output
 """
 
 
@@ -247,6 +236,7 @@ def extract_triage_data(data: dict, ioc_type: str) -> dict:
     triage_data["threat_score"] = get_val(data, "attributes.gti_assessment.threat_score.value")
     triage_data["verdict"] = get_val(data, "attributes.gti_assessment.verdict.value")
     triage_data["description"] = get_val(data, "attributes.gti_assessment.description")
+    triage_data["crowdsourced_ai_results"] = get_val(data, "attributes.crowdsourced_ai_results")
 
     return triage_data
 
@@ -275,6 +265,72 @@ def prepare_detailed_context_for_llm(relationships_data: dict) -> dict:
     
     return detailed_context
 
+def generate_markdown_report_locally(analysis: dict, ioc: str, ioc_type: str) -> str:
+    """
+    Generates a markdown report from the structured JSON analysis.
+    This avoids JSON parsing errors caused by large markdown strings in LLM output.
+    """
+    try:
+        md = f"# IOC Triage Report\n\n"
+        
+        # 1. IOC Summary
+        md += "## IOC Summary\n"
+        md += f"*   **IOC Type:** {ioc_type}\n"
+        md += f"*   **IOC Value:** `{ioc}`\n"
+        md += f"*   **Verdict:** {analysis.get('verdict', 'Unknown')}\n"
+        md += f"*   **Confidence:** {analysis.get('confidence', 'Unknown')}\n"
+        md += f"*   **Severity:** {analysis.get('severity', 'Unknown')}\n"
+        md += f"*   **Threat Score:** {analysis.get('threat_score', 'N/A')}\n\n"
+        
+        # 2. Executive Summary
+        md += "## Executive Summary\n"
+        md += f"{analysis.get('executive_summary', 'No summary provided.')}\n\n"
+        
+        # 3. Key Findings
+        if analysis.get("key_findings"):
+            md += "## Key Findings\n"
+            for finding in analysis["key_findings"]:
+                md += f"*   {finding}\n"
+            md += "\n"
+            
+        # 4. Threat Context
+        context = analysis.get("threat_context", {})
+        md += "## Threat Context\n"
+        if context.get("campaigns"):
+            md += f"*   **Campaigns:** {', '.join(context['campaigns'])}\n"
+        if context.get("threat_actors"):
+            md += f"*   **Threat Actors:** {', '.join(context['threat_actors'])}\n"
+        if context.get("malware_families"):
+            md += f"*   **Malware Families:** {', '.join(context['malware_families'])}\n"
+        
+        techniques = context.get("attack_techniques", [])
+        if techniques:
+            md += "*   **Attack Techniques (MITRE ATT&CK):**\n"
+            for tech in techniques:
+                md += f"    *   {tech}\n"
+        
+        if context.get("infrastructure_notes"):
+            md += f"*   **Infrastructure Notes:** {context['infrastructure_notes']}\n"
+        md += "\n"
+            
+        # 5. Priority Entities table
+        entities = analysis.get("priority_entities", [])
+        if entities:
+            md += "## Priority Entities\n"
+            md += "| Entity ID | Entity Type | Reason |\n"
+            md += "| :--- | :--- | :--- |\n"
+            for e in entities:
+                md += f"| `{e.get('entity_id')}` | {e.get('entity_type')} | {e.get('reason')} |\n"
+            md += "\n"
+            
+        # 6. Investigation Notes
+        if analysis.get("investigation_notes"):
+            md += "## Investigation Notes\n"
+            md += f"{analysis.get('investigation_notes')}\n"
+            
+        return md
+    except Exception as e:
+        return f"Error generating markdown report: {str(e)}"
 
 async def comprehensive_triage_analysis(
     ioc: str,
@@ -298,7 +354,8 @@ async def comprehensive_triage_analysis(
     location = os.getenv("GOOGLE_CLOUD_REGION", "asia-southeast1")
     llm = ChatVertexAI(
         model="gemini-2.5-flash",
-        temperature=0.0,
+        #model="gemini-3-flash-preview",
+        temperature=0.0, # recommend to remove for gemini 3
         project=project_id,
         location=location
     )
@@ -343,6 +400,10 @@ Perform comprehensive first-level triage analysis now.
         
         clean_content = final_text.replace("```json", "").replace("```", "").strip()
         analysis = json.loads(clean_content)
+        
+        # [FIX] Generate Markdown Report Locally
+        # This is more robust than asking the LLM to put markdown inside JSON
+        analysis["markdown_report"] = generate_markdown_report_locally(analysis, ioc, ioc_type)
         analysis["_llm_reasoning"] = final_text  # Store for transparency
         
         logger.info("phase2_analysis_complete",

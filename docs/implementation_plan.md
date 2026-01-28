@@ -1,6 +1,6 @@
-# Implementation Checklist: Project Harimau V2
+# Implementation Checklist: Project Harimau
 
-This document tracks the progress of the Harimau V2 rebuild.
+This document tracks the progress of the Harimau rebuild.
 
 ## Phase 1: Infrastructure & Deployment
 - [x] **Repo Setup**: Clear `old_archive`, setup `app/` (Frontend) and `backend/` (API).
@@ -186,6 +186,7 @@ This document tracks the progress of the Harimau V2 rebuild.
   - URL categories
   - Verdict
 - [x] **URL Categories**: Added extraction and display for URL entities.
+- [x] **Agent Reports**: Added individual agent reports in markdown for clarity and transparency.
 
 **Bug Fixes (Jan 2026)**:
 - [x] **UnboundLocalError**: Fixed variable shadowing in `triage.py` line 464 (`gti` → `gti_data`).

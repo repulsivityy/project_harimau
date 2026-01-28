@@ -198,8 +198,16 @@ For SUSPICIOUS/UNDETECTED:
         }}
     ],
     
-    "investigation_notes": "Additional context or caveats for specialists"
+    "investigation_notes": "Additional context or caveats for specialists",
+    
+    "markdown_report": "STRING - A comprehensive markdown-formatted report as a single string field (not a separate section). Include sections: IOC Summary (type/verdict/confidence/severity/score), Executive Summary, Key Findings (with entity IDs), Threat Context (campaigns/actors/families/techniques), Infrastructure Analysis, Priority Entities table, Recommended Next Steps, and Investigation Notes. This should be a complete standalone report in markdown format."
 }}
+
+**OUTPUT INSTRUCTIONS:**
+- Return ONLY valid JSON (no additional text before or after)
+- The markdown_report field must be a STRING containing markdown-formatted text
+- Do NOT output markdown separately - it must be INSIDE the JSON as a field value
+- Use \\n for line breaks in the markdown_report string
 
 **CRITICAL REMINDERS:**
 - You have COMPLETE data - use all of it
@@ -591,6 +599,7 @@ async def triage_node(state: AgentState):
             "confidence": analysis.get("confidence"),
             "severity": analysis.get("severity"),
             "investigation_notes": analysis.get("investigation_notes", ""),
+            "markdown_report": analysis.get("markdown_report", ""),
             "_llm_reasoning": analysis.get("_llm_reasoning")
         }
         

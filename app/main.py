@@ -115,7 +115,7 @@ if st.session_state.current_job_id:
         subtasks = res.get("subtasks", [])
                 
         # Tabs for different views
-        tab1, tab2, tab3, tab4 = st.tabs(["📝 Triage & Plan", "🕸️ Graph", "📄 Final Report", "⏱️ Timeline"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📝 Triage & Plan", "🕸️ Graph", "🤖 Specialist Reports", "📄 Final Report", "⏱️ Timeline"])
         
         with tab1:
             st.subheader("Triage Assessment")
@@ -138,11 +138,20 @@ if st.session_state.current_job_id:
             # Row 2: Description
             if desc:
                 st.info(f"**Analysis (Automated):** {desc}")
-                
-            t_summary = rich_intel.get("triage_summary")
-            if t_summary:
-                st.markdown("### 🛡️ Analyst Summary")
-                st.markdown(t_summary)
+            
+            # Analyst Report - Use markdown report if available, fallback to summary
+            triage_analysis = res.get("metadata", {}).get("rich_intel", {}).get("triage_analysis", {})
+            markdown_report = triage_analysis.get("markdown_report", "")
+            
+            if markdown_report:
+                st.markdown("### 🛡️ Triage Analysis Report")
+                st.markdown(markdown_report)
+            else:
+                # Fallback to old summary format if markdown report not available
+                t_summary = rich_intel.get("triage_summary")
+                if t_summary:
+                    st.markdown("### 🛡️ Analyst Summary")
+                    st.markdown(t_summary)
             
             st.divider()
             
@@ -361,6 +370,48 @@ if st.session_state.current_job_id:
                     st.exception(e)
         
         with tab3:
+            st.subheader("Specialist Agent Reports")
+            
+            # Get specialist results from the investigation
+            specialist_results = res.get("specialist_results", {})
+            
+            if not specialist_results:
+                st.info("No specialist reports available yet. Specialists are invoked based on triage findings.")
+            else:
+                st.write("Detailed analysis from specialized investigation agents:")
+                st.write("")
+                
+                # Display each specialist's report
+                for agent_name, agent_result in specialist_results.items():
+                    # Format agent name
+                    display_name = agent_name.replace("_", " ").title()
+                    
+                    # Get the markdown report
+                    markdown_report = agent_result.get("markdown_report", "")
+                    
+                    # Get summary for preview
+                    summary = agent_result.get("summary", "No summary available")
+                    verdict = agent_result.get("verdict", "N/A")
+                    
+                    # Agent status indicator
+                    if verdict in ["Malicious", "MALICIOUS"]:
+                        icon = "🔴"
+                    elif verdict in ["Suspicious", "SUSPICIOUS"]:
+                        icon = "🟡"
+                    elif verdict in ["Benign", "BENIGN"]:
+                        icon = "🟢"
+                    else:
+                        icon = "⚪"
+                    
+                    # Create collapsible panel for each agent
+                    with st.expander(f"{icon} **{display_name}** - {verdict}", expanded=False):
+                        if markdown_report:
+                            st.markdown(markdown_report)
+                        else:
+                            st.warning("No detailed report available from this specialist.")
+                            st.json(agent_result)  # Fallback to raw JSON
+        
+        with tab4:
             st.subheader("Final Intelligence Report")
             report = res.get("final_report", "No report available.")
             
@@ -377,7 +428,7 @@ if st.session_state.current_job_id:
             
             st.markdown(report)
         
-        with tab4:
+        with tab5:
             st.subheader("Investigation Timeline")
             
             # Timeline visualization

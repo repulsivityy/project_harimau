@@ -1,10 +1,10 @@
-# Project Harimau (V2)
+# Project Harimau
 
 **Cloud-Native AI Threat Hunter**
 
 Project Harimau is an automated threat investigation platform using a graph-based multi-agent system (LangGraph) to mimic SOC team workflows.
 
-## Architecture V2
+## Architecture
 * **Frontend**: Streamlit (Cloud Run Service).
 * **Backend**: FastAPI + LangGraph (Cloud Run Service).
 * **MCP**: Embedded GTI Server (stdio/Direct API).

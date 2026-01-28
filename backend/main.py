@@ -304,11 +304,13 @@ async def get_investigation_graph(job_id: str):
     elif ioc_type == "Domain":
         root_label = f"Domain: {ioc}"
     elif ioc_type == "URL":
-        root_label = f"URL: {ioc[:32]}..."
+        root_label = f"URL: {ioc}" if len(ioc) < 64 else f"URL: {ioc[:60]}..."
     
+    # 1. Central Node (The IOC) with better label
+    root_id = ioc
     nodes = [
         {
-            "id": "root", 
+            "id": root_id, 
             "label": root_label, 
             "color": "#FF4B4B",  # Red for IOC
             "size": 35,
@@ -317,6 +319,10 @@ async def get_investigation_graph(job_id: str):
     ]
     edges = []
     
+    # Track existing nodes to prevent dups and enable merging
+    node_registry = set([root_id]) 
+    edge_registry = set() # Track edges to prevent dups: (source, target, label)
+
     # Note: Agent subtasks are NOT added to graph - only IOC relationships
     logger.info("graph_config", agent_nodes_disabled=True, reason="only_show_ioc_relationships")
     
@@ -377,9 +383,9 @@ async def get_investigation_graph(job_id: str):
                 # Smart truncation: Keep first 24 chars + extension
                 import os
                 base, ext = os.path.splitext(name)
-                if len(base) > 24:
-                    # Truncate to 24 chars, keep extension
-                    truncated = base[:24] + "..." + ext
+                if len(base) > 48:
+                    # Truncate to 48 chars, keep extension
+                    truncated = base[:48] + "..." + ext
                 else:
                     truncated = name
                 return f"{ent_id}\n({truncated})"  # Full hash + truncated filename
@@ -394,117 +400,143 @@ async def get_investigation_graph(job_id: str):
             
         return ent_id  # Default: show full ID
 
-    # Process Relationships with Clustering
-    node_registry = set(["root"]) # Track existing nodes to prevent dups
-    
+    # Process Relationships with clustering and source awareness
     for rel_type, entities in filtered_relationships.items():
         logger.info("graph_processing_relationship", 
                    rel_type=rel_type, 
                    entity_count=len(entities))
         
-        # Clustering Logic: If multiple entities, create a group node
-        use_clustering = len(entities) > 1
-        source_id = "root"
-        
-        if use_clustering:
-            group_id = f"group_{rel_type}"
-            group_label = rel_type.replace("_", " ").title()
-            
-            nodes.append({
-                "id": group_id,
-                "label": group_label,
-                "color": "#2C3E50",  # Dark BlueGrey (Matches 'Black' in Legend)
-                "size": 25,  # Larger than entities, smaller than root
-                "shape": "box",  # Box shape for groups
-                "title": f"{group_label}\n{len(entities)} entities"
-            })
-            
-            edges.append({
-                "source": "root",
-                "target": group_id,
-                "label": "",  # No label on this edge (label is on the group node)
-            })
-            
-            source_id = group_id
-            
         # Add entities (limit to 15 to prevent graph overload)
         display_entities = entities[:15]
         
-        for idx, entity in enumerate(display_entities):
-            ent_id = entity.get("id")
-            if not ent_id: continue
+        # Group entities by source to allow accurate clustering
+        sources = {}
+        for entity in display_entities:
+            s_id = entity.get("source_id", root_id)
+            if s_id not in sources: sources[s_id] = []
+            sources[s_id].append(entity)
+
+        for s_id, s_entities in sources.items():
+            use_clustering = len(s_entities) > 2 # Cluster if source has many of same relationship
+            target_source_id = s_id
             
-            unique_id = f"{rel_type}_{ent_id}"
-            
-            # Skip if already added
-            if unique_id in node_registry: continue
-            node_registry.add(unique_id)
-            
-            ent_type = entity.get("type", "unknown")
-            
-            # Color Palette
-            color_map = {
-                "file": "#9B59B6",           # Purple
-                "domain": "#E67E22",         # Orange
-                "ip_address": "#E67E22",     # Orange
-                "url": "#2ECC71",            # Green (Matches Legend)
-                "collection": "#3498DB",     # Blue
-            }
-            color = color_map.get(ent_type, "#95A5A6") # Grey default
-            
-            # Build human-readable mouseover tooltip
-            tooltip_lines = []
-            
-            # 1. Threat Score
-            if entity.get("threat_score"):
-                tooltip_lines.append(f"Threat Score: {entity['threat_score']}")
-            
-            # 2. Vendor Detections
-            if entity.get("malicious_count"):
-                count = entity["malicious_count"]
-                tooltip_lines.append(f"{count} vendor{'s' if count != 1 else ''} detected as malicious")
-            
-            # 3. File-specific info
-            if ent_type == "file":
-                if entity.get("meaningful_name"):
-                    tooltip_lines.append(f"Filename: {entity['meaningful_name']}")
-                elif entity.get("names"):
-                    tooltip_lines.append(f"Filename: {entity['names'][0]}")
-                if entity.get("file_type"):
-                    tooltip_lines.append(f"Type: {entity['file_type']}")
-                if entity.get("size"):
-                    size_mb = entity["size"] / (1024 * 1024)
-                    tooltip_lines.append(f"Size: {size_mb:.2f} MB")
-            
-            # 4. URL categories
-            elif ent_type == "url":
-                if entity.get("categories"):
-                    cats = entity["categories"]
-                    if isinstance(cats, dict):
-                        cat_list = ", ".join(cats.values())
-                    else:
-                        cat_list = ", ".join(cats) if isinstance(cats, list) else str(cats)
-                    tooltip_lines.append(f"Categories: {cat_list}")
-            
-            # 5. Verdict
-            if entity.get("verdict"):
-                tooltip_lines.append(f"Verdict: {entity['verdict']}")
-            
-            tooltip_text = "\n".join(tooltip_lines) if tooltip_lines else f"{ent_type}: {ent_id}"
-            
-            nodes.append({
-                "id": unique_id,
-                "label": get_entity_label(entity),
-                "color": color,
-                "size": 20, # Standard entity size
-                "title": tooltip_text
-            })
-            
-            edges.append({
-                "source": source_id,  # Either root or group
-                "target": unique_id,
-                "label": "" if use_clustering else rel_type.replace("_", " ")
-            })
+            if use_clustering:
+                # Group ID should be unique to (source + relationship)
+                # But we must ensure the source node exists!
+                # If s_id isn't in registry yet, we might have a problem (ghost node).
+                # For now, if s_id != root and not in registry, default to root or add s_id?
+                # Actually, specialists should have added the s_id (hash 2) as a dropped file node already.
+                
+                group_id = f"group_{s_id}_{rel_type}"
+                group_label = rel_type.replace("_", " ").title()
+                
+                if group_id not in node_registry:
+                    nodes.append({
+                        "id": group_id,
+                        "label": group_label,
+                        "color": "#2C3E50",
+                        "size": 25,
+                        "shape": "box",
+                        "title": f"{group_label}\n{len(s_entities)} entities from {s_id}"
+                    })
+                    node_registry.add(group_id)
+                    
+                    # Link group to source
+                    edge_key = (s_id, group_id, "")
+                    if edge_key not in edge_registry and s_id != group_id:
+                        edges.append({"source": s_id, "target": group_id, "label": ""})
+                        edge_registry.add(edge_key)
+                
+                target_source_id = group_id
+
+            for entity in s_entities:
+                ent_id = entity.get("id")
+                if not ent_id or ent_id == s_id: continue
+                
+                ent_type = entity.get("type", "unknown")
+                
+                # Add node if it doesn't exist
+                if ent_id not in node_registry:
+                    # Color Palette
+                    color_map = {
+                        "file": "#9B59B6", "domain": "#E67E22", "ip_address": "#E67E22", "url": "#2ECC71", "collection": "#3498DB"
+                    }
+                    color = color_map.get(ent_type, "#95A5A6")
+                    
+                    # Build human-readable mouseover tooltip
+                    attrs = entity.get("attributes", {})
+                    tooltip_lines = []
+                    
+                    # 0. Specialist Context (High Visibility)
+                    mal_ctx = attrs.get("malware_context") or entity.get("malware_context")
+                    if mal_ctx:
+                        ctx_label = mal_ctx.replace("_", " ").title()
+                        tooltip_lines.append(f"🚩 Specialist Finding: {ctx_label}")
+
+                    # 1. Threat Score
+                    score = attrs.get("threat_score") or entity.get("threat_score")
+                    if score:
+                        tooltip_lines.append(f"Threat Score: {score}")
+                    
+                    # 2. Vendor Detections
+                    m_count = attrs.get("malicious_count") or entity.get("malicious_count")
+                    if m_count:
+                        tooltip_lines.append(f"{m_count} vendor{'s' if m_count != 1 else ''} detected as malicious")
+                    
+                    # 3. File-specific info
+                    if ent_type == "file":
+                        fname = attrs.get("meaningful_name") or entity.get("meaningful_name")
+                        if not fname and (attrs.get("names") or entity.get("names")):
+                            names = attrs.get("names") or entity.get("names")
+                            fname = names[0]
+                        if fname:
+                            tooltip_lines.append(f"Filename: {fname}")
+                        
+                        f_type = attrs.get("file_type") or entity.get("file_type")
+                        if f_type:
+                            tooltip_lines.append(f"Type: {f_type}")
+                        
+                        size = attrs.get("size") or entity.get("size")
+                        if size:
+                            size_mb = size / (1024 * 1024)
+                            tooltip_lines.append(f"Size: {size_mb:.2f} MB")
+                    
+                    # 4. URL categories
+                    elif ent_type == "url":
+                        cats = attrs.get("categories") or entity.get("categories")
+                        if cats:
+                            if isinstance(cats, dict):
+                                cat_list = ", ".join(cats.values())
+                            else:
+                                cat_list = ", ".join(cats) if isinstance(cats, list) else str(cats)
+                            tooltip_lines.append(f"Categories: {cat_list}")
+                    
+                    # 5. Verdict
+                    verdict = attrs.get("verdict") or entity.get("verdict")
+                    if verdict:
+                        tooltip_lines.append(f"Verdict: {verdict}")
+                    
+                    tooltip_text = "\n".join(tooltip_lines) if tooltip_lines else f"{ent_type.title()}: {ent_id}"
+                    
+                    nodes.append({
+                        "id": ent_id,
+                        "label": get_entity_label(entity),
+                        "color": color,
+                        "size": 20,
+                        "title": tooltip_text
+                    })
+                    node_registry.add(ent_id)
+
+                # Always add edge unless it exists
+                rel_label = "" if use_clustering else rel_type.replace("_", " ")
+                edge_key = (target_source_id, ent_id, rel_label)
+                if edge_key not in edge_registry:
+                    edges.append({
+                        "source": target_source_id,
+                        "target": ent_id,
+                        "label": rel_label
+                    })
+                    edge_registry.add(edge_key)
         
         # If truncated, add "+X more" indicator node
         if len(entities) > 15:
@@ -521,7 +553,7 @@ async def get_investigation_graph(job_id: str):
             })
             
             edges.append({
-                "source": source_id,
+                "source": root_id, # Default to root for general overflows
                 "target": overflow_id,
                 "label": "",
                 "dashes": True

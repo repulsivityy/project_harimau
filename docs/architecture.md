@@ -48,22 +48,30 @@ graph TD
 * **Storage**: In-memory `MultiDiGraph` stored in LangGraph state.
 * **Lifecycle**: Created per investigation, persists for entire job.
 * **Contents**: Full entity attributes from GTI API.
-* **Purpose**:
-  - Triage stores complete entities (all relationships, full attributes).
-  - LLM queries minimal fields for analysis (token-efficient).
-  - Specialists retrieve full data from cache (no re-fetching).
+
+#### Interaction Model: Store First, Summarize Second
+To maintain token efficiency, Agents strictly follow this order of operations:
+1. **Fetch**: Agent calls GTI API tool (e.g., `get_file_report`).
+2. **Store (Data Layer)**: Agent *immediately* writes the full, heavy JSON response into NetworkX. This acts as the "Hard Drive".
+3. **Summarize (Control Layer)**: Agent extracts a *minimal* summary (ID, Verdict, Score) to pass back to the LangGraph state (`messages`). This acts as the "RAM".
+
+**Why?**
+* **NetworkX (Hard Drive)**: Holds 100% of the data (50+ attributes per entity). Zero token cost.
+* **LangGraph (RAM)**: Holds <5% of data. Keeps LLM context small (<30K tokens).
 
 **Example Usage**:
 ```python
-# Triage stores full entity
-graph.add_node(entity_id, **full_attributes)
+# 1. FETCH
+raw_data = gti_api.get(entity)
 
-# LLM gets minimal context
-llm_context = {k: graph.nodes[entity_id][k] 
-               for k in ["verdict", "threat_score"]}
+# 2. CACHE (NetworkX) - Store the heavy data here
+cache.add_entity(entity, raw_data) 
 
-# Specialist gets everything
-full_entity = dict(graph.nodes[entity_id])
+# 3. SUMMARIZE (LangGraph) - Tell the LLM what we found
+summary = f"Found entity {entity.id} with verdict {entity.verdict}"
+
+# 4. RETURN - Updates the workflow state
+return {"messages": [summary]}
 ```
 
 ### 3.2 Future: FalkorDB (Phase 6 - Planned)
@@ -87,8 +95,8 @@ full_entity = dict(graph.nodes[entity_id])
 * **Technology**: NetworkX `MultiDiGraph`.
 * **Storage**: In LangGraph `AgentState` (per-job, in-memory).
 * **Schema**:
-  - **Nodes**: Entity ID + full GTI attributes.
-  - **Edges**: Relationship types (e.g., `contacted_domains`).
+  - **Nodes**: Entity ID + **full_gti_attributes** (e.g., scores, verdict, country, full JSON).
+  - **Edges**: Relationship type + metadata (e.g., `first_seen`, `scan_date`).
 * **Query Patterns**:
   - **For LLM**: Minimal field extraction (9 essential fields).
   - **For Specialists**: Full attribute retrieval.

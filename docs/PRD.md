@@ -53,6 +53,12 @@ The Lead Hunter must produce a **comprehensive narrative report**, not just a ve
     - **Smart Truncation**: Filenames are truncated (24 chars + ext) to preserve SHA256 hashes.
     - **Filtering**: Contextual metadata (`attack_techniques`, etc.) analyzed but not visualized.
     - **Capacity**: 15 entities per relationship, 150 total.
+    
+### 3.3.1 Data Flow Strategy (Memory Architecture)
+*   **Dual-Layer Memory**:
+    *   **Data Layer (NetworkX)**: Acts as the "Hard Drive". Stores **100% of fetched data** (full JSON attributes). Agents MUST write to this *first*.
+    *   **Control Layer (LangGraph)**: Acts as the "RAM". Stores **token-optimized summaries** (<5% of data). Agents write to this *second*.
+*   **Rule**: "Store First, Summarize Second". Agents never pass raw API JSON into the LangGraph state `messages` or `context` to prevent context window exhaustion.
 
 ### 3.4 The Librarian (Async)
 *   Runs *after* investigation completion.

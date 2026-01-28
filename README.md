@@ -12,8 +12,6 @@ Project Harimau is an automated threat investigation platform using a graph-base
 * **Investigation Cache**: NetworkX (in-memory graph per job).
 
 ## Features
-* **Token-Optimized**: <30K tokens for file IOC investigations (down from 200K-2M).
-* **Dual-Layer Data Model**: Store full entity attributes, send minimal context to LLM.
 * **Rich Visualization**: Full URLs, filenames, threat scores in graph tooltips.
 * **Modularity**: Add tools via `mcp_registry.json` and agents via `agents.yaml`.
 * **Reliability**: Async architecture handles long investigations without timeouts.
@@ -48,23 +46,6 @@ Project Harimau is an automated threat investigation platform using a graph-base
 - **Phase 4 (Hybrid Triage + Token Optimization)**: ✅ Complete
 - **Phase 5 (Enhanced Visualization + NetworkX Cache)**: 🚧 In Progress
 - **Phase 6 (Specialist Agent Expansion)**: 📋 Planned
-
-## Recent Enhancements
-
-### Token Optimization (Phase 4.5)
-- **Reduced Relationships**: 20 → 11 critical types for file IOCs
-- **Minimal Entity Storage**: Only essential fields sent to LLM
-- **Result**: 90% token reduction while maintaining analysis depth
-
-### Visualization Improvements (Phase 5)
-- **Full URLs**: No truncation in graph display
-- **Rich Tooltips**: Threat score, vendor detections, file metadata, URL categories
-- **Filenames**: Shows meaningful names instead of truncated hashes
-
-### Bug Fixes
-- ✅ Fixed `UnboundLocalError` in triage agent (variable shadowing)
-- ✅ Fixed empty mouseover tooltips
-- ✅ Added display fields for graph visualization
 
 ## Quick Start (Local)
 

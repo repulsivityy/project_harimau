@@ -133,7 +133,7 @@ You have COMPLETE data from Google Threat Intelligence:
    - YOU MUST ONLY ASSIGN TASKS TO AVAILABLE AGENTS.
    - **AVAILABLE AGENTS:**
      * `malware_specialist`: For file analysis, YARA scanning, and code reverse engineering.
-   - **DO NOT** invent other agents (e.g., NO "threat_intelligence_specialist", NO "infrastructure_specialist").
+     * `infrastructure_specialist`: For IP/Domain pivots, passive DNS, and mapping hosting infrastructure.
    - If no specialist is needed, leave "subtasks" empty.
 
 **Analysis Framework:**
@@ -144,12 +144,14 @@ For MALICIOUS files:
 - How does it work? (attack_techniques)
 - Where is the infrastructure? (contacted_domains/ips)
 - **ACTION**: Assign to `malware_specialist` if file analysis is needed.
+- **ACTION**: Assign to `infrastructure_specialist` if critical C2 IPs/Domains need deep pivoting.
 
 For MALICIOUS infrastructure (IP/Domain):
 - What's hosted here? (downloaded_files, urls)
 - Who connects to it? (communicating_files)
 - What's the infrastructure map? (resolutions, subdomains)
 - What campaigns use it? (associations)
+- **ACTION**: Assign to `infrastructure_specialist`.
 
 For SUSPICIOUS/UNDETECTED:
 - What's uncertain? (missing data, conflicting signals)
@@ -191,30 +193,20 @@ For SUSPICIOUS/UNDETECTED:
     
     "subtasks": [
         {{
-            "agent": "malware_specialist|infrastructure_specialist",
+            "agent": "malware_specialist",
             "priority": "high|medium|low",
+            "entity_id": "Exact ID of the entity to analyze (e.g. 1.2.3.4, malicious.com, or hash)",
             "task": "Specific task with entity IDs and focus areas",
             "context": "What you found that makes this task necessary"
-        }}
+        }
     ],
     
-    "investigation_notes": "Additional context or caveats for specialists",
-    
-    "markdown_report": "STRING - A comprehensive markdown-formatted report as a single string field (not a separate section). Include sections: IOC Summary (type/verdict/confidence/severity/score), Executive Summary, Key Findings (with entity IDs), Threat Context (campaigns/actors/families/techniques), Infrastructure Analysis, Priority Entities table, Recommended Next Steps, and Investigation Notes. This should be a complete standalone report in markdown format."
-}}
+    "investigation_notes": "Additional context or caveats for specialists"
+}
 
 **OUTPUT INSTRUCTIONS:**
 - Return ONLY valid JSON (no additional text before or after)
-- The markdown_report field must be a STRING containing markdown-formatted text
-- Do NOT output markdown separately - it must be INSIDE the JSON as a field value
-- Use \\n for line breaks in the markdown_report string
-
-**CRITICAL REMINDERS:**
-- You have COMPLETE data - use all of it
-- Be specific - include entity IDs and names
-- Provide context - don't make specialists rediscover your findings
-- Prioritize - what's most important for specialists to examine?
-- Be actionable - subtasks should be concrete and focused
+- Do not include markdown formatting in the output
 """
 
 
@@ -247,6 +239,7 @@ def extract_triage_data(data: dict, ioc_type: str) -> dict:
     triage_data["threat_score"] = get_val(data, "attributes.gti_assessment.threat_score.value")
     triage_data["verdict"] = get_val(data, "attributes.gti_assessment.verdict.value")
     triage_data["description"] = get_val(data, "attributes.gti_assessment.description")
+    triage_data["crowdsourced_ai_results"] = get_val(data, "attributes.crowdsourced_ai_results")
 
     return triage_data
 
@@ -275,6 +268,72 @@ def prepare_detailed_context_for_llm(relationships_data: dict) -> dict:
     
     return detailed_context
 
+def generate_markdown_report_locally(analysis: dict, ioc: str, ioc_type: str) -> str:
+    """
+    Generates a markdown report from the structured JSON analysis.
+    This avoids JSON parsing errors caused by large markdown strings in LLM output.
+    """
+    try:
+        md = f"# IOC Triage Report\n\n"
+        
+        # 1. IOC Summary
+        md += "## IOC Summary\n"
+        md += f"*   **IOC Type:** {ioc_type}\n"
+        md += f"*   **IOC Value:** `{ioc}`\n"
+        md += f"*   **Verdict:** {analysis.get('verdict', 'Unknown')}\n"
+        md += f"*   **Confidence:** {analysis.get('confidence', 'Unknown')}\n"
+        md += f"*   **Severity:** {analysis.get('severity', 'Unknown')}\n"
+        md += f"*   **Threat Score:** {analysis.get('threat_score', 'N/A')}\n\n"
+        
+        # 2. Executive Summary
+        md += "## Executive Summary\n"
+        md += f"{analysis.get('executive_summary', 'No summary provided.')}\n\n"
+        
+        # 3. Key Findings
+        if analysis.get("key_findings"):
+            md += "## Key Findings\n"
+            for finding in analysis["key_findings"]:
+                md += f"*   {finding}\n"
+            md += "\n"
+            
+        # 4. Threat Context
+        context = analysis.get("threat_context", {})
+        md += "## Threat Context\n"
+        if context.get("campaigns"):
+            md += f"*   **Campaigns:** {', '.join(context['campaigns'])}\n"
+        if context.get("threat_actors"):
+            md += f"*   **Threat Actors:** {', '.join(context['threat_actors'])}\n"
+        if context.get("malware_families"):
+            md += f"*   **Malware Families:** {', '.join(context['malware_families'])}\n"
+        
+        techniques = context.get("attack_techniques", [])
+        if techniques:
+            md += "*   **Attack Techniques (MITRE ATT&CK):**\n"
+            for tech in techniques:
+                md += f"    *   {tech}\n"
+        
+        if context.get("infrastructure_notes"):
+            md += f"*   **Infrastructure Notes:** {context['infrastructure_notes']}\n"
+        md += "\n"
+            
+        # 5. Priority Entities table
+        entities = analysis.get("priority_entities", [])
+        if entities:
+            md += "## Priority Entities\n"
+            md += "| Entity ID | Entity Type | Reason |\n"
+            md += "| :--- | :--- | :--- |\n"
+            for e in entities:
+                md += f"| `{e.get('entity_id')}` | {e.get('entity_type')} | {e.get('reason')} |\n"
+            md += "\n"
+            
+        # 6. Investigation Notes
+        if analysis.get("investigation_notes"):
+            md += "## Investigation Notes\n"
+            md += f"{analysis.get('investigation_notes')}\n"
+            
+        return md
+    except Exception as e:
+        return f"Error generating markdown report: {str(e)}"
 
 async def comprehensive_triage_analysis(
     ioc: str,
@@ -298,7 +357,8 @@ async def comprehensive_triage_analysis(
     location = os.getenv("GOOGLE_CLOUD_REGION", "asia-southeast1")
     llm = ChatVertexAI(
         model="gemini-2.5-flash",
-        temperature=0.0,
+        #model="gemini-3-flash-preview",
+        temperature=0.0, # recommend to remove for gemini 3
         project=project_id,
         location=location
     )
@@ -343,6 +403,10 @@ Perform comprehensive first-level triage analysis now.
         
         clean_content = final_text.replace("```json", "").replace("```", "").strip()
         analysis = json.loads(clean_content)
+        
+        # [FIX] Generate Markdown Report Locally
+        # This is more robust than asking the LLM to put markdown inside JSON
+        analysis["markdown_report"] = generate_markdown_report_locally(analysis, ioc, ioc_type)
         analysis["_llm_reasoning"] = final_text  # Store for transparency
         
         logger.info("phase2_analysis_complete",
@@ -391,28 +455,28 @@ async def triage_node(state: AgentState):
     ioc = state["ioc"]
     logger.info("triage_start", ioc=ioc, mode="hybrid_comprehensive")
     
-    # 1. IOC Identification
-    ipv4_pattern = r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$"
-    config = {}
-    
-    if "http" in ioc or "/" in ioc:
-        config = {"type": "URL", "direct_tool": gti.get_url_report, 
-                 "rel_tool": "get_entities_related_to_an_url", "arg": "url"}
-    elif re.match(ipv4_pattern, ioc):
-        config = {"type": "IP", "direct_tool": gti.get_ip_report, 
-                 "rel_tool": "get_entities_related_to_an_ip_address", "arg": "ip_address"}
-    elif "." in ioc:
-         config = {"type": "Domain", "direct_tool": gti.get_domain_report, 
-                  "rel_tool": "get_entities_related_to_a_domain", "arg": "domain"}
-    else:
-         config = {"type": "File", "direct_tool": gti.get_file_report, 
-                  "rel_tool": "get_entities_related_to_a_file", "arg": "hash"}
-         
-    logger.info("triage_detected_type", type=config["type"])
-    
-    priority_rels = PRIORITY_RELATIONSHIPS.get(config["type"], ["associations"])
-    
     try:
+        # 1. IOC Identification
+        ipv4_pattern = r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$"
+        config = {}
+        
+        if "http" in ioc or "/" in ioc:
+            config = {"type": "URL", "direct_tool": gti.get_url_report, 
+                     "rel_tool": "get_entities_related_to_an_url", "arg": "url"}
+        elif re.match(ipv4_pattern, ioc):
+            config = {"type": "IP", "direct_tool": gti.get_ip_report, 
+                     "rel_tool": "get_entities_related_to_an_ip_address", "arg": "ip_address"}
+        elif "." in ioc:
+             config = {"type": "Domain", "direct_tool": gti.get_domain_report, 
+                      "rel_tool": "get_entities_related_to_a_domain", "arg": "domain"}
+        else:
+             config = {"type": "File", "direct_tool": gti.get_file_report, 
+                      "rel_tool": "get_entities_related_to_a_file", "arg": "hash"}
+             
+        logger.info("triage_detected_type", type=config["type"])
+        
+        priority_rels = PRIORITY_RELATIONSHIPS.get(config["type"], ["associations"])
+        
         # 2. Get base facts AND relationships in one Super-Bundle call
         logger.info("triage_fetching_super_bundle", ioc=ioc, rel_count=len(priority_rels))
         
@@ -428,6 +492,7 @@ async def triage_node(state: AgentState):
         triage_data = extract_triage_data(base_data, config["type"])
         
         # Initialize metadata
+        if "metadata" not in state: state["metadata"] = {} # Safety check
         state["metadata"]["risk_level"] = "Assessing..." 
         state["metadata"]["gti_score"] = triage_data["threat_score"] or "N/A"
         state["metadata"]["rich_intel"] = triage_data
@@ -619,7 +684,9 @@ async def triage_node(state: AgentState):
                 
     except Exception as e:
         logger.error("triage_fatal_error", error=str(e))
+        if "metadata" not in state: state["metadata"] = {} # Ensuring metadata exists on error
         state["metadata"]["risk_level"] = "Error"
+        if "rich_intel" not in state["metadata"]: state["metadata"]["rich_intel"] = {}
         
         # Fatal error visibility
         import traceback

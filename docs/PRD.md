@@ -36,6 +36,7 @@ The Lead Hunter must produce a **comprehensive narrative report**, not just a ve
 *   **Executive Summary**: One-paragraph verdict with confidence level.
 *   **Attack Chain Narrative**: Explain HOW the malicious activity occurred (e.g., "The file attempted to execute code that downloaded a 2nd stage ransomware payload from domain X").
 *   **Evidence**: List all IOCs discovered, their verdicts, and relationships.
+*   **Specialist Analysis**: Detailed sub-reports from Malware and Infrastructure agents (rendered in dedicated tabs).
 *   **Technical Details**: Relevant TTPs, CVEs, campaign names from GTI.
 *   **Recommended Actions**: Containment/remediation steps.
 

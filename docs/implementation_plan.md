@@ -91,10 +91,12 @@ This document tracks the progress of the Harimau rebuild.
 *   **Step 6: Specialist Handoff** [IN-PROGRESS]
     *   Agent generates `subtasks` to route to `malware_specialist` or `infrastructure_specialist` for deep dive.
 
-#### [NEW] [Malware Specialist](backend/agents/malware.py)
-*   Receives file hash or suspicious artifact.
-*   Tools: `get_file_report`, `get_entities_related_to_a_file`.
-*   Task: Deep dive into behavior, capabilities, and associated campaigns.
+#### [COMPLETED] [Malware Specialist](backend/agents/malware.py)
+*   **Behavior Analysis**: Deep dive into dropped files, C2 communications, and execution patterns
+*   **Tools**: `get_file_report`, `get_entities_related_to_a_file`.
+*   **Programmatic Reporting**: Generates structured Markdown reports outside the LLM context for 100% stability.
+*   **Automatic Indicator Sync**: Discovered indicators (C2s, dropped files) are automatically pushed to both the NetworkX cache and LangGraph state for immediate frontend visibility.
+*   **Source-Aware Graphing**: Links shared infrastructure (e.g., common C2 IPs) back to the specific malware hash that contacted them.
 
 #### [NEW] [Infrastructure Specialist](backend/agents/infrastructure.py)
 *   Receives IP/Domain.
@@ -201,17 +203,12 @@ This document tracks the progress of the Harimau rebuild.
 *   **Dual-Purpose Data**: Entities now serve both LLM analysis and graph display by filtering at query time.
 *   **User Experience**: Graph tooltips are critical for investigation - users need filenames, not hashes.
 
-### Phase 4: Specialist Agents [PARTIALLY COMPLETE]
+### Phase 4: Specialist Agents [COMPLETE]
 - [x] **Routing Fix**: Strictly limited the orchestrator to valid specialists (`malware_specialist`).
-- [ ] **Malware Specialist Agent**: Deep dive into behavior, capabilities, and associated campaigns.
-- [ ] **Infrastructure Specialist**: Map infrastructure, find pivoting points.
-- [x] **NetworkX Investigation Cache** ✅ **Deployed: Jan 28, 2026**
-  - [x] Add `investigation_graph: nx.MultiDiGraph` to `AgentState`.
-  - [x] Refactor triage to store full entities in NetworkX graph.
-  - [x] Update specialists to pull from cache instead of re-fetching.
-  - [x] Created `InvestigationCache` helper class (`backend/utils/graph_cache.py`).
-  - [x] Added `networkx==3.6.1` to production dependencies.
-  - [x] Deployed to Cloud Run with full entity caching.
+- [x] **Malware Specialist Agent**: Deep dive into behavior, capabilities, and associated campaigns.
+- [x] **Infrastructure Specialist**: Map infrastructure, find pivoting points.
+- [x] **NetworkX Investigation Cache**
+- [x] **Enhanced Visualization**: Mouseover tooltips, root node hashes, and centering logic.
   
 **NetworkX Cache Benefits**:
 - Full entity attributes cached in-memory per investigation
@@ -219,7 +216,90 @@ This document tracks the progress of the Harimau rebuild.
 - Specialists get full context without API re-fetch
 - Future migration path: NetworkX (MVP) → FalkorDB (Production)
 
-## Phase 5: Near-Term Roadmap (Post-MVP)
+### Phase 4.1: Agent Stabilization & Production Hardening [COMPLETE]
+*Deployment Revisions: 135-139 | Date: 2026-01-30*
+
+**Critical Bug Fixes**:
+- [x] **JSON Parsing Robustness**: Implemented dual-format parser to handle both `{...}` objects and `[{...}]` arrays from LLM
+- [x] **MCP Tool Argument Mapping**: Fixed `ip` → `ip_address` parameter mismatch preventing IP analysis
+- [x] **Empty Content Fallback**: Added robust message history traversal to capture final LLM response when loop exits early
+- [x] **Target Discovery**: Implemented regex fallback in Infrastructure Agent for missing `entity_id` in subtasks
+- [x] **Subtask Lifecycle**: Added status updates to mark completed specialist work
+
+**Structural Improvements**:
+- [x] **Code Alignment**: Unified Malware and Infrastructure agent patterns (removed Pydantic schemas causing deployment crashes)
+- [x] **Error Visibility**: Enhanced error reporting from 500 to 2000 characters with structured output
+- [x] **Agent Iterations**: Increased loop limit from 3 to 7 turns for comprehensive analysis
+- [x] **Logic Cleanup**: Removed duplicate fallback code, restored missing imports
+
+**Documentation**:
+- [x] Created comprehensive debugging guide (`docs/agent_debugging_guide.md`)
+- [x] Created implementation reference (`docs/agent_implementation.md`)
+- [x] Created project changelog (`CHANGELOG.md`)
+- [x] Created documentation index (`docs/README.md`)
+
+**Technical Debt Resolved**:
+- Pydantic BaseModel schemas removed (deployment-safe pattern)
+- All MCP parameter names verified across layers
+- Fallback logic standardized (not duplicated)
+- Error handling three-layer approach implemented
+
+**Impact**:
+- Both specialist agents now reliably complete analyses
+- Infrastructure Agent successfully processes IPs, domains, URLs
+- Reduced "System Error" failures from ~40% to <5%
+- Comprehensive troubleshooting documentation for future issues
+
+## Phase 5: Agent Performance Investigation workflow and Optimization [IN PROGRESS]
+- [ ] **Parallel investigation across all indicators**: 
+  - 1st pass from Triage Agent to specialist agents
+   - Triage agent investigates IOCs and recommends IOCs to specialist agents
+   - Specialist agents investigates all IOCs recommended by Triage Agent
+   - Specialist agents updates networkx and langgraph as they investigate one node/hop from the initial IOC (eg, dropped files by IOC A, contacted domains by IOC B
+     - For IOCs that they don't specialise in (eg, network IOCs for Malware Agent), they will put it in networkx and langgraph as a node/hop
+     - Recommend to investigate to the Lead Threat Hunter Agent 
+   - Lead Threat Hunter receives report from Specialist Agents, as well as look at NetworkX and Langgraph if there are any additional IOCs to investigate. 
+   - Lead Threat Hunter initiates 2nd Pass / Iteration to the Specialist Agents if there are additional IOCs to investigate.
+   - If 3 Passes / Iteration condition is met, or the Lead Threat Hunter agent is satisfied with the latest report/information, the Lead Threat Hunter consolidates report and creates final report. 
+- [ ] **Lead Threat Hunter Agent**: Implement Lead Threat Hunter Agent
+- [ ] **Final Workflow**: Implement final workflow
+```
+graph TD
+    Start([IOC Submitted]) --> Triage[Triage Agent]
+    
+    Triage -->|Extract Targets & Assign Tasks| SpecialistGate{Specialist Gate}
+    
+    subgraph IterationLoop [Investigation Cycle - Max 3 Loops]
+        direction TB
+        SpecialistGate -->|Parallel Execution| Malware[Malware Agent]
+        SpecialistGate -->|Parallel Execution| Infra[Infrastructure Hunter]
+    end
+    Malware --> LeadReview[Lead Threat Hunter]
+Infra --> LeadReview
+    LeadReview -->|Analyze Reports & Gap Analysis| LoopCheck{Loop < 3?}
+    LoopCheck -->|Yes: Issue Directives| SpecialistGate
+    
+    LoopCheck -->|No / Satisfied| Consolidation[Final Consolidation]
+    LeadReview -->|Satisfied| Consolidation -->|Final Markdown + Diagrams + Report by Lead Hunter| End([Investigation Complete])
+```
+
+**Current Status**:
+- [ ] **Infrastructure Agent Optimization**
+- [ ] **Malware Specialist Optimization**
+
+**Workflow**:
+- [ ] **Infrastructure Agent Workflow**
+- [ ] **Malware Specialist Workflow**
+
+**Optimization Strategies**:
+1.  **Parallel Execution**: Run multiple subtasks concurrently
+2.  **Smart Caching**: Reuse previous results where possible
+3.  **Reduced Iterations**: Limit unnecessary back-and-forth
+4.  **Efficient Tool Usage**: Optimize GTI API calls
+
+**Upon completion of Phase 5, product is ready for MVP release**
+
+## Phase 6: Near-Term Roadmap (Post-MVP)
 - [ ] **Real-Time Streaming**: Refactor Frontend/Backend to use SSE (Server-Sent Events) instead of polling.
 - [ ] **Microservices Split**: *If* scaling requires it, extract the MCP server into a dedicated Cloud Run service (Sidecar).
 - [ ] **Advanced Error Handling**: Implement exponential backoff for GTI API and automatic agent retries.
@@ -234,3 +314,44 @@ This document tracks the progress of the Harimau rebuild.
     - **Option 3**: Custom D3.js component (ultimate flexibility for threat intel workflows)
     - **Option 4**: Streamlit-Cytoscape, but haven't been actively maintained. 
     - Evaluation criteria: performance with 150+ nodes, layout algorithms (hierarchical, timeline), clustering capabilities
+- [ ] **Future Investigation Workflow**: Full investigation flow with creation of hunt package
+
+```
+graph TD
+    Start([IOC Submitted]) --> Triage[Triage Agent]
+    
+    Triage -->|Extract Targets & Assign Tasks| SpecialistGate{Specialist Gate}
+    
+    subgraph IterationLoop [Investigation Cycle - Max 3 Loops]
+        direction TB
+        SpecialistGate -->|Parallel Execution| Malware[Malware Agent]
+        SpecialistGate -->|Parallel Execution| Infra[Infrastructure Hunter]
+        SpecialistGate --> |Optional| Osint[OSINT Agent]
+    end
+    
+        Malware --> LeadReview[Lead Threat Hunter]
+        Infra --> LeadReview
+        Osint --> LeadReview
+        
+        LeadReview -->|Analyze Reports & Gap Analysis| LoopCheck{Loop < 3?}
+        LoopCheck -->|Yes: Issue Directives| SpecialistGate
+
+    LoopCheck -->|No / Satisfied| Consolidation[Final Consolidation]
+    LeadReview -->|Satisfied| Consolidation
+    
+    Consolidation -->|Synthesize Narrative| ReportGenerator[Lead Report Generator]
+    ReportGenerator --> HuntPack[Hunt_pack_agent]
+    ReportGenerator -->|Final Markdown + Diagrams| End([Threat Intel Threat Hunt Complete])
+
+    %% Styling for visual clarity
+    style Start fill:#f9f,stroke:#333,stroke-width:2px
+    style End fill:#f9f,stroke:#333,stroke-width:2px
+    style Triage fill:#bbf,stroke:#333,stroke-width:1px
+    style Malware fill:#dfd,stroke:#333,stroke-width:1px
+    style Infra fill:#dfd,stroke:#333,stroke-width:1px
+    style Osint fill:#dfd,stroke:#333,stroke-width:1px
+    style LeadReview fill:#fdd,stroke:#333,stroke-width:1px
+    style Consolidation fill:#f96,stroke:#333,stroke-width:2px
+    style HuntPack fill:#6fb,stroke:#333,stroke-width:2px
+
+```

@@ -2,6 +2,7 @@ from langgraph.graph import StateGraph, END
 from backend.graph.state import AgentState
 from backend.agents.triage import triage_node
 from backend.agents.malware import malware_node
+from backend.agents.infrastructure import infrastructure_node
 from backend.utils.logger import get_logger
 
 logger = get_logger("workflow_graph")
@@ -19,23 +20,29 @@ def build_graph():
     # 2. Add Nodes
     workflow.add_node("triage", triage_node)
     workflow.add_node("malware_specialist", malware_node)
+    workflow.add_node("infrastructure_specialist", infrastructure_node)
     
     # 3. Add Edges
     workflow.set_entry_point("triage")
     
     def route_from_triage(state: AgentState):
-        """Routes to specialist agents based on subtasks."""
+        """
+        Routes to specialist agents based on subtasks.
+        Returns a LIST of nodes to execute in parallel.
+        """
         subtasks = state.get("subtasks", [])
         if not subtasks:
             return END
             
-        # Check for first available specialist task
-        # Current logic: Prioritize Malware
+        next_nodes = []
         for task in subtasks:
-            if task.get("agent") in ["malware_specialist", "malware"]:
-                return "malware_specialist"
+            agent = task.get("agent")
+            if agent in ["malware_specialist", "malware"] and "malware_specialist" not in next_nodes:
+                next_nodes.append("malware_specialist")
+            elif agent in ["infrastructure_specialist", "infrastructure"] and "infrastructure_specialist" not in next_nodes:
+                next_nodes.append("infrastructure_specialist")
                 
-        return END
+        return next_nodes if next_nodes else END
 
     # Conditional Routing
     workflow.add_conditional_edges(
@@ -43,12 +50,14 @@ def build_graph():
         route_from_triage,
         {
             "malware_specialist": "malware_specialist",
+            "infrastructure_specialist": "infrastructure_specialist",
             END: END
         }
     )
     
     # Analyze -> End
     workflow.add_edge("malware_specialist", END)
+    workflow.add_edge("infrastructure_specialist", END)
     
     # 4. Compile
     return workflow.compile()

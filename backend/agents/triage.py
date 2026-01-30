@@ -133,7 +133,7 @@ You have COMPLETE data from Google Threat Intelligence:
    - YOU MUST ONLY ASSIGN TASKS TO AVAILABLE AGENTS.
    - **AVAILABLE AGENTS:**
      * `malware_specialist`: For file analysis, YARA scanning, and code reverse engineering.
-   - **DO NOT** invent other agents (e.g., NO "threat_intelligence_specialist", NO "infrastructure_specialist").
+     * `infrastructure_specialist`: For IP/Domain pivots, passive DNS, and mapping hosting infrastructure.
    - If no specialist is needed, leave "subtasks" empty.
 
 **Analysis Framework:**
@@ -144,12 +144,14 @@ For MALICIOUS files:
 - How does it work? (attack_techniques)
 - Where is the infrastructure? (contacted_domains/ips)
 - **ACTION**: Assign to `malware_specialist` if file analysis is needed.
+- **ACTION**: Assign to `infrastructure_specialist` if critical C2 IPs/Domains need deep pivoting.
 
 For MALICIOUS infrastructure (IP/Domain):
 - What's hosted here? (downloaded_files, urls)
 - Who connects to it? (communicating_files)
 - What's the infrastructure map? (resolutions, subdomains)
 - What campaigns use it? (associations)
+- **ACTION**: Assign to `infrastructure_specialist`.
 
 For SUSPICIOUS/UNDETECTED:
 - What's uncertain? (missing data, conflicting signals)
@@ -193,6 +195,7 @@ For SUSPICIOUS/UNDETECTED:
         {{
             "agent": "malware_specialist",
             "priority": "high|medium|low",
+            "entity_id": "Exact ID of the entity to analyze (e.g. 1.2.3.4, malicious.com, or hash)",
             "task": "Specific task with entity IDs and focus areas",
             "context": "What you found that makes this task necessary"
         }
@@ -452,28 +455,28 @@ async def triage_node(state: AgentState):
     ioc = state["ioc"]
     logger.info("triage_start", ioc=ioc, mode="hybrid_comprehensive")
     
-    # 1. IOC Identification
-    ipv4_pattern = r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$"
-    config = {}
-    
-    if "http" in ioc or "/" in ioc:
-        config = {"type": "URL", "direct_tool": gti.get_url_report, 
-                 "rel_tool": "get_entities_related_to_an_url", "arg": "url"}
-    elif re.match(ipv4_pattern, ioc):
-        config = {"type": "IP", "direct_tool": gti.get_ip_report, 
-                 "rel_tool": "get_entities_related_to_an_ip_address", "arg": "ip_address"}
-    elif "." in ioc:
-         config = {"type": "Domain", "direct_tool": gti.get_domain_report, 
-                  "rel_tool": "get_entities_related_to_a_domain", "arg": "domain"}
-    else:
-         config = {"type": "File", "direct_tool": gti.get_file_report, 
-                  "rel_tool": "get_entities_related_to_a_file", "arg": "hash"}
-         
-    logger.info("triage_detected_type", type=config["type"])
-    
-    priority_rels = PRIORITY_RELATIONSHIPS.get(config["type"], ["associations"])
-    
     try:
+        # 1. IOC Identification
+        ipv4_pattern = r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$"
+        config = {}
+        
+        if "http" in ioc or "/" in ioc:
+            config = {"type": "URL", "direct_tool": gti.get_url_report, 
+                     "rel_tool": "get_entities_related_to_an_url", "arg": "url"}
+        elif re.match(ipv4_pattern, ioc):
+            config = {"type": "IP", "direct_tool": gti.get_ip_report, 
+                     "rel_tool": "get_entities_related_to_an_ip_address", "arg": "ip_address"}
+        elif "." in ioc:
+             config = {"type": "Domain", "direct_tool": gti.get_domain_report, 
+                      "rel_tool": "get_entities_related_to_a_domain", "arg": "domain"}
+        else:
+             config = {"type": "File", "direct_tool": gti.get_file_report, 
+                      "rel_tool": "get_entities_related_to_a_file", "arg": "hash"}
+             
+        logger.info("triage_detected_type", type=config["type"])
+        
+        priority_rels = PRIORITY_RELATIONSHIPS.get(config["type"], ["associations"])
+        
         # 2. Get base facts AND relationships in one Super-Bundle call
         logger.info("triage_fetching_super_bundle", ioc=ioc, rel_count=len(priority_rels))
         
@@ -489,6 +492,7 @@ async def triage_node(state: AgentState):
         triage_data = extract_triage_data(base_data, config["type"])
         
         # Initialize metadata
+        if "metadata" not in state: state["metadata"] = {} # Safety check
         state["metadata"]["risk_level"] = "Assessing..." 
         state["metadata"]["gti_score"] = triage_data["threat_score"] or "N/A"
         state["metadata"]["rich_intel"] = triage_data
@@ -680,7 +684,9 @@ async def triage_node(state: AgentState):
                 
     except Exception as e:
         logger.error("triage_fatal_error", error=str(e))
+        if "metadata" not in state: state["metadata"] = {} # Ensuring metadata exists on error
         state["metadata"]["risk_level"] = "Error"
+        if "rich_intel" not in state["metadata"]: state["metadata"]["rich_intel"] = {}
         
         # Fatal error visibility
         import traceback

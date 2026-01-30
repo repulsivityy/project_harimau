@@ -468,9 +468,11 @@ async def get_investigation_graph(job_id: str):
                     tooltip_lines = []
                     
                     # 0. Specialist Context (High Visibility)
-                    mal_ctx = attrs.get("malware_context") or entity.get("malware_context")
-                    if mal_ctx:
-                        ctx_label = mal_ctx.replace("_", " ").title()
+                    specialist_ctx = attrs.get("malware_context") or entity.get("malware_context") or \
+                                   attrs.get("infra_context") or entity.get("infra_context")
+                                   
+                    if specialist_ctx:
+                        ctx_label = specialist_ctx.replace("_", " ").title()
                         tooltip_lines.append(f"🚩 Specialist Finding: {ctx_label}")
 
                     # 1. Threat Score

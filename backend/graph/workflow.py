@@ -7,10 +7,12 @@ from backend.utils.logger import get_logger
 
 logger = get_logger("workflow_graph")
 
+from backend.agents.infrastructure import infrastructure_node
+
 def build_graph():
     """
     Constructs the Harimau Investigation Graph.
-    MVP: Start -> Triage -> End
+    Phase 5.1: Triage -> Parallel Specialists (Gate) -> End
     """
     logger.info("building_graph")
     
@@ -31,7 +33,19 @@ def build_graph():
         Returns a LIST of nodes to execute in parallel.
         """
         subtasks = state.get("subtasks", [])
-        if not subtasks:
+        next_nodes = []
+        
+        # Check subtasks
+        for task in subtasks:
+            agent = task.get("agent")
+            if agent in ["malware_specialist", "malware"]:
+                 if "malware_specialist" not in next_nodes:
+                     next_nodes.append("malware_specialist")
+            elif agent in ["infrastructure_specialist", "infrastructure"]:
+                 if "infrastructure_specialist" not in next_nodes:
+                     next_nodes.append("infrastructure_specialist")
+        
+        if not next_nodes:
             return END
             
         next_nodes = []
@@ -44,7 +58,7 @@ def build_graph():
                 
         return next_nodes if next_nodes else END
 
-    # Conditional Routing
+    # Conditional Routing (Parallel Fan-Out)
     workflow.add_conditional_edges(
         "triage",
         route_from_triage,
@@ -55,7 +69,7 @@ def build_graph():
         }
     )
     
-    # Analyze -> End
+    # Specialists -> End (Fan-In/Converge)
     workflow.add_edge("malware_specialist", END)
     workflow.add_edge("infrastructure_specialist", END)
     

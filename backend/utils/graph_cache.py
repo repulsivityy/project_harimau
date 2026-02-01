@@ -177,7 +177,55 @@ class InvestigationCache:
             "total_relationships": self.graph.number_of_edges(),
             "entity_types": entity_types
         }
-    
+        
+    def mark_as_investigated(self, entity_id: str, agent: str):
+        """
+        Mark an entity as investigated by a specific agent.
+        
+        Args:
+            entity_id: The entity ID
+            agent: The agent name (e.g., 'malware', 'infrastructure')
+        """
+        if entity_id not in self.graph:
+            return
+            
+        node = self.graph.nodes[entity_id]
+        analyzed_by = set(node.get("analyzed_by", []))
+        analyzed_by.add(agent)
+        
+        # Update node attribute (convert back to list for JSON serialization)
+        self.graph.nodes[entity_id]["analyzed_by"] = list(analyzed_by)
+        
+    def get_uninvestigated_nodes(self, agent_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Get nodes that have NOT been fully investigated.
+        
+        Args:
+            agent_filter: If provided, only returns nodes NOT analyzed by this specific agent.
+            
+        Returns:
+            List of node dictionaries with their data.
+        """
+        uninvestigated = []
+        for node_id, data in self.graph.nodes(data=True):
+            analyzed_by = data.get("analyzed_by", [])
+            
+            # If agent_filter is specific, check if THIS agent has analyzed it
+            if agent_filter:
+                if agent_filter not in analyzed_by:
+                    # Return full data
+                    node_data = dict(data)
+                    node_data["id"] = node_id
+                    uninvestigated.append(node_data)
+            else:
+                # If no filter, return if NO ONE has analyzed it (fresh node)
+                if not analyzed_by:
+                    node_data = dict(data)
+                    node_data["id"] = node_id
+                    uninvestigated.append(node_data)
+                    
+        return uninvestigated
+
     def export_for_visualization(self) -> Dict[str, List[Dict[str, Any]]]:
         """
         Export graph data for frontend visualization.

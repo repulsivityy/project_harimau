@@ -39,3 +39,9 @@ class AgentState(TypedDict):
     # Investigation Graph: NetworkX cache for full entity storage
     # Stores complete GTI attributes for all entities and relationships
     investigation_graph: Annotated[Optional[Any], last_value]  # nx.MultiDiGraph (using Any to avoid import)
+    
+    # Iteration Control
+    loop_count: Annotated[int, operator.add]
+    
+    # Lead Hunter's Strategic Plan (for transparency)
+    lead_plan: Optional[str]

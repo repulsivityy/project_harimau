@@ -113,7 +113,8 @@ def generate_infrastructure_markdown_report(result: dict, ioc: str) -> str:
 
 async def infrastructure_node(state: AgentState):
     """
-    Infrastructure Specialist Agent.
+    Infrastructure Specialist Agent (Iterative & Graph-Aware).
+    Now includes: Triage context reading + Relationship expansion.
     """
     ioc = state["ioc"]
     logger.info("infra_agent_start", ioc=ioc)
@@ -121,6 +122,16 @@ async def infrastructure_node(state: AgentState):
     try:
         # Initialize cache from state
         cache = InvestigationCache(state.get("investigation_graph"))
+        cache_stats_before = cache.get_stats()
+        logger.info("infra_cache_loaded", stats=cache_stats_before)
+        
+        # [NEW] Retrieve Triage Context
+        triage_context = state.get("metadata", {}).get("rich_intel", {}).get("triage_analysis", {})
+        triage_summary = triage_context.get("executive_summary", "No triage summary available.")
+        key_findings = triage_context.get("key_findings", [])
+        logger.info("infra_triage_context_loaded", 
+                   has_summary=bool(triage_summary), 
+                   findings_count=len(key_findings))
         
         project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
         location = os.getenv("GOOGLE_CLOUD_REGION", "asia-southeast1")
@@ -245,9 +256,37 @@ async def infrastructure_node(state: AgentState):
             
             llm = ChatVertexAI(model="gemini-2.5-flash", temperature=0.0, project=project_id, location=location).bind_tools(tools)
             
+            # [NEW] Format Triage Context for LLM
+            triage_context_str = f"""**TRIAGE SUMMARY:**
+{triage_summary}
+
+**KEY FINDINGS FROM TRIAGE:**
+"""
+            if key_findings:
+                for finding in key_findings:
+                    triage_context_str += f"- {finding}\n"
+            else:
+                triage_context_str += "- (No specific findings listed)\n"
+            
+            # Check subtasks for specific instructions
+            context = ""
+            for task in state.get("subtasks", []):
+                if task.get("agent") in ["infrastructure_specialist", "infrastructure"]:
+                    context += f"- Task: {task.get('task')}\n"
+                    context += f"- Context: {task.get('context')}\n"
+            
             messages = [
                 SystemMessage(content=INFRA_ANALYSIS_PROMPT),
-                HumanMessage(content=f"Analyze these targets:\n{json.dumps(unique_targets, indent=2)}")
+                HumanMessage(content=f"""
+{triage_context_str}
+
+**YOUR ASSIGNMENT:**
+Analyze the following infrastructure indicators based on the triage context above:
+{json.dumps(unique_targets, indent=2)}
+
+**SPECIFIC INSTRUCTIONS:**
+{context if context else "Perform comprehensive infrastructure analysis."}
+                """)
             ]
             
             # --- Robust Loop (Increased to 7 iterations for comprehensive analysis) ---
@@ -291,11 +330,29 @@ async def infrastructure_node(state: AgentState):
                     final_content = response.content
                     if final_content: break
             
+            # Enhanced fallback logic with detailed logging
             if not final_content and messages:
+                logger.warning("infra_no_final_content_using_fallback", total_messages=len(messages))
+                
+                # Strategy 1: Find AIMessage with content but NO tool_calls (preferred)
                 for msg in reversed(messages):
                     if isinstance(msg, AIMessage) and msg.content and not msg.tool_calls:
                         final_content = msg.content
+                        logger.info("infra_fallback_strategy_1", found=True)
                         break
+                
+                # Strategy 2: If still empty, accept ANY AIMessage with content (even if it has tool_calls)
+                if not final_content:
+                    logger.warning("infra_fallback_strategy_2_trying")
+                    for msg in reversed(messages):
+                        if isinstance(msg, AIMessage) and msg.content:
+                            final_content = msg.content
+                            logger.info("infra_fallback_strategy_2", found=True, had_tool_calls=bool(msg.tool_calls))
+                            break
+                
+                # Log final status
+                if not final_content:
+                    logger.error("infra_fallback_failed", ai_message_count=sum(1 for m in messages if isinstance(m, AIMessage)))
 
             # --- Parsing & Reporting ---
             try:
@@ -380,32 +437,98 @@ async def infrastructure_node(state: AgentState):
                             if ent_type != "unknown":
                                 # Add to NetworkX Cache
                                 cache.add_entity(ind_value, ent_type, {"infra_context": "related_indicator"})
-                                # Link to the SOURCE target that was analyzed (usually unique_targets[0] or root)
+                                # Link to the SOURCE target that was analyzed
                                 source_node = unique_targets[0]["value"]
                                 cache.add_relationship(source_node, ind_value, "related_infrastructure", {"source": "infrastructure_analysis"})
-                                
-                                # Sync to Rich Intel for Frontend
-                                if "metadata" not in state: state["metadata"] = {}
-                                if "rich_intel" not in state["metadata"]: state["metadata"]["rich_intel"] = {}
-                                if "relationships" not in state["metadata"]["rich_intel"]: state["metadata"]["rich_intel"]["relationships"] = {}
-                                
-                                rels_data = state["metadata"]["rich_intel"]["relationships"]
-                                rel_name = "related_infrastructure"
-                                
-                                if rel_name not in rels_data: rels_data[rel_name] = []
-                                
-                                 # Dedupe
-                                exists = any(e.get("id") == ind_value and e.get("source_id") == source_node for e in rels_data[rel_name])
-                                if not exists:
-                                    rels_data[rel_name].append({
-                                        "id": ind_value,
-                                        "type": ent_type,
-                                        "source_id": source_node,
-                                        "attributes": {"infra_context": "related_indicator"}
-                                    })
-                                    
                     except Exception as e:
                         logger.warning("infra_indicator_parse_error", error=str(e))
+                
+                # [NEW] RELATIONSHIP EXPANSION
+                # For each analyzed entity, fetch its relationships and expand the graph
+                from backend.tools import gti
+                import re
+                
+                for target in unique_targets:
+                    target_value = target["value"]
+                    logger.info("infra_expanding_relationships", target=target_value)
+                    
+                    try:
+                        # Determine entity type and fetch appropriate relationships
+                        is_ip = re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", target_value)
+                        is_url = "http" in target_value
+                        is_domain = not is_ip and not is_url and "." in target_value
+                        
+                        rel_data = None
+                        
+                        if is_ip:
+                            # Fetch IP relationships
+                            rel_data = await gti.get_ip_address_report(
+                                target_value,
+                                relationships=["resolutions", "communicating_files", "downloaded_files"]
+                            )
+                        elif is_domain:
+                            # Fetch domain relationships
+                            rel_data = await gti.get_domain_report(
+                                target_value,
+                                relationships=["resolutions", "subdomains", "communicating_files", "downloaded_files"]
+                            )
+                        elif is_url:
+                            # Fetch URL relationships
+                            rel_data = await gti.get_url_report(
+                                target_value,
+                                relationships=["network_location", "downloaded_files", "contacted_domains", "contacted_ips"]
+                            )
+                        
+                        if rel_data and "data" in rel_data:
+                            raw_rels = rel_data["data"].get("relationships", {})
+                            new_entities_count = 0
+                            
+                            for rel_name, rel_content in raw_rels.items():
+                                entities = rel_content.get("data", [])
+                                for entity in entities:
+                                    entity_id = entity.get("id")
+                                    entity_type = entity.get("type")
+                                    entity_attrs = entity.get("attributes", {})
+                                    
+                                    # Add to cache
+                                    cache.add_entity(
+                                        entity_id=entity_id,
+                                        entity_type=entity_type,
+                                        attributes=entity_attrs
+                                    )
+                                    cache.add_relationship(target_value, entity_id, rel_name)
+                                    new_entities_count += 1
+                            
+                            logger.info("infra_graph_expanded", 
+                                       target=target_value, 
+                                       new_entities=new_entities_count,
+                                       relationships=list(raw_rels.keys()))
+                    except Exception as expand_err:
+                        logger.error("infra_expansion_error", target=target_value, error=str(expand_err))
+                
+                # Persist expanded graph back to state
+                state["investigation_graph"] = cache.graph
+                cache_stats_after = cache.get_stats()
+                logger.info("infra_graph_updated", 
+                           before=cache_stats_before, 
+                           after=cache_stats_after)
+                
+                # Store result
+                if "specialist_results" not in state:
+                    state["specialist_results"] = {}
+                    
+                state["specialist_results"]["infrastructure"] = result
+                
+                # Markdown Report
+                markdown_report = generate_infrastructure_markdown_report(result, ioc)
+                
+                # Append to final report
+                current_report = state.get("final_report") or ""
+                if "## Infrastructure Specialist Analysis" not in current_report:
+                    if current_report:
+                        current_report += "\n\n"
+                    current_report += markdown_report
+                    state["final_report"] = current_report
                 
                 # Update Subtask Status
                 new_subtasks = []
@@ -416,6 +539,7 @@ async def infrastructure_node(state: AgentState):
                     new_subtasks.append(task)
                 state["subtasks"] = new_subtasks
                 
+                logger.info("infra_agent_success", verdict=result.get("verdict"))
             except Exception as e:
                 logger.error("infra_parsing_error", error=str(e))
                 import traceback

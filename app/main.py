@@ -453,9 +453,9 @@ if st.session_state.current_job_id:
                     # Render graphviz diagram using native Streamlit
                     clean_code = part.strip()
                     
-                    # Debug: Show the graphviz code in an expander
-                    with st.expander("🐛 Debug: View Graphviz Code", expanded=False):
-                        st.code(clean_code, language="dot")
+                    # [COMMENTED OUT] Debug: Show the graphviz code in an expander
+                    # with st.expander("🐛 Debug: View Graphviz Code", expanded=False):
+                    #     st.code(clean_code, language="dot")
                     
                     # Render using native Streamlit Graphviz
                     st.graphviz_chart(clean_code, use_container_width=True)

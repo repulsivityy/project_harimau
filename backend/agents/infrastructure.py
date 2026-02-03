@@ -78,22 +78,22 @@ def generate_infrastructure_markdown_report(result: dict, ioc: str) -> str:
     """
     try:
         md = "## Infrastructure Specialist Analysis\n\n"
-        md += f"### Target: `{ioc}`\n\n"
+        #md += f"### Target: `{ioc}`\n\n"
         
         # 1. Verdict & Context
-        verdict = result.get("verdict", "Unknown")
-        score = result.get("threat_score", "N/A")
-        owner = result.get("asn_or_registrar", "Unknown")
+        #verdict = result.get("verdict", "Unknown")
+        #score = result.get("threat_score", "N/A")
+        #owner = result.get("asn_or_registrar", "Unknown")
         
-        icon = "🔴" if str(verdict).lower() == "malicious" else "🟡" if str(verdict).lower() == "suspicious" else "🟢"
+        #icon = "🔴" if str(verdict).lower() == "malicious" else "🟡" if str(verdict).lower() == "suspicious" else "🟢"
         
-        md += f"**Verdict:** {icon} {verdict} (Score: {score})\n"
-        md += f"**Owner/ASN:** {owner}\n"
+        #md += f"**Verdict:** {icon} {verdict} (Score: {score})\n"
+        #md += f"**Owner/ASN:** {owner}\n"
         
-        cats = result.get("categories", [])
-        if cats:
-            md += f"**Categories:** {', '.join(cats)}\n"
-        md += "\n"
+        #cats = result.get("categories", [])
+        #if cats:
+        #    md += f"**Categories:** {', '.join(cats)}\n"
+        #md += "\n"
         
         # 2. Executive Summary
         md += "### Executive Summary\n"

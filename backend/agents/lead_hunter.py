@@ -50,7 +50,7 @@ Explain the complete kill chain from delivery through post-exploitation.
 **Sophistication**: [Advanced/Moderate/Low] - based on TTPs and evasion techniques
 **Assessment Justification**: Brief explanation of the profiling.
 
-### 5. Infrastructure Mapping (3-5 key findings)
+### 4.1. Infrastructure Mapping (3-5 key findings)
 Map the threat infrastructure and identify patterns:
 - **DNS Infrastructure**: Shared nameservers, registrars, or domain patterns (e.g., "All C2 domains use Cloudflare NS")
 - **Hosting Infrastructure**: Shared ASNs, IP ranges, or hosting providers (e.g., "15 domains resolve to same /24 subnet")
@@ -59,7 +59,7 @@ Map the threat infrastructure and identify patterns:
 
 Use specific evidence from specialist reports. Distinguish between **confirmed** infrastructure (verified connections) and **suspected** infrastructure (similar patterns).
 
-### 6. Malware Intelligence
+### 4.2. Malware Intelligence
 **Key Capabilities**:
 - Technical capabilities identified (encryption, evasion, persistence, C2 protocols)
 - Evolution from previous variants (if known)
@@ -70,7 +70,7 @@ Use specific evidence from specialist reports. Distinguish between **confirmed**
 - File paths, registry keys, or behavioral indicators
 - YARA rule opportunities for hunting similar samples
 
-### 7. Attack Flow Diagram
+### 5. Attack Flow Diagram
 Create a Graphviz diagram showing the complete infrastructure and attack chain.
 
 **CRITICAL Graphviz Rules:**
@@ -97,7 +97,7 @@ digraph {
 }
 ```
 
-### 8. Intelligence Gaps and Research Pivots
+### 6. Intelligence Gaps and Research Pivots
 **Missing Intelligence**:
 - Unknown infrastructure components  (additional C2, staging servers, data exfil endpoints)
 - Unanalyzed malware variants or payloads
@@ -111,7 +111,7 @@ digraph {
 - [ ] WHOIS/registrar pivots for actor infrastructure patterns
 - [ ] Search for related campaigns or threat reports
 
-### 9. Attribution and Context
+### 7. Attribution and Context
 **Attribution Indicators**:
 - TTPs matching known threat actors (reference MITRE ATT&CK)
 - Infrastructure patterns consistent with previous campaigns
@@ -123,7 +123,7 @@ digraph {
 - Similar infrastructure or malware seen in other GTI data
 - Potential connections to other threat actors
 
-### 10. IOC Summary for Distribution
+### 8. IOC Summary for Distribution
 **High-Confidence IOCs** (confirmed malicious, safe to share):
 - File hashes (MD5, SHA1, SHA256)
 - C2 domains and IPs

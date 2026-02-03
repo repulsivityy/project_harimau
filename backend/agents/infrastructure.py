@@ -52,9 +52,24 @@ Analyze the provided network indicator (Domain, IP, or URL) to assess its malici
     "summary": "Detailed technical summary of the infrastructure and its role in the attack..."
 }
 
-**OUTPUT INSTRUCTIONS:**
-- Return ONLY valid JSON.
-- Do NOT include markdown formatting in the output.
+**CRITICAL OUTPUT INSTRUCTIONS:**
+- You MUST ALWAYS return valid JSON in the exact format shown above.
+- Do NOT include markdown formatting, code blocks, or explanatory text.
+- **IF TOOLS FAIL OR ERROR:** Still return JSON! Use "Unknown", empty arrays [], or "N/A" for fields you couldn't populate.
+- **NEVER provide narrative explanations instead of JSON.** If you encountered errors, mention them in the "summary" field.
+- When you're done analyzing, respond with ONLY the JSON object - nothing else.
+
+**Example when tools fail:**
+{
+    "verdict": "Unknown",
+    "threat_score": 0,
+    "categories": [],
+    "asn_or_registrar": "Unknown",
+    "associated_campaigns": [],
+    "pivot_findings": ["Unable to fetch subdomains due to tool error"],
+    "related_indicators": [],
+    "summary": "Analysis incomplete due to tool errors. Based on available data: [describe what you know]"
+}
 """
 
 def generate_infrastructure_markdown_report(result: dict, ioc: str) -> str:
@@ -70,7 +85,7 @@ def generate_infrastructure_markdown_report(result: dict, ioc: str) -> str:
         score = result.get("threat_score", "N/A")
         owner = result.get("asn_or_registrar", "Unknown")
         
-        icon = "🔴" if str(verdict).lower() == "malicious" else "mod_detect_suspicious" if str(verdict).lower() == "suspicious" else "🟢"
+        icon = "🔴" if str(verdict).lower() == "malicious" else "🟡" if str(verdict).lower() == "suspicious" else "🟢"
         
         md += f"**Verdict:** {icon} {verdict} (Score: {score})\n"
         md += f"**Owner/ASN:** {owner}\n"
@@ -415,10 +430,6 @@ Analyze the following infrastructure indicators based on the triage context abov
                 # Generate Report
                 result["markdown_report"] = generate_infrastructure_markdown_report(result, ioc)
                 
-                # Store in State
-                if "specialist_results" not in state: state["specialist_results"] = {}
-                state["specialist_results"]["infrastructure"] = result
-                
                 # --- Graph Population (Related Indicators) ---
                 related = result.get("related_indicators", [])
                 for ind in related:
@@ -577,20 +588,11 @@ Analyze the following infrastructure indicators based on the triage context abov
                                     primary_target,
                                     {"infra_context": "related_indicator"}
                                 )
-                    except:
+                    except (KeyError, ValueError, IndexError, TypeError) as e:
+                        logger.warning("infra_indicator_parse_failed", 
+                                     indicator=ind.get("id", "unknown") if isinstance(ind, dict) else str(ind)[:50],
+                                     error=str(e))
                         pass
-                
-                # Store result
-                if "specialist_results" not in state:
-                    state["specialist_results"] = {}
-                    
-                state["specialist_results"]["infrastructure"] = result
-                
-                # Markdown Report
-                markdown_report = generate_infrastructure_markdown_report(result, ioc)
-                
-                # Markdown Report
-                markdown_report = generate_infrastructure_markdown_report(result, ioc)
                 
                 # [RACE CONDITION FIX] Do not update final_report here.
                 # Lead Hunter will assemble it to avoid race conditions.
@@ -610,8 +612,7 @@ Analyze the following infrastructure indicators based on the triage context abov
                 logger.error("infra_parsing_error", error=str(e))
                 import traceback
                 tb = traceback.format_exc()
-                state["specialist_results"] = state.get("specialist_results", {})
-                state["specialist_results"]["infrastructure"] = {
+                result = {
                     "verdict": "System Error",
                     "summary": f"Failed to parse analysis results: {str(e)}",
                     "markdown_report": f"## Analysis Failed\n\nThe Infrastructure Agent encountered an error while processing the results.\n\n**Error Details:**\n```\n{str(e)}\n```\n\n**Raw Output:**\n```\n{str(final_text)[:2000] if 'final_text' in locals() else str(final_content)[:2000]}\n```"
@@ -620,11 +621,15 @@ Analyze the following infrastructure indicators based on the triage context abov
         logger.error("infra_node_fatal_error", error=str(e))
         import traceback
         tb = traceback.format_exc()
-        if "specialist_results" not in state: state["specialist_results"] = {}
-        state["specialist_results"]["infrastructure"] = {
+        result = {
             "verdict": "System Error",
             "summary": f"Fatal error in Infrastructure Specialist: {str(e)}",
             "markdown_report": f"## System Error\n\nThe Infrastructure Specialist encountered a fatal error.\n\n### Error Details\n```\n{str(e)}\n```\n\n### Traceback\n```\n{tb}\n```"
         }
-            
+    
+    # Consolidated State Update - Single source of truth
+    if "specialist_results" not in state:
+        state["specialist_results"] = {}
+    state["specialist_results"]["infrastructure"] = result
+    
     return state

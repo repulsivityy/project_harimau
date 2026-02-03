@@ -334,6 +334,20 @@ Infra --> LeadReview
 - [ ] **Authentication Hardening**: Switch from `--allow-unauthenticated` to IAP/IAM.
 - [ ] **Crash Recovery**: Implement LangGraph Postgres Checkpointing to resume jobs after Cloud Run restarts.
 - [ ] **Smart Entity Filtering (Option B)**: Implement user-configurable filters at investigation start to prioritize malicious/high-score entities by threat score, verdict, and recency.
+- [ ] **Structured Output Enhancement**: Consider migrating to LangChain's `with_structured_output()` for final agent responses.
+    - **Context**: Currently using enhanced prompts to ensure JSON output; LLM sometimes provides narrative explanations when tools fail.
+    - **Proposal**: Use structured output only for final iteration response while maintaining AI-led investigation during tool-use loop.
+    - **Benefits**: Guaranteed valid JSON parsing, type safety via Pydantic schemas, elimination of JSON parsing errors.
+    - **Trade-off**: Slightly more deterministic output format, but preserves agentic decision-making during investigation.
+    - **Implementation Pattern**: 
+      ```python
+      # Iterations 1-6: Fully AI-led with tools
+      llm_with_tools = ChatVertexAI(...).bind_tools(tools)
+      
+      # Final iteration: Structured output for reliability
+      llm_structured = ChatVertexAI(...).with_structured_output(AgentAnalysisSchema)
+      ```
+    - **Status**: Prompt-based approach working well (Feb 2026); re-evaluate if JSON parsing failures increase.
 
 ## Phase 6: Long-Term Enhancements
 - [ ] **Advanced Graph Visualization**: Migrate from `streamlit-agraph` to more professional library:

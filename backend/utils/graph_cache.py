@@ -34,11 +34,32 @@ class InvestigationCache:
             entity_type: Entity type (file, ip_address, domain, url, etc.)
             attributes: Complete attributes dictionary from GTI API
         """
-        self.graph.add_node(
-            entity_id,
-            entity_type=entity_type,
-            **attributes
-        )
+        # Deduplication: Check if entity already exists
+        if entity_id in self.graph:
+            # Entity exists - merge attributes instead of overwriting
+            existing_data = self.graph.nodes[entity_id]
+            
+            # Deep merge: preserve existing data, add new fields
+            for key, value in attributes.items():
+                if key not in existing_data:
+                    # New attribute - add it
+                    existing_data[key] = value
+                elif isinstance(value, dict) and isinstance(existing_data[key], dict):
+                    # Both are dicts - merge them
+                    existing_data[key].update(value)
+                elif isinstance(value, list) and isinstance(existing_data[key], list):
+                    # Both are lists - extend (avoid duplicates)
+                    for item in value:
+                        if item not in existing_data[key]:
+                            existing_data[key].append(item)
+                # If types mismatch or simple value, keep existing (first-write wins)
+        else:
+            # New entity - add it
+            self.graph.add_node(
+                entity_id,
+                entity_type=entity_type,
+                **attributes
+            )
     
     def add_relationship(self, source_id: str, target_id: str, rel_type: str, 
                         metadata: Optional[Dict[str, Any]] = None):

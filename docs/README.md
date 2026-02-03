@@ -1,8 +1,8 @@
 # Documentation Index
 
-*Last updated: 2026-01-30*
+*Last updated: 2026-02-03*
 
-Welcome to the Project Harimau documentation. This index helps you find the right document for your needs.
+Welcome to the Project Harimau documentation. This index helps you navigate the technical documentation for our AI-powered threat intelligence analysis platform.
 
 ## Quick Links
 

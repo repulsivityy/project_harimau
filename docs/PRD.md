@@ -1,44 +1,50 @@
 # Product Requirements Document (PRD): Project Harimau V2
 
-> **Vision:** A scalable, open-source-friendly AI Threat Hunting platform that mimics a human SOC team using GraphRAG and specialist agents.
+> **Vision:** A scalable AI-powered threat intelligence analysis platform that analyzes IOCs from Google Threat Intelligence using multi-agent collaboration and knowledge graph reasoning.
 
 ## 1. Objectives
-*   **Cost-Effective**: Run primarily on GCP Free Tier (Cloud Run, Gemini Flash).
-*   **Graph-Centric**: Maintain investigation state in a knowledge graph (GraphRAG).
-*   **Agentic**: Use LangGraph to orchestrate multi-step investigations.
-*   **Reliable**: Solution must handle long-running investigations (>5 mins) via Async Workers.
-*   **Observable**: Deep visibility into Agent reasoning and Tool execution via tiered logging.
+*   **Intelligence-Focused**: Analyze malware, map infrastructure, and synthesize threat intelligence reports
+*   **Graph-Centric**: Maintain investigation findings in a knowledge graph for relationship discovery
+*   **Agentic**: Use LangGraph to orchestrate multi-agent threat analysis workflows
+*   **Scalable**: Handle deep investigations via async architecture on GCP Cloud Run
+*   **Observable**: Deep visibility into agent reasoning and threat data exploration
 
 ## 2. Technical Stack
-*   **Frontend (`/app`)**: Streamlit (Cloud Run Service A).
-*   **Backend (`/backend`)**: FastAPI + LangGraph (Cloud Run Service B).
-*   **Database**: FalkorDB (Sidecar or Docker).
-*   **MCP Server**: Google Threat Intelligence (Embedded Python Subprocess).
-*   **Models**: Gemini 2.5 Flash (Triage) / Pro (Analysis).
+*   **Frontend (`/app`)**: Streamlit (Cloud Run Service) - Interactive investigation dashboard
+*   **Backend (`/backend`)**: FastAPI + LangGraph (Cloud Run Service) - Multi-agent orchestration
+*   **Cache**: NetworkX (in-memory graph per investigation)
+*   **MCP Server**: Google Threat Intelligence (Embedded Python subprocess)
+*   **Models**: Gemini 2.5 Flash (Triage) / Pro (Deep Analysis)
 
 ## 3. Core Features
 
 ### 3.1 Architecture & Modularity
-*   **Split Services**: Frontend (UI) and Backend (Logic) are separate to allow Async Worker patterns.
-*   **Embedded MCP**: The GTI MCP server runs inside the Backend container via `stdio`.
-*   **Config-Driven Agents**: Agents added via `agents.yaml`.
-*   **MCP Registry**: Tools loaded dynamically from `mcp_registry.json`.
+*   **Split Services**: Frontend (UI) and Backend (Logic) run as separate Cloud Run services
+*   **Embedded MCP**: GTI MCP server runs inside Backend container via `stdio`
+*   **Config-Driven Agents**: Specialist agents defined in `agents.yaml`
+*   **MCP Registry**: GTI tools loaded dynamically from `mcp_registry.json`
 
-### 3.2 Investigation Workflow
-1.  **Input**: User inputs IOC in Streamlit.
-2.  **Async Queue**: Frontend posts job to Backend -> Backend offloads to Cloud Tasks.
-3.  **Hybrid Triage Agent**: Classifies IOC using Fast Facts (Direct API Super-Bundle) + Agentic Reasoning (Root Node).
-4.  **Pivot (Recursion)**: Infra Agent / Malware Agent expands the graph.
-5.  **Synthesis**: Lead Hunter writes the report.
+### 3.2 Threat Intelligence Workflow
+1.  **Input**: User provides IOC (hash, domain, IP, URL) in Streamlit interface
+2.  **Async Investigation**: Frontend submits job → Backend orchestrates multi-agent analysis
+3.  **Triage Agent**: Initial classification and relationship discovery (breadth-first)
+4.  **Specialist Agents** (parallel execution):
+    - **Malware Specialist**: Behavioral analysis, capability assessment, attribution
+    - **Infrastructure Specialist**: DNS mapping, hosting analysis, pivot detection
+5.  **Lead Hunter**: Cross-domain synthesis and intelligence report generation
 
-**Report Format Requirements:**
-The Lead Hunter must produce a **comprehensive narrative report**, not just a verdict. The report must include:
-*   **Executive Summary**: One-paragraph verdict with confidence level.
-*   **Attack Chain Narrative**: Explain HOW the malicious activity occurred (e.g., "The file attempted to execute code that downloaded a 2nd stage ransomware payload from domain X").
-*   **Evidence**: List all IOCs discovered, their verdicts, and relationships.
-*   **Specialist Analysis**: Detailed sub-reports from Malware and Infrastructure agents (rendered in dedicated tabs).
-*   **Technical Details**: Relevant TTPs, CVEs, campaign names from GTI.
-*   **Recommended Actions**: Containment/remediation steps.
+**Intelligence Report Requirements:**
+The Lead Hunter must produce a **comprehensive threat intelligence analysis**, not just a malware scan. The report must include:
+*   **Executive Summary**: High-level threat overview and key findings
+*   **Campaign Timeline**: Chronological evolution of threat infrastructure
+*   **Attack Narrative**: Complete kill chain from delivery through post-exploitation
+*   **Threat Profiling**: Attribution, sophistication assessment, campaign classification
+*   **Infrastructure Mapping**: DNS/IP relationships, hosting patterns, shared infrastructure
+*   **Malware Intelligence**: Capabilities, evasion techniques, code similarities, IOC expansion
+*   **Attack Flow Diagram**: Visual representation of infrastructure and attack chain  (Graphviz)
+*   **Intelligence Gaps**: Missing data, research pivots, recommended next steps
+*   **Attribution & Context**: Campaign indicators, related threat actors, MITRE ATT&CK mapping
+*   **IOC Summary**: High-confidence vs. low-confidence indicators for distribution
 
 ### 3.3 The Knowledge Graph
 *   **Schema**: Hybrid (Fixed Layout Properties + Dynamic Intelligence Properties).

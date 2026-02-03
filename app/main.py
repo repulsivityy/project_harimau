@@ -43,7 +43,7 @@ with st.sidebar:
     link_distance = st.slider("Link Distance", 50, 1000, 200, help="Space between nodes")
 
 # Main Interface
-st.write("Harimau (Tiger in Malay) is an automated threat hunting platform that uses AI to analyze and investigate IOCs (IPs, Domains, Hashes, URLs). ")
+st.write("Harimau (Tiger in Malay) is an AI-powered threat hunting platform that uses multiple specialised threat hunt agents to analyze and investigate IOCs (IPs, Domains, Hashes, URLs).")
 st.write("Harimau leverages LangGraph with multiple specialised threat hunt agents to mimic the flow of a threat hunting program.")
 st.write("Harimau is currently in Beta Phase. Expect some bugs and unexpected behaviour.")
 st.write("### Investigation Console")

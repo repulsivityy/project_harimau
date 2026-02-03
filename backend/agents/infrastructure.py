@@ -299,7 +299,7 @@ Analyze the following infrastructure indicators based on the triage context abov
                 
                 if iteration == max_iterations - 1:
                     logger.info("infra_agent_final_iteration", iteration=iteration)
-                    messages.append(HumanMessage(content="This is the final iteration. Please provide the comprehensive JSON structure based on the findings gathered so far."))
+                    messages.append(HumanMessage(content="This is the FINAL iteration. You MUST stop using tools now.\n\nBased on all the information you've gathered, provide your comprehensive analysis in valid JSON format.\n\nDo NOT make any more tool calls. Return ONLY the JSON structure as specified in the system prompt.\n\nIf you don't have enough information, provide your best analysis based on what you've gathered so far."))
 
                 response = await llm.ainvoke(messages)
                 messages.append(response)
@@ -506,12 +506,79 @@ Analyze the following infrastructure indicators based on the triage context abov
                     except Exception as expand_err:
                         logger.error("infra_expansion_error", target=target_value, error=str(expand_err))
                 
+                # [NEW] Mark all analyzed targets as investigated (for Lead Hunter tracking)
+                for target_info in unique_targets:
+                    cache.mark_as_investigated(target_info["value"], "infrastructure")
+                    logger.info("infra_marked_investigated", entity=target_info["value"])
+                
                 # Persist expanded graph back to state
                 state["investigation_graph"] = cache.graph
                 cache_stats_after = cache.get_stats()
                 logger.info("infra_graph_updated", 
                            before=cache_stats_before, 
                            after=cache_stats_after)
+                
+                # --- SYNC CACHE TO STATE (Frontend Graph Visibility) ---
+                # Ensure structure exists
+                if "metadata" not in state: 
+                    state["metadata"] = {}
+                if "rich_intel" not in state["metadata"]: 
+                    state["metadata"]["rich_intel"] = {}
+                if "relationships" not in state["metadata"]["rich_intel"]: 
+                    state["metadata"]["rich_intel"]["relationships"] = {}
+                
+                relationships_data = state["metadata"]["rich_intel"]["relationships"]
+                
+                def push_to_rich_intel(rel_name, entity_type, value, source_id, attributes={}):
+                    if rel_name not in relationships_data:
+                        relationships_data[rel_name] = []
+                    
+                    # Avoid duplicates
+                    exists = any(
+                        e.get("id") == value and e.get("source_id") == source_id 
+                        for e in relationships_data[rel_name]
+                    )
+                    if not exists:
+                        relationships_data[rel_name].append({
+                            "id": value,
+                            "type": entity_type,
+                            "source_id": source_id,
+                            "attributes": attributes
+                        })
+                
+                # Sync related indicators from infrastructure analysis
+                for indicator in result.get("related_indicators", []):
+                    try:
+                        # Parse "IP: 1.2.3.4" or "Domain: evil.com"
+                        parts = indicator.split(":", 1)
+                        if len(parts) == 2:
+                            ind_type_raw = parts[0].strip().lower()
+                            ind_value = parts[1].strip()
+                            
+                            entity_type = "unknown"
+                            if "ip" in ind_type_raw: 
+                                entity_type = "ip_address"
+                            elif "domain" in ind_type_raw: 
+                                entity_type = "domain"
+                            elif "url" in ind_type_raw:
+                                entity_type = "url"
+                            elif "file" in ind_type_raw:
+                                entity_type = "file"
+                            
+                            if entity_type != "unknown":
+                                # Get primary target for source_id
+                                primary_target = unique_targets[0]["value"] if unique_targets else ioc
+                                
+                                # Infrastructure relationships
+                                push_to_rich_intel(
+                                    "related_infrastructure", 
+                                    entity_type, 
+                                    ind_value, 
+                                    primary_target,
+                                    {"infra_context": "related_indicator"}
+                                )
+                    except:
+                        pass
                 
                 # Store result
                 if "specialist_results" not in state:
@@ -522,13 +589,12 @@ Analyze the following infrastructure indicators based on the triage context abov
                 # Markdown Report
                 markdown_report = generate_infrastructure_markdown_report(result, ioc)
                 
-                # Append to final report
-                current_report = state.get("final_report") or ""
-                if "## Infrastructure Specialist Analysis" not in current_report:
-                    if current_report:
-                        current_report += "\n\n"
-                    current_report += markdown_report
-                    state["final_report"] = current_report
+                # Markdown Report
+                markdown_report = generate_infrastructure_markdown_report(result, ioc)
+                
+                # [RACE CONDITION FIX] Do not update final_report here.
+                # Lead Hunter will assemble it to avoid race conditions.
+
                 
                 # Update Subtask Status
                 new_subtasks = []

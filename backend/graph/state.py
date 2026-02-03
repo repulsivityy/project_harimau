@@ -10,6 +10,12 @@ def last_value(a: Any, b: Any) -> Any:
     """Reducer that returns the last value (for scalar fields in parallel execution)."""
     return b if b is not None else a
 
+def concat_reports(a: Optional[str], b: Optional[str]) -> Optional[str]:
+    """Concatenate reports with separator (for parallel specialist reports)."""
+    if not a: return b
+    if not b: return a
+    return f"{a}\n\n{b}"
+
 class AgentState(TypedDict):
     """
     State schema for the Harimau Investigation Graph.
@@ -31,6 +37,7 @@ class AgentState(TypedDict):
     specialist_results: Annotated[Dict[str, Any], merge_dicts]
     
     # Final Report: The generated markdown report
+    # Reverting to last_value since Lead Hunter now assembles report manually
     final_report: Annotated[Optional[str], last_value]
     
     # Metadata: Timing, errors, etc.
@@ -42,6 +49,8 @@ class AgentState(TypedDict):
     
     # Iteration Control
     loop_count: Annotated[int, operator.add]
+    iteration: Annotated[int, last_value]  # Explicit iteration phase (0, 1, 2)
     
     # Lead Hunter's Strategic Plan (for transparency)
     lead_plan: Optional[str]
+    lead_hunter_report: Annotated[Optional[str], last_value]  # Full synthesis report

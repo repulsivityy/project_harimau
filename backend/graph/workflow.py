@@ -3,16 +3,15 @@ from backend.graph.state import AgentState
 from backend.agents.triage import triage_node
 from backend.agents.malware import malware_node
 from backend.agents.infrastructure import infrastructure_node
+from backend.agents.lead_hunter import lead_hunter_node
 from backend.utils.logger import get_logger
 
 logger = get_logger("workflow_graph")
 
-from backend.agents.infrastructure import infrastructure_node
-
 def build_graph():
     """
     Constructs the Harimau Investigation Graph.
-    Phase 5.1: Triage -> Parallel Specialists (Gate) -> End
+    Phase 5.2: Triage -> Gate -> Specialists -> Lead Hunter -> (Loop or END)
     """
     logger.info("building_graph")
     
@@ -21,60 +20,113 @@ def build_graph():
     
     # 2. Add Nodes
     workflow.add_node("triage", triage_node)
+    workflow.add_node("gate", gate_node)  # NEW: Routing node
     workflow.add_node("malware_specialist", malware_node)
     workflow.add_node("infrastructure_specialist", infrastructure_node)
+    workflow.add_node("lead_hunter", lead_hunter_node)  # NEW: Orchestrator
     
     # 3. Add Edges
     workflow.set_entry_point("triage")
     
-    def route_from_triage(state: AgentState):
-        """
-        Routes to specialist agents based on subtasks.
-        Returns a LIST of nodes to execute in parallel.
-        """
-        subtasks = state.get("subtasks", [])
-        next_nodes = []
-        
-        # Check subtasks
-        for task in subtasks:
-            agent = task.get("agent")
-            if agent in ["malware_specialist", "malware"]:
-                 if "malware_specialist" not in next_nodes:
-                     next_nodes.append("malware_specialist")
-            elif agent in ["infrastructure_specialist", "infrastructure"]:
-                 if "infrastructure_specialist" not in next_nodes:
-                     next_nodes.append("infrastructure_specialist")
-        
-        if not next_nodes:
-            return END
-            
-        next_nodes = []
-        for task in subtasks:
-            agent = task.get("agent")
-            if agent in ["malware_specialist", "malware"] and "malware_specialist" not in next_nodes:
-                next_nodes.append("malware_specialist")
-            elif agent in ["infrastructure_specialist", "infrastructure"] and "infrastructure_specialist" not in next_nodes:
-                next_nodes.append("infrastructure_specialist")
-                
-        return next_nodes if next_nodes else END
-
-    # Conditional Routing (Parallel Fan-Out)
+    # Triage -> Gate (first pass)
+    workflow.add_edge("triage", "gate")
+    
+    # Specialists -> Lead Hunter (Fan-In/Converge)
+    workflow.add_edge("malware_specialist", "lead_hunter")
+    workflow.add_edge("infrastructure_specialist", "lead_hunter")
+    
+    # 4. Conditional Routing
+    
+    # Gate -> Specialists (Parallel Fan-Out)
     workflow.add_conditional_edges(
-        "triage",
-        route_from_triage,
+        "gate",
+        route_from_gate,
         {
             "malware_specialist": "malware_specialist",
             "infrastructure_specialist": "infrastructure_specialist",
-            END: END
+            "lead_hunter": "lead_hunter" # Skip specialists if no subtasks
         }
     )
     
-    # Specialists -> End (Fan-In/Converge)
-    workflow.add_edge("malware_specialist", END)
-    workflow.add_edge("infrastructure_specialist", END)
+    # Lead Hunter -> Loop Decision
+    workflow.add_conditional_edges(
+        "lead_hunter",
+        route_from_lead_hunter,
+        {
+            "gate": "gate",  # Loop back for next iteration
+            END: END         # Stop investigation
+        }
+    )
     
-    # 4. Compile
+    # 5. Compile
     return workflow.compile()
+
+# --- Helper Nodes & Routing Logic ---
+
+def gate_node(state: AgentState) -> AgentState:
+    """
+    Routing node that directs execution to specialists based on subtasks.
+    Ideally this would handle deduction of next steps, but currently it's a pass-through
+    for the conditional edge routing.
+    """
+    iteration = state.get("iteration", 0)
+    subtasks = state.get("subtasks", [])
+    logger.info("gate_node_routing", iteration=iteration, subtask_count=len(subtasks))
+    return state
+
+def route_from_gate(state: AgentState):
+    """
+    Routes from Gate to Specialist Agents based on subtasks.
+    Returns a LIST of nodes to execute in parallel.
+    """
+    subtasks = state.get("subtasks", [])
+    next_nodes = []
+    
+    # Check subtasks
+    for task in subtasks:
+        agent = task.get("agent")
+        if agent in ["malware_specialist", "malware"]:
+             if "malware_specialist" not in next_nodes:
+                 next_nodes.append("malware_specialist")
+        elif agent in ["infrastructure_specialist", "infrastructure"]:
+             if "infrastructure_specialist" not in next_nodes:
+                 next_nodes.append("infrastructure_specialist")
+    
+    # If no subtasks found (or no valid agents), skip to Lead Hunter
+    # Lead Hunter will likely decide to END or find something new (though without specialists, probably END)
+    if not next_nodes:
+        logger.info("gate_skipping_specialists_no_tasks")
+        return ["lead_hunter"]
+        
+    return next_nodes
+
+def route_from_lead_hunter(state: AgentState):
+    """
+    Decide if we should continue investigating or end based on Lead Hunter's decision.
+    State['subtasks'] will have been updated by Lead Hunter if continuation is needed.
+    """
+    iteration = state.get("iteration", 0)
+    max_iterations = 1
+    subtasks = state.get("subtasks", [])
+    
+    logger.info("lead_hunter_routing_check", 
+               iteration=iteration, 
+               max_iterations=max_iterations,
+               has_subtasks=bool(subtasks))
+    
+    # Hard stop at max iterations
+    if iteration >= max_iterations:
+        logger.info("lead_hunter_max_iterations_reached", iteration=iteration)
+        return END
+        
+    # If no subtasks were generated by Lead Hunter, we stop
+    if not subtasks:
+        logger.info("lead_hunter_complete_no_new_tasks")
+        return END
+        
+    # Otherwise, loop back to Gate
+    logger.info("lead_hunter_continuing_loop", next_iteration=iteration)
+    return "gate"
 
 # Singleton instance of the runnable graph
 app_graph = build_graph()

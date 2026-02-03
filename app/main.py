@@ -45,6 +45,7 @@ with st.sidebar:
 # Main Interface
 st.write("Harimau (Tiger in Malay) is an automated threat hunting platform that uses AI to analyze and investigate IOCs (IPs, Domains, Hashes, URLs). ")
 st.write("Harimau leverages LangGraph with multiple specialised threat hunt agents to mimic the flow of a threat hunting program.")
+st.write("Harimau is currently in Beta Phase. Expect some bugs and unexpected behaviour.")
 st.write("### Investigation Console")
 st.write("\n")
 
@@ -433,7 +434,31 @@ if st.session_state.current_job_id:
                     use_container_width=True
                 )
             
-            st.markdown(report)
+            # st.markdown(report) -> Replaced with Graphviz-aware rendering
+            
+            # Split content by graphviz blocks
+            # Pattern: ```dot ... ``` or ```graphviz ... ```
+            import re
+            
+            # Regex to find graphviz/dot blocks
+            parts = re.split(r'```(?:dot|graphviz)\s+(.*?)\s+```', report, flags=re.DOTALL)
+            
+            for i, part in enumerate(parts):
+                # Even indices are normal markdown (0, 2, 4...)
+                # Odd indices are graphviz code (1, 3, 5...)
+                if i % 2 == 0:
+                    if part.strip():
+                        st.markdown(part)
+                else:
+                    # Render graphviz diagram using native Streamlit
+                    clean_code = part.strip()
+                    
+                    # Debug: Show the graphviz code in an expander
+                    with st.expander("🐛 Debug: View Graphviz Code", expanded=False):
+                        st.code(clean_code, language="dot")
+                    
+                    # Render using native Streamlit Graphviz
+                    st.graphviz_chart(clean_code, use_container_width=True)
         
         with tab5:
             st.subheader("Investigation Timeline")

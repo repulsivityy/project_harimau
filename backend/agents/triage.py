@@ -672,6 +672,12 @@ async def triage_node(state: AgentState):
         state["metadata"]["rich_intel"]["triage_summary"] = analysis.get("executive_summary")
         state["metadata"]["risk_level"] = analysis.get("verdict", "Unknown")
         
+        # [REPORT INIT] Initialize final_report with triage findings
+        state["final_report"] = analysis.get("markdown_report", "")
+        # Initialize iteration if not present
+        if "iteration" not in state: state["iteration"] = 1
+
+        
         logger.info("triage_complete",
                    verdict=state["metadata"]["risk_level"],
                    confidence=analysis.get("confidence"),

@@ -168,14 +168,24 @@ class InvestigationCache:
     def get_stats(self) -> Dict[str, Any]:
         """Get cache statistics."""
         entity_types = {}
+        analyzed_count = 0
+        
         for node, data in self.graph.nodes(data=True):
             etype = data.get('entity_type', 'unknown')
             entity_types[etype] = entity_types.get(etype, 0) + 1
+            
+            # Count analyzed nodes (for Lead Hunter tracking)
+            if data.get("analyzed_by"):
+                analyzed_count += 1
         
         return {
-            "total_entities": self.graph.number_of_nodes(),
-            "total_relationships": self.graph.number_of_edges(),
-            "entity_types": entity_types
+            "nodes": self.graph.number_of_nodes(),
+            "edges": self.graph.number_of_edges(),
+            "total_entities": self.graph.number_of_nodes(),  # Backward compat
+            "total_relationships": self.graph.number_of_edges(),  # Backward compat
+            "entity_types": entity_types,
+            "nodes_by_type": entity_types,  # For Lead Hunter
+            "analyzed_count": analyzed_count
         }
         
     def mark_as_investigated(self, entity_id: str, agent: str):

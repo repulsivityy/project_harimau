@@ -250,19 +250,61 @@ This document tracks the progress of the Harimau rebuild.
 - Reduced "System Error" failures from ~40% to <5%
 - Comprehensive troubleshooting documentation for future issues
 
-## Phase 5: Agent Performance Investigation workflow and Optimization [IN PROGRESS]
-- [ ] **Parallel investigation across all indicators**: 
-  - 1st pass from Triage Agent to specialist agents
-   - Triage agent investigates IOCs and recommends IOCs to specialist agents
-   - Specialist agents investigates all IOCs recommended by Triage Agent
-   - Specialist agents updates networkx and langgraph as they investigate one node/hop from the initial IOC (eg, dropped files by IOC A, contacted domains by IOC B
-     - For IOCs that they don't specialise in (eg, network IOCs for Malware Agent), they will put it in networkx and langgraph as a node/hop
-     - Recommend to investigate to the Lead Threat Hunter Agent 
-   - Lead Threat Hunter receives report from Specialist Agents, as well as look at NetworkX and Langgraph if there are any additional IOCs to investigate. 
-   - Lead Threat Hunter initiates 2nd Pass / Iteration to the Specialist Agents if there are additional IOCs to investigate.
-   - If 3 Passes / Iteration condition is met, or the Lead Threat Hunter agent is satisfied with the latest report/information, the Lead Threat Hunter consolidates report and creates final report. 
-- [ ] **Lead Threat Hunter Agent**: Implement Lead Threat Hunter Agent
-- [ ] **Final Workflow**: Implement final workflow
+## Phase 5: Iterative Investigation Workflow [IN PROGRESS]
+
+### Phase 5.1: Specialist Agent Enhancements [COMPLETED]
+**Goal**: Enable specialists to read triage context and expand the investigation graph.
+
+**Completed Tasks**:
+- [x] State Management Refactor
+- [x] Specialist Gate Implementation
+- [x] Malware Agent: Triage context integration + graph expansion
+- [x] Infrastructure Agent: Triage context integration + graph expansion
+- [x] Bug fixes: Empty content fallback, JSON extraction, scope errors
+- [x] Local verification scripts
+
+**Impact**: Graph now grows from ~50 nodes (triage) to ~150 nodes (after specialists).
+
+---
+
+### Phase 5.2: Lead Threat Hunter Agent [IN PROGRESS]
+**Goal**: Orchestrate iterative investigations (max 3 iterations).
+
+**See**: `docs/phase_5_2_lead_hunter.md` for full technical specification.
+
+**Core Tasks**:
+- [ ] Create `backend/agents/lead_hunter.py` with LLM-based orchestration logic
+- [ ] Add `get_uninvestigated_nodes()` to InvestigationCache
+- [ ] Update workflow: Add gate and lead hunter nodes, implement iteration loop
+- [ ] Add `iteration` and `lead_hunter_report` to AgentState
+- [ ] Testing: Unit, integration, end-to-end
+- [ ] Deploy and verify iteration behavior
+
+**Lead Hunter Responsibilities**:
+1. Review triage + specialist reports
+2. Analyze graph to find uninvestigated entities
+3. Prioritize high-value targets (malicious, attack-chain-relevant)
+4. Create subtasks for next iteration
+5. Generate holistic synthesis report
+6. Decide: continue (if iteration < 3 and targets exist) or end
+
+**Workflow**:
+```
+Iteration 0: Triage → Gate → [Malware, Infra] → Lead Hunter → Decision
+Iteration 1: Gate → [Malware, Infra] → Lead Hunter → Decision
+Iteration 2: Gate → [Malware, Infra] → Lead Hunter → END (max reached)
+```
+
+---
+
+### Phase 5.3: Autonomy & Fine-Tuning [PLANNED]
+- [ ] Advanced prompting for autonomous decisions
+- [ ] Adaptive iteration limits
+- [ ] Cost-aware investigation
+- [ ] Hunt package generation (YARA/Sigma)
+- [ ] Timeline reconstruction
+
+**Upon completion of Phase 5, product is ready for MVP release**
 ```
 graph TD
     Start([IOC Submitted]) --> Triage[Triage Agent]
@@ -283,21 +325,7 @@ Infra --> LeadReview
     LeadReview -->|Satisfied| Consolidation -->|Final Markdown + Diagrams + Report by Lead Hunter| End([Investigation Complete])
 ```
 
-**Current Status**:
-- [ ] **Infrastructure Agent Optimization**
-- [ ] **Malware Specialist Optimization**
 
-**Workflow**:
-- [ ] **Infrastructure Agent Workflow**
-- [ ] **Malware Specialist Workflow**
-
-**Optimization Strategies**:
-1.  **Parallel Execution**: Run multiple subtasks concurrently
-2.  **Smart Caching**: Reuse previous results where possible
-3.  **Reduced Iterations**: Limit unnecessary back-and-forth
-4.  **Efficient Tool Usage**: Optimize GTI API calls
-
-**Upon completion of Phase 5, product is ready for MVP release**
 
 ## Phase 6: Near-Term Roadmap (Post-MVP)
 - [ ] **Real-Time Streaming**: Refactor Frontend/Backend to use SSE (Server-Sent Events) instead of polling.

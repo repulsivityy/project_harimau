@@ -43,18 +43,20 @@ Project Harimau is an automated threat intelligence investigation system that an
    ```
 
 ## 📊 Status
-- **Phase 1 (Infrastructure)**: ✅ Complete
-- **Phase 2 (The Brain)**: ✅ Complete
-- **Phase 3 (Interface)**: ✅ Complete
-- **Phase 4 (Hybrid Triage + Token Optimization)**: ✅ Complete
-- **Phase 5 (Enhanced Visualization + NetworkX Cache)**: ✅ Complete
-- **Phase 6 (Threat Intelligence Refinement)**: � In Progress
+-   **Phase 1 (Infrastructure)**: ✅ Complete
+-   **Phase 2 (The Brain)**: ✅ Complete
+-   **Phase 3 (Interface)**: ✅ Complete
+-   **Phase 4 (Hybrid Triage + Token Optimization)**: ✅ Complete
+-   **Phase 5 (Enhanced Visualization + NetworkX Cache)**: ✅ Complete
+-   **Phase 6 (Threat Intelligence Refinement)**: ✅ Complete (Feb 2026)
+
+### 🛠️ Code Quality Overhaul (Feb 2026)
+-   **Robustness**: Consolidated state, deep-merge cache deduplication, and specific exception handling.
+-   **Reliability**: Dual-fallback JSON parsing and guaranteed format delivery.
+-   **Efficiency**: Parallel specialist execution with iterative synthesis.
 
 ## Quick Start (Local)
 
-1. **Clone & Env**:
-   ```bash
-   cp .env.example .env
    # Add GTI_API_KEY
    ```
 
@@ -87,7 +89,7 @@ Project Harimau is an automated threat intelligence investigation system that an
 ### Agent Philosophy
 - **Triage**: Quick assessment, relationship discovery
 - **Specialists**: Deep domain expertise, intelligence gathering
-- **Lead Hunter**: Strategic synthesis, campaign tracking, research gap identification
+- **Lead Hunter**: Strategic synthesis, campaign tracking, and iterative investigation (2 rounds)
 
 ## Documentation
 * [Product Requirements (PRD)](docs/PRD.md)

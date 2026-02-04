@@ -31,7 +31,7 @@
 4.  **Specialist Agents** (parallel execution):
     - **Malware Specialist**: Behavioral analysis, capability assessment, attribution
     - **Infrastructure Specialist**: DNS mapping, hosting analysis, pivot detection
-5.  **Lead Hunter**: Cross-domain synthesis and intelligence report generation
+5.  **Lead Hunter**: Cross-domain synthesis, intelligence report generation, and iterative investigation (2 rounds)
 
 **Intelligence Report Requirements:**
 The Lead Hunter must produce a **comprehensive threat intelligence analysis**, not just a malware scan. The report must include:

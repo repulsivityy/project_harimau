@@ -34,7 +34,7 @@ async with mcp_manager.get_session("gti") as session:
             return str(e)
 ```
 
-### Phase 3: Agent Loop (7 Iterations)
+### Phase 3: Agent Loop (10 Iterations)
 ```python
     llm = ChatVertexAI(model="gemini-2.0-flash-exp", temperature=0)
     llm_with_tools = llm.bind_tools([tool1, tool2, ...])
@@ -247,7 +247,7 @@ async def get_ip_address_report(ip_address: str):
 
 ```python
 # Agent Loop Configuration
-MAX_ITERATIONS = 7  # Empirically determined optimal
+MAX_ITERATIONS = 10  # Increased for deep analysis
 
 # LLM Settings
 MODEL = "gemini-2.0-flash-exp"
@@ -303,3 +303,53 @@ Before deployment:
 - [agent_debugging_guide.md](./agent_debugging_guide.md) - Troubleshooting
 - [architecture.md](./architecture.md) - System design
 - [../CHANGELOG.md](../CHANGELOG.md) - Version history
+
+---
+
+## Lead Hunter Implementation
+
+### Workflow Integration
+
+The Lead Hunter orchestrates the iterative investigation loop (max 2 iterations).
+
+```mermaid
+graph TD
+    Triage --> Gate
+    Gate -->|Parallel| Malware[Malware Specialist]
+    Gate -->|Parallel| Infra[Infra Specialist]
+    Malware --> LeadHunter
+    Infra --> LeadHunter
+    LeadHunter{Decision}
+    LeadHunter -->|Continue| Gate
+    LeadHunter -->|End| END
+```
+
+### Decision Logic
+
+```python
+def should_continue_investigation(state: AgentState) -> str:
+    """
+    Lead Hunter decides: Continue or End
+    """
+    iteration = state.get("iteration", 0)
+    max_iterations = 2  # Hard limit
+    subtasks = state.get("subtasks", [])
+    
+    # Hard stop at max iterations
+    if iteration >= max_iterations:
+        return END
+    
+    # No new work identified
+    if not subtasks:
+        return END
+    
+    # Continue to next iteration
+    return "continue"
+```
+
+### Core Responsibilities
+1.  **Review Work**: Analyzes specialist reports from current iteration.
+2.  **Analyze Graph**: Identifies uninvestigated entities in the NetworkX cache.
+3.  **Prioritize**: Selects high-value targets (malicious, central nodes).
+4.  **Direct**: Generates subtasks for next iteration.
+5.  **Synthesize**: Updates the holistic intelligence report.

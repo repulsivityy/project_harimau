@@ -41,7 +41,7 @@ graph TD
 * **Role**: Investigation orchestration and state management.
 * **Modules**:
   - `main.py`: API Endpoints with enhanced graph visualization.
-  - `graph/workflow.py`: LangGraph State Machine.
+  - `graph/workflow.py`: LangGraph State Machine (Iterative Loop).
   - `graph/state.py`: AgentState definition (includes NetworkX graph)## 3. Data Layer: Investigation Cache
 
 ### 3.1 NetworkX Graph (Phase 5 - Current)
@@ -316,6 +316,12 @@ Investigations can take >5 minutes. HTTP times out in 60s.
 - Rich mouseover tooltips
 - Full filenames in graph
 - Human-readable vendor detections
+
+### Code Quality Overhaul (Feb 2026)
+- **Robustness**: Consolidated infrastructure agent state updates to prevent race conditions.
+- **Data Integrity**: Implemented deep-merge deduplication in NetworkX cache.
+- **Reliability**: Replaced bare exception handlers with specific error types and structured logging.
+- **Efficiency**: Confirmed parallel execution of specialist agents.
 
 ---
 

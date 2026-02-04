@@ -270,7 +270,7 @@ This document tracks the progress of the Harimau rebuild.
 ### Phase 5.2: Lead Threat Hunter Agent [IN PROGRESS]
 **Goal**: Orchestrate iterative investigations (max 3 iterations).
 
-**See**: `docs/phase_5_2_lead_hunter.md` for full technical specification.
+**See**: `docs/agent_implementation.md` for full technical specification.
 
 **Core Tasks**:
 - [ ] Create `backend/agents/lead_hunter.py` with LLM-based orchestration logic

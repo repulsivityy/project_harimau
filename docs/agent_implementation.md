@@ -36,7 +36,7 @@ async with mcp_manager.get_session("gti") as session:
 
 ### Phase 3: Agent Loop (10 Iterations)
 ```python
-    llm = ChatVertexAI(model="gemini-2.0-flash-exp", temperature=0)
+    llm = ChatVertexAI(model="gemini-2.5-flash", temperature=0)
     llm_with_tools = llm.bind_tools([tool1, tool2, ...])
     
     messages = [SystemMessage(content=PROMPT), HumanMessage(content=task)]
@@ -250,7 +250,7 @@ async def get_ip_address_report(ip_address: str):
 MAX_ITERATIONS = 10  # Increased for deep analysis
 
 # LLM Settings
-MODEL = "gemini-2.0-flash-exp"
+MODEL = "gemini-2.5-flash"
 TEMPERATURE = 0  # Deterministic analysis
 
 # Error Display

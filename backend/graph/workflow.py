@@ -6,6 +6,9 @@ from backend.agents.infrastructure import infrastructure_node
 from backend.agents.lead_hunter import lead_hunter_node
 from backend.utils.logger import get_logger
 
+## Global Variables
+hunt_iterations = 2 # Changed from 1 to 2 for additional investigation round
+
 logger = get_logger("workflow_graph")
 
 def build_graph():
@@ -106,7 +109,7 @@ def route_from_lead_hunter(state: AgentState):
     State['subtasks'] will have been updated by Lead Hunter if continuation is needed.
     """
     iteration = state.get("iteration", 0)
-    max_iterations = 1
+    max_iterations = hunt_iterations  # Changed from 1 to 2 for additional investigation round
     subtasks = state.get("subtasks", [])
     
     logger.info("lead_hunter_routing_check", 

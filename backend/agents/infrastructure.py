@@ -9,10 +9,13 @@ from backend.mcp.client import mcp_manager
 from backend.utils.logger import get_logger
 from backend.utils.graph_cache import InvestigationCache
 
+## Global Variables
+infra_iterations = 10 #number of iterations the infra agent goes through per set of investigation
+
 logger = get_logger("agent_infrastructure")
 
 INFRA_ANALYSIS_PROMPT = """
-You are an Elite Network Infrastructure Hunter (V2 Structured Data).
+You are an Elite Network Infrastructure Hunter.
 
 **Role:**
 You are a threat intelligence analyst specializing in pivoting across adversary infrastructure. You trace the connections between domains, IPs, and URLs to map out the attacker's footprint.
@@ -36,7 +39,7 @@ Analyze the provided network indicator (Domain, IP, or URL) to assess its malici
 - `get_entities_related_to_an_ip_address`: Pivot from an IP (e.g., to resolutions, communicating_files).
 - `get_entities_related_to_an_url`: Pivot from a URL (e.g., to network_location, downloaded_files).
 
-**Output (JSON):**
+**Example Output (JSON):**
 {
     "verdict": "Malicious|Suspicious|Benign",
     "threat_score": 85,
@@ -306,7 +309,7 @@ Analyze the following infrastructure indicators based on the triage context abov
             
             # --- Robust Loop (Increased to 7 iterations for comprehensive analysis) ---
             final_content = ""
-            max_iterations = 7
+            max_iterations = infra_iterations
             logger.info("infra_agent_loop_start", max_iterations=max_iterations)
             
             for iteration in range(max_iterations):

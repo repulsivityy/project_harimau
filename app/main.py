@@ -458,7 +458,7 @@ if st.session_state.current_job_id:
                     #     st.code(clean_code, language="dot")
                     
                     # Render using native Streamlit Graphviz
-                    st.graphviz_chart(clean_code, use_container_width=True)
+                    st.graphviz_chart(clean_code, use_container_width=False)
         
         with tab5:
             st.subheader("Investigation Timeline")

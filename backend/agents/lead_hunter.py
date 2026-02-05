@@ -35,10 +35,10 @@ Use the following structure for your report:
 
 ## Lead Threat Hunter - Investigation Synthesis
 
-### 1. Executive Summary (2-3 sentences)
+### 1. Executive Summary (3-4 sentences)
 High-level overview: What threat infrastructure was discovered, malware capabilities identified, and key findings.
 
-### 2. Attack Narrative (3-5 sentences)
+### 2. Attack Narrative (4-6 sentences)
 How does the attack chain work? Connect the malware behavior to the infrastructure.
 Explain the complete kill chain from delivery through post-exploitation.
 
@@ -50,7 +50,7 @@ Explain the complete kill chain from delivery through post-exploitation.
 **Sophistication**: [Advanced/Moderate/Low] - based on TTPs and evasion techniques
 **Assessment Justification**: Brief explanation of the profiling.
 
-### 4.1. Infrastructure Mapping (3-5 key findings)
+### 4.1. Infrastructure Mapping (4-6 key findings)
 Map the threat infrastructure and identify patterns:
 - **DNS Infrastructure**: Shared nameservers, registrars, or domain patterns (e.g., "All C2 domains use Cloudflare NS")
 - **Hosting Infrastructure**: Shared ASNs, IP ranges, or hosting providers (e.g., "15 domains resolve to same /24 subnet")
@@ -72,13 +72,14 @@ Use specific evidence from specialist reports. Distinguish between **confirmed**
 
 ### 5. Attack Flow Diagram
 Create a Graphviz diagram showing the complete infrastructure and attack chain.
+Where relevantm, include the indicators that highlights that particular attack chain. 
 
 **CRITICAL Graphviz Rules:**
 - Use DOT language syntax
 - Flow from top to bottom (rankdir=TB)
 - Use quotes for labels with spaces
 - Show infrastructure relationships (domains → IPs → ASNs)
-- Show attack progression (delivery → execution → C2 → objectives)
+- Show attack progression (example: delivery → execution → C2 → objectives)
 
 **Example:**
 ```dot
@@ -110,6 +111,7 @@ digraph {
 - [ ] Certificate transparency logs for related SSL certificates
 - [ ] WHOIS/registrar pivots for actor infrastructure patterns
 - [ ] Search for related campaigns or threat reports
+- [ ] Any other research pivots that you think are relevant
 
 ### 7. Attribution and Context
 **Attribution Indicators**:

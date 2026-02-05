@@ -134,6 +134,12 @@ You have COMPLETE data from Google Threat Intelligence:
    - **AVAILABLE AGENTS:**
      * `malware_specialist`: For file analysis, YARA scanning, and code reverse engineering.
      * `infrastructure_specialist`: For IP/Domain pivots, passive DNS, and mapping hosting infrastructure.
+   - **CRITICAL**: Create SEPARATE subtasks for each distinct entity you want investigated.
+     * BAD: "Investigate IPs 1.2.3.4, 5.6.7.8, and domain evil.com"
+     * GOOD:
+       - Subtask 1: "Investigate IP 1.2.3.4"
+       - Subtask 2: "Investigate IP 5.6.7.8"
+       - Subtask 3: "Investigate domain evil.com"
    - If no specialist is needed, leave "subtasks" empty.
 
 **Analysis Framework:**

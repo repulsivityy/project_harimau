@@ -10,7 +10,8 @@ from backend.utils.logger import get_logger
 from backend.utils.graph_cache import InvestigationCache
 
 ## Global Variables
-infra_iterations = 10 #number of iterations the infra agent goes through per set of investigation
+infra_iterations = 10 # number of iterations the infra agent goes through per set of investigation
+unique_targets_limit = 10 # number of unique targets the infra agent investigates per set of investigation
 
 logger = get_logger("agent_infrastructure")
 
@@ -172,22 +173,10 @@ async def infrastructure_node(state: AgentState):
         for task in state.get("subtasks", []):
             if task.get("agent") in ["infrastructure_specialist", "infrastructure"]:
                 val = task.get("entity_id")
-                
-                # Fallback: Extract from task description if missing
-                if not val and task.get("task"):
-                    task_text = task.get("task")
-                    # Try IP
-                    ip_match = re.search(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", task_text)
-                    if ip_match: val = ip_match.group(0)
-                    # Try URL (simple)
-                    elif "http" in task_text:
-                        url_match = re.search(r"https?://[^\s]+", task_text)
-                        if url_match: val = url_match.group(0)
-                    # Try Domain (very basic, avoid common words)
-                    elif "." in task_text:
-                         dom_match = re.search(r"\b([a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)\b", task_text)
-                         if dom_match and dom_match.group(1) not in ["e.g", "i.e"]: val = dom_match.group(1)
+                task_text = task.get("task", "")
+                task_context = task.get("context", "")
 
+                # If explicit entity_id is provided, use it
                 if val:
                     targets.append({
                         "type": "subtask", 
@@ -195,17 +184,67 @@ async def infrastructure_node(state: AgentState):
                         "context": task.get("context")
                     })
                 
+                # ALSO scan the task description for additional entities (grouped tasks)
+                # Regex for IP
+                ips = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", task_text)
+                for ip in ips:
+                    targets.append({"type": "subtask_extraction", "value": ip, "context": task_context})
+                
+                # Regex for URL (simple)
+                urls = re.findall(r"https?://[^\s]+", task_text)
+                for url in urls:
+                    targets.append({"type": "subtask_extraction", "value": url, "context": task_context})
+                
+                # Regex for Domain (avoid common words, require dot)
+                # Exclude common file extensions often mistaken for domains in text
+                domains = re.findall(r"\b([a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)\b", task_text)
+                ignored_exts = ["exe", "dll", "pdf", "txt", "json", "docx", "png", "jpg", "zip", "rar"]
+                for d in domains:
+                    parts = d.split(".")
+                    if len(parts) >= 2 and parts[-1].lower() not in ignored_exts and d not in ["e.g", "i.e", "vs."]:
+                         targets.append({"type": "subtask_extraction", "value": d, "context": task_context})
+
+        # 3. SAFETY NET: Scan Triage Key Findings if we have capacity
+        # Sometimes Triage identifies infrastructure but forgets to create a subtask
+        if len(targets) < 5:  # Arbitrary check to see if we need more targets
+            combined_text = triage_summary + " " + " ".join(key_findings)
+            logger.info("infra_safety_net_scanning")
+            
+            # IPs
+            ips = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", combined_text)
+            for ip in ips:
+                 targets.append({"type": "safety_net", "value": ip, "context": "Found in Triage Summary"})
+
+            # Domains (stricter filter for safety net to avoid noise)
+            domains = re.findall(r"\b([a-zA-Z0-9-]+\.[a-zA-Z]{2,})\b", combined_text)
+            for d in domains:
+                if d.lower() not in [ioc.lower(), "google.com", "virustotal.com", "example.com"]:
+                     targets.append({"type": "safety_net", "value": d, "context": "Found in Triage Summary"})
+
         # Deduplicate
         unique_targets = []
         seen = set()
+        
+        # Helper to clean values (strip trailing periods, etc)
+        def clean_val(v):
+            return v.strip(".,;:").lower()
+
         for t in targets:
-            if t["value"] and t["value"] not in seen:
+            raw_val = t["value"]
+            if not raw_val: continue
+            
+            clean = clean_val(raw_val)
+            
+            # Avoid self-referencing loop if target IS the root IOC
+            # (Unless root is specifically what we want to re-analyze, but usually we pivot FROM it)
+            # Actually, we DO want to analyze root if it's infra.
+            
+            if clean not in seen:
                 unique_targets.append(t)
-                seen.add(t["value"])
+                seen.add(clean)
                 
-        # Limit
-        unique_targets = unique_targets[:3]
-        logger.info("infra_targets_identified", count=len(unique_targets))
+        unique_targets = unique_targets[:unique_targets_limit]
+        logger.info("infra_targets_identified", count=len(unique_targets), targets=[t["value"] for t in unique_targets])
         
         if not unique_targets:
             logger.warning("infra_no_targets_found")

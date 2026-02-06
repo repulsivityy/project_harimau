@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-02-07
+
+### Added
+- Agent tasks now displayed in collapsible expander in Triage tab for cleaner UI
+- Full SHA256 hash display in graph nodes (no truncation)
+- Graphviz diagram enforcement for top-to-bottom layout (`rankdir=TB`)
+- Future agent roadmap documented: OSINT, Detection Engineering, SOC agents
+
+### Changed
+- **Code Cleanup**: Removed 49 lines of commented-out code across `malware.py`, `infrastructure.py`, `triage.py`
+- **Code Cleanup**: Removed 9 outdated `[NEW]` markers from Jan 2026 features (now production-stable)
+- **Code Cleanup**: Updated TODO comments to reference roadmap items (Phase 6)
+- Graph node labels now show full hashes instead of truncated versions (e.g., `abcde...123ebf` → full SHA256)
+- Comment numbering corrections in infrastructure markdown report generator
+- Simplified verbose comments in `main.py` for better readability
+
+### Documentation
+- Updated `README.md` with "How it works" section
+- Added future agent capabilities preview
+- Updated `CHANGELOG.md` with recent improvements
+- Updated `.gitignore` to exclude `test_*` files
+
 ### Fixed
 - Infrastructure Agent now successfully processes IP addresses without validation errors
 - Both agents robustly handle JSON responses in array or object format

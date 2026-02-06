@@ -13,7 +13,7 @@ from backend.utils.graph_cache import InvestigationCache
 logger = get_logger("agent_triage")
 
 # Graph growth control
-MAX_ENTITIES_PER_RELATIONSHIP = 10  # Increased from 5 to fetch more entities per relationship
+MAX_ENTITIES_PER_RELATIONSHIP = 10  # Increase to fetch more entities per relationship
 MAX_TOTAL_ENTITIES = 150  # Increased from 50 to accommodate 52 relationship types
 MIN_THREAT_SCORE = 0  # Roadmap: Smart filtering by threat score (Phase 6)
 REQUIRE_MALICIOUS_VERDICT = False  # Roadmap: Smart filtering by verdict (Phase 6)
@@ -39,11 +39,9 @@ PRIORITY_RELATIONSHIPS = {
         "execution_parents",      # Parent processes
         "itw_domains",            # In-the-wild domains
         "itw_ips",                # In-the-wild IPs
-<<<<<<< Updated upstream
         
         # Commented out for token optimization (re-enable if needed)
         # "bundled_files",        # Files bundled together (low priority)
-        "contacted_urls",       # URLs contacted (covered by domains/IPs)
         # "embedded_urls",        # Embedded URLs (covered by domains/IPs)
         # "email_attachments",    # Email-related relationships
         # "email_parents",        # Email-related relationships
@@ -51,8 +49,6 @@ PRIORITY_RELATIONSHIPS = {
         # "memory_pattern_domains", # Memory patterns (specialized)
         "memory_pattern_ips",     # Memory patterns (specialized)
         "memory_pattern_urls",    # Memory patterns (specialized)
-=======
->>>>>>> Stashed changes
     ],
     "IP": [
         "communicating_files",

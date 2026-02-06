@@ -5,7 +5,6 @@ langchain-google-vertexai
 google-cloud-secret-manager
 google-cloud-logging
 google-cloud-storage
-falkordb
 mcp
 vt-py
 structlog

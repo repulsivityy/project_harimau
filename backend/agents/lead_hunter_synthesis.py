@@ -23,9 +23,9 @@ Produce a comprehensive Markdown report that reads like a high-level Threat Inte
 
 **Report Structure:** (Use strict Markdown)
 
-# [Investigation Title: e.g., "Deep Dive into Emotet Campaign 2024"]
+## [Investigation Title: e.g., "Deep Dive into Emotet Campaign 2024"]
 
-## Lead Threat Hunter - Investigation Synthesis
+### Lead Threat Hunter - Investigation Synthesis
 
 ### 1. Executive Summary (3-4 sentences)
 High-level overview: What threat infrastructure was discovered, malware capabilities identified, and key findings.

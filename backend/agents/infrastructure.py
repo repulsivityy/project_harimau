@@ -87,7 +87,7 @@ def generate_infrastructure_markdown_report(result: dict, ioc: str) -> str:
         md += "### Executive Summary\n"
         md += f"{result.get('summary', 'No summary provided.')}\n\n"
         
-        # 3. Pivot Findings
+        # 1. Pivot Findings
         pivots = result.get("pivot_findings", [])
         if pivots:
             md += "### 🔍 Pivot Findings\n"
@@ -95,7 +95,7 @@ def generate_infrastructure_markdown_report(result: dict, ioc: str) -> str:
                 md += f"*   {p}\n"
             md += "\n"
             
-        # 4. Campaigns/Actors
+        # 2. Campaigns/Actors
         campaigns = result.get("associated_campaigns", [])
         if campaigns:
             md += "### 🏴 Associated Campaigns\n"
@@ -103,7 +103,7 @@ def generate_infrastructure_markdown_report(result: dict, ioc: str) -> str:
                 md += f"*   {c}\n"
             md += "\n"
             
-        # 5. Related Indicators (Table)
+        # 3. Related Indicators (Table)
         indicators = result.get("related_indicators", [])
         if indicators:
             md += "### 🌐 Related Infrastructure\n"
@@ -499,7 +499,7 @@ Analyze the following infrastructure indicators based on the triage context abov
                         
                         if is_ip:
                             # Fetch IP relationships
-                            rel_data = await gti.get_ip_report(
+                            rel_data = await gti.get_ip_address_report(
                                 target_value,
                                 relationships=["resolutions", "communicating_files", "downloaded_files"]
                             )

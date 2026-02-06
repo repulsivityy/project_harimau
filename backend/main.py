@@ -260,15 +260,15 @@ async def get_investigation_graph(job_id: str):
             attrs = entity.get("attributes", {})
             ent_type = entity.get("type", "unknown")
             
-            # More robust label extraction
+            # Label extraction without truncation for hashes
             label = ent_id
             if ent_type == "domain":
                 label = attrs.get("host_name") or ent_id
             elif ent_type == "ip_address":
                 label = ent_id  # IP is already in the id field
             elif ent_type == "file":
-                # Use meaningful_name if available, else truncate hash
-                label = attrs.get("meaningful_name") or ent_id[:8] + "..."
+                # Use meaningful_name if available, else show FULL hash (no truncation)
+                label = attrs.get("meaningful_name") or ent_id
             
             # Unique Node ID
             unique_id = f"{rel_type}_{idx}_{ent_id}"
@@ -284,7 +284,7 @@ async def get_investigation_graph(job_id: str):
             
             nodes.append({
                 "id": unique_id,
-                "label": label[:30] + "..." if len(str(label)) > 30 else str(label),
+                "label": str(label),  # No truncation - show full hash/domain/IP
                 "color": color,
                 "size": 15,
                 "title": json.dumps({

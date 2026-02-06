@@ -70,6 +70,7 @@ Where relevant, include the indicators that highlight that particular attack cha
 - Show infrastructure relationships (domains -> IPs -> ASNs)
 - Show attack progression (example: delivery -> execution -> C2 -> objectives)
 - Show the full ioc (sha256, IP Address, URL, Domain), do not truncate them. 
+- Make sure the rankdir is TB (top to bottom)
 
 **Example:**
 ```dot

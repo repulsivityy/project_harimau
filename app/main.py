@@ -162,43 +162,42 @@ if st.session_state.current_job_id:
             
             st.divider()
             
-            st.write("#### Generated Agent Tasks")
-            
-            # Agent Task Status Cards
-            for idx, task in enumerate(subtasks):
-                agent_name = task.get('agent', 'Agent')
-                task_desc = task.get('task', 'No description')
-                status = task.get('status', 'pending')
-                
-                # Determine status icon and color
-                if status == "completed":
-                    status_icon = "✅"
-                    border_color = "#28a745"
-                elif status == "running":
-                    status_icon = "⏳"
-                    border_color = "#ffc107"
-                elif status == "failed":
-                    status_icon = "❌"
-                    border_color = "#dc3545"
-                else:
-                    status_icon = "⏸️"
-                    border_color = "#6c757d"
-                
-                st.markdown(f"""
-                <div style="
-                    border-left: 4px solid {border_color};
-                    padding: 12px 16px;
-                    margin: 8px 0;
-                    background-color: rgba(255, 255, 255, 0.05);
-                    border-radius: 4px;
-                ">
-                    <div style="display: flex; align-items: center; margin-bottom: 8px;">
-                        <span style="font-size: 20px; margin-right: 10px;">{status_icon}</span>
-                        <strong style="font-size: 16px;">{agent_name}</strong>
+            # Agent Task Status Cards (Collapsible)
+            with st.expander(f"#### 🤖 Generated Agent Tasks ({len(subtasks)})", expanded=True):
+                for idx, task in enumerate(subtasks):
+                    agent_name = task.get('agent', 'Agent')
+                    task_desc = task.get('task', 'No description')
+                    status = task.get('status', 'pending')
+                    
+                    # Determine status icon and color
+                    if status == "completed":
+                        status_icon = "✅"
+                        border_color = "#28a745"
+                    elif status == "running":
+                        status_icon = "⏳"
+                        border_color = "#ffc107"
+                    elif status == "failed":
+                        status_icon = "❌"
+                        border_color = "#dc3545"
+                    else:
+                        status_icon = "⏸️"
+                        border_color = "#6c757d"
+                    
+                    st.markdown(f"""
+                    <div style="
+                        border-left: 4px solid {border_color};
+                        padding: 12px 16px;
+                        margin: 8px 0;
+                        background-color: rgba(255, 255, 255, 0.05);
+                        border-radius: 4px;
+                    ">
+                        <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                            <span style="font-size: 20px; margin-right: 10px;">{status_icon}</span>
+                            <strong style="font-size: 16px;">{agent_name}</strong>
+                        </div>
+                        <p style="margin: 0; color: #aaa; font-size: 14px;">{task_desc}</p>
                     </div>
-                    <p style="margin: 0; color: #aaa; font-size: 14px;">{task_desc}</p>
-                </div>
-                """, unsafe_allow_html=True)
+                    """, unsafe_allow_html=True)
         
             #  Agent Transparency Section
             st.markdown("---")

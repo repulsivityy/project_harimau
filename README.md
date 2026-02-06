@@ -59,7 +59,7 @@ The application takes an IOC (like a file hash, URL, or IP address) and kicks of
 -   **Phase 3 (Interface)**: ✅ Complete
 -   **Phase 4 (Hybrid Triage + Token Optimization)**: ✅ Complete
 -   **Phase 5 (Enhanced Visualization + NetworkX Cache)**: ✅ Complete
--   **Phase 6 (Threat Intelligence Refinement)**: ✅ Complete (Feb 2026)
+-   **Phase 6 (Threat Intelligence Refinement)**: ✅ Complete
 
 ### 🛠️ Code Quality Overhaul
 -   **Robustness**: Consolidated state, deep-merge cache deduplication, and specific exception handling.
@@ -76,7 +76,7 @@ The application takes an IOC (like a file hash, URL, or IP address) and kicks of
 3. **Lead Hunter**: Cross-domain synthesis and intelligence report generation
 
 ### Data Flow
-1. **Fetch Full**: Agents fetch complete entity data from various tools ()
+1. **Fetch Full**: Agents fetch complete entity data from various tools
 2. **Store All**: Full attributes cached in NetworkX graph (LangGraph state)
 3. **Query Minimal**: LLM receives filtered summaries (token-efficient)
 4. **Enrich On-Demand**: Specialists pull from cache (no re-fetch)
@@ -88,7 +88,7 @@ The application takes an IOC (like a file hash, URL, or IP address) and kicks of
 - **Lead Hunter**: Strategic synthesis, campaign tracking, and iterative investigation (2 rounds)
 - **OSINT Agent**: Helps with OSINT research / Attribution
 - **Detection Agent**: Helps with detection engineering and creation of hunt package
-- **SOC Agent**: Connects to SIEM and SOAR platforms to hunt internally with the help of the hunt package (Might combine with Detection Agent)
+- **SOC Agent**: Connects to SIEM platforms to hunt internally with the help of the hunt package (Might combine with Detection Agent)
 
 ## Documentation
 * [Product Requirements (PRD)](docs/PRD.md)

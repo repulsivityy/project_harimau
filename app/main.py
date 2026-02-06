@@ -45,7 +45,7 @@ with st.sidebar:
 # Main Interface
 st.write("Harimau (Tiger in Malay) is an AI-powered threat hunting platform that uses multiple specialised threat hunt agents to analyze and investigate IOCs (IPs, Domains, Hashes, URLs).")
 st.write("Harimau leverages LangGraph with multiple specialised threat hunt agents to mimic the flow of a threat hunting program.")
-st.write("Harimau is currently in Beta Phase. Expect some bugs and unexpected behaviour.")
+st.write("Harimau is currently in Beta Phase. Expect some bugs and unexpected behaviour. Current investigation takes ~8 minutes to complete.")
 st.write("### Investigation Console")
 st.write("\n")
 
@@ -88,8 +88,10 @@ if st.session_state.current_job_id:
                 data = api.get_investigation(job_id)
                 status = data.get("status")
                 
-                # Calculate progress
-                progress = min(poll_count * 2, 95) if status == "running" else 100
+                # Calculate progress based on elapsed time (assume ~8.5 min avg)
+                elapsed_seconds = poll_count * 10  # Polls every 10 seconds
+                estimated_duration = 510  # 8.5 minutes in seconds
+                progress = min(int((elapsed_seconds / estimated_duration) * 100), 95) if status == "running" else 100
                 progress_bar.progress(progress)
                 
                 if status == "completed":
@@ -104,12 +106,9 @@ if st.session_state.current_job_id:
                 else:
                     active_agent = data.get("current_agent", "Processing")
                     status_text.info(f"🤖 Status: {status} | Agent: {active_agent}")
-                    progress_details.caption(f"Poll #{poll_count + 1} | Elapsed: {poll_count * 2}s")
-                    time.sleep(2)
+                    progress_details.caption(f"Poll #{poll_count + 1} | Elapsed: {poll_count * 10}s")
+                    time.sleep(10)
                     poll_count += 1
-            
-            # Use rerun to clear polling UI and show results clean
-            # but st.rerun() might be too aggressive, let's just fall through
         
         # 3. Display Results
         res = api.get_investigation(job_id)

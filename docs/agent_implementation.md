@@ -1,6 +1,6 @@
 # Agent Implementation Reference
 
-*Supplement to [architecture.md](./architecture.md) - Last updated: 2026-01-30*
+*Supplement to [architecture.md](./architecture.md) - Last updated: 2026-02-07*
 
 This document provides implementation-level details for the Harimau specialist agents.
 
@@ -246,8 +246,13 @@ async def get_ip_address_report(ip_address: str):
 ## Configuration Constants
 
 ```python
-# Agent Loop Configuration
-MAX_ITERATIONS = 10  # Increased for deep analysis
+# Malware Agent Configuration (Feb 2026)
+malware_iterations = 10  # LLM analysis loop iterations
+max_analysis_targets = 5  # File hash limit (prevents timeouts)
+
+# Infrastructure Agent Configuration (Feb 2026)
+infra_iterations = 10  # LLM analysis loop iterations
+unique_targets_limit = 10  # Maximum entities to investigate per iteration
 
 # LLM Settings
 MODEL = "gemini-2.5-flash"
@@ -298,6 +303,50 @@ Before deployment:
 
 ---
 
+## Malware Specialist Tools (Feb 2026)
+
+The Malware agent has access to 4 GTI tools via MCP:
+
+1. **get_file_behavior** - Fetches sandbox behavior summary
+   ```python
+   @tool
+   async def get_file_behavior(file_hash: str):
+       res = await session.call_tool("get_file_behavior_summary", arguments={"hash": file_hash})
+   ```
+
+2. **get_dropped_files** - Files dropped during execution
+   ```python
+   @tool
+   async def get_dropped_files(file_hash: str):
+       res = await session.call_tool("get_entities_related_to_a_file", arguments={
+           "hash": file_hash,
+           "relationship_name": "dropped_files",
+           "descriptors_only": True
+       })
+   ```
+
+3. **get_attribution** - Malware families, threat actors, **and vulnerabilities**
+   ```python
+   @tool
+   async def get_attribution(file_hash: str):
+       # Fetches: malware_families, related_threat_actors, vulnerabilities
+       # Returns JSON with all three relationship types
+   ```
+
+4. **get_file_report** - Full static analysis report (Added Feb 2026)
+   ```python
+   @tool
+   async def get_file_report(file_hash: str):
+       res = await session.call_tool("get_file_report", arguments={"file_hash": file_hash})
+   ```
+
+**Tool Binding:**
+```python
+llm.bind_tools([get_file_behavior, get_dropped_files, get_attribution, get_file_report])
+```
+
+---
+
 ## Related Documents
 
 - [agent_debugging_guide.md](./agent_debugging_guide.md) - Troubleshooting
@@ -335,8 +384,8 @@ def should_continue_investigation(state: AgentState) -> str:
     max_iterations = 2  # Hard limit
     subtasks = state.get("subtasks", [])
     
-    # Hard stop at max iterations
-    if iteration >= max_iterations:
+    # Hard stop AFTER max iterations (allow synthesis at iteration 2)
+    if iteration > max_iterations:  # Fixed Feb 2026: was >=
         return END
     
     # No new work identified

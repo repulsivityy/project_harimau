@@ -180,7 +180,7 @@ Verdict: {entity['verdict']}
 ### 3.1 Investigation Endpoints
 
 #### POST /api/investigate
-**Submit new investigation.**
+**Submit new investigation (Async Pattern).**
 
 **Request**:
 ```json
@@ -189,15 +189,16 @@ Verdict: {entity['verdict']}
 }
 ```
 
-**Response** (202 Accepted):
+**Response** (200 OK - Returns immediately):
 ```json
 {
   "job_id": "abc-123",
   "status": "running",
-  "ioc": "44d88612fea8a8f36de82e1278abb02f",
-  "ioc_type": "File"
+  "message": "Investigation started. Poll /api/investigations/{job_id} for results."
 }
 ```
+
+**Note**: Investigation runs in background. Poll the GET endpoint below for completion status.
 
 #### GET /api/investigations/{job_id}
 **Get investigation status and results.**
@@ -282,9 +283,20 @@ Verdict: {entity['verdict']}
 2. **Specialist Results Tab**: A dedicated Streamlit tab renders individual markdown reports for each specialist.
 3. **Graph Integration**: Specialist findings (Dropped Files, C2 IPs) appear as new nodes in the graph with unique 🚩 specialist tooltips.
 4. **Centering Logic**: The graph is explicitly forced to re-center when specialized findings are added.
-Investigations can take >5 minutes. HTTP times out in 60s.
-* **Solution**: Frontend submits job, gets `job_id`, polls for updates.
-* **Backend**: Runs LangGraph workflow synchronously (Cloud Run timeout: 60m).
+
+### 4.4 Async Background Processing (Feb 2026)
+
+**Problem**: Investigations can take 8+ minutes. HTTP connections time out in 60-300 seconds depending on Cloud Run configuration.
+
+**Solution**: Async job pattern with polling:
+* **Frontend**: Submits investigation via `POST /api/investigate`, receives `job_id` immediately, polls `GET /api/investigations/{job_id}` every 10 seconds.
+* **Backend**: Returns job immediately, runs LangGraph workflow in background task (`asyncio.create_task`). Cloud Run container timeout: 60 minutes.
+* **Progress Bar**: Frontend calculates progress based on elapsed time (~8.5 min average) capped at 95% until actual completion.
+
+**Benefits**:
+- No connection timeouts for long investigations
+- Real-time status updates via polling
+- User-friendly progress visualization
 
 ### 4.4 Tiered Logging
 * **Info Level**: Milestones ("Triage Complete").
@@ -322,6 +334,27 @@ Investigations can take >5 minutes. HTTP times out in 60s.
 - **Data Integrity**: Implemented deep-merge deduplication in NetworkX cache.
 - **Reliability**: Replaced bare exception handlers with specific error types and structured logging.
 - **Efficiency**: Confirmed parallel execution of specialist agents.
+
+### Major Changes (Feb 2026)
+
+#### Async Background Processing
+- **Problem**: Investigations taking 8+ minutes exceeded Cloud Run connection timeout (60-300s)
+- **Solution**: POST /api/investigate returns immediately with job_id, investigation runs via `asyncio.create_task`
+- **Frontend**: Polls every 10 seconds with realistic progress bar (95% cap until completion)
+- **Impact**: Zero connection timeouts, improved UX
+
+#### Parallel Specialist Execution Fixes
+- **Graph Merge**: Added custom reducer to preserve data from parallel malware/infra agents
+- **Iteration Logic**: Fixed Lead Hunter to allow synthesis at final iteration (changed `>= max_iterations` to `> max_iterations`)
+- **Data Preservation**: Subtasks stored in `metadata["rich_intel"]["triage_analysis"]["subtasks"]` to survive Lead Hunter state clearing
+- **Impact**: Frontend timeline and agent tasks now display correctly
+
+#### Malware Agent Enhancements
+- **New Tools**: 
+  - `get_file_report` - Full static analysis report
+  - `get_attribution` now includes vulnerabilities (CVEs, exploits)
+- **Target Limiting**: `max_analysis_targets = 5` (separate from `malware_iterations = 10`)
+- **Impact**: Better intelligence quality without overwhelming API/tokens
 
 ---
 

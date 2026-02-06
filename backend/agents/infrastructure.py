@@ -515,7 +515,7 @@ Analyze the following infrastructure indicators based on the triage context abov
                         
                         if is_ip:
                             # Fetch IP relationships
-                            rel_data = await gti.get_ip_address_report(
+                            rel_data = await gti.get_ip_report(
                                 target_value,
                                 relationships=["resolutions", "communicating_files", "downloaded_files"]
                             )

@@ -45,20 +45,13 @@ JOBS = {}
 @app.post("/api/investigate")
 async def run_investigation(request: InvestigationRequest):
     """
-    Triggers the LangGraph investigation workflow.
+    Triggers the LangGraph investigation workflow in the background.
+    Returns immediately with job_id for polling.
     """
+    import asyncio
+    
     job_id = str(uuid.uuid4())
     logger.info("investigation_request", job_id=job_id, ioc=request.ioc)
-    
-    # Initialize State
-    initial_state = {
-        "job_id": job_id,
-        "ioc": request.ioc,
-        "messages": [],
-        "subtasks": [],
-        "specialist_results": {},
-        "metadata": {}
-    }
     
     # Initialize Job Status
     JOBS[job_id] = {
@@ -68,31 +61,73 @@ async def run_investigation(request: InvestigationRequest):
         "created_at": "now"
     }
     
+    # Run investigation in background
+    asyncio.create_task(_run_investigation_background(job_id, request.ioc))
+    
+    # Return immediately
+    return {
+        "job_id": job_id,
+        "status": "running",
+        "message": "Investigation started. Poll /api/investigations/{job_id} for results."
+    }
+
+async def _run_investigation_background(job_id: str, ioc: str):
+    """Background task that runs the actual investigation."""
     try:
+        initial_state = {
+            "job_id": job_id,
+            "ioc": ioc,
+            "messages": [],
+            "subtasks": [],
+            "specialist_results": {},
+            "metadata": {}
+        }
+        
         final_state = await app_graph.ainvoke(initial_state)
         
-        # Update Job
+        # Preserve subtasks from triage for frontend display
+        # The Lead Hunter clears subtasks at the end, but the frontend needs them for timeline
+        # So we extract them from specialist_results which has the original task assignments
+        initial_subtasks = []
+        specialist_results = final_state.get("specialist_results", {})
+        
+        # Reconstruct subtasks from what each specialist was assigned
+        for agent_name, agent_data in specialist_results.items():
+            if isinstance(agent_data, dict) and agent_data.get("task"):
+                initial_subtasks.append({
+                    "agent": agent_name,
+                    "task": agent_data.get("task", ""),
+                    "status": "completed"
+                })
+        
+        # Fallback: Try to get from metadata if available
+        if not initial_subtasks:
+            metadata = final_state.get("metadata", {})
+            triage_data = metadata.get("rich_intel", {}).get("triage_analysis", {})
+            initial_subtasks = triage_data.get("subtasks", [])
+        
+        # Update Job with results
         result = {
             "job_id": job_id,
             "status": "completed",
-            "ioc": final_state.get("ioc") or request.ioc, 
+            "ioc": final_state.get("ioc") or ioc, 
             "ioc_type": final_state.get("ioc_type"),
-            "subtasks": final_state.get("subtasks"),
+            "subtasks": initial_subtasks,  # Use preserved subtasks instead of cleared ones
             "final_report": final_state.get("final_report", "No report generated."),
             "risk_level": final_state.get("metadata", {}).get("risk_level", "Unknown"),
             "gti_score": final_state.get("metadata", {}).get("gti_score", "N/A"),
             "rich_intel": final_state.get("metadata", {}).get("rich_intel", {}),
-            "specialist_results": final_state.get("specialist_results", {}),
+            "specialist_results": specialist_results,
             "metadata": final_state.get("metadata", {}),
+            "investigation_graph": final_state.get("investigation_graph")  # Add graph to result
         }
         JOBS[job_id] = result
-        return result
+        logger.info("investigation_complete", job_id=job_id, status="completed")
         
     except Exception as e:
         logger.error("investigation_failed", job_id=job_id, error=str(e))
         JOBS[job_id]["status"] = "failed"
         JOBS[job_id]["error"] = str(e)
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/investigations/{job_id}")
 async def get_investigation(job_id: str):

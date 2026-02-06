@@ -19,7 +19,6 @@ MIN_THREAT_SCORE = 0  # TODO: Add smart filtering (Option B) - prioritize by thr
 REQUIRE_MALICIOUS_VERDICT = False  # TODO: Add smart filtering (Option B) - prioritize malicious entities
 
 # Define priority relationships for each IOC type
-# [TOKEN OPTIMIZATION] Reduced from 20 to 11 critical relationships
 # Based on alpha version patterns + analytical depth requirements
 PRIORITY_RELATIONSHIPS = {
     "File": [
@@ -43,14 +42,14 @@ PRIORITY_RELATIONSHIPS = {
         
         # Commented out for token optimization (re-enable if needed)
         # "bundled_files",        # Files bundled together (low priority)
-        # "contacted_urls",       # URLs contacted (covered by domains/IPs)
+        "contacted_urls",       # URLs contacted (covered by domains/IPs)
         # "embedded_urls",        # Embedded URLs (covered by domains/IPs)
         # "email_attachments",    # Email-related relationships
         # "email_parents",        # Email-related relationships
         # "itw_urls",             # In-the-wild URLs (covered by domains/IPs)
         # "memory_pattern_domains", # Memory patterns (specialized)
-        # "memory_pattern_ips",     # Memory patterns (specialized)
-        # "memory_pattern_urls",    # Memory patterns (specialized)
+        "memory_pattern_ips",     # Memory patterns (specialized)
+        "memory_pattern_urls",    # Memory patterns (specialized)
     ],
     "IP": [
         "communicating_files",
@@ -172,7 +171,7 @@ For SUSPICIOUS/UNDETECTED:
     "severity": "Critical|High|Medium|Low",
     "threat_score": <number>,
     
-    "executive_summary": "One paragraph: verdict + key findings + recommended action",
+    "executive_summary": "One to three paragraphs: verdict + key findings + recommended action",
     
     "key_findings": [
         "Finding 1 with specific entity IDs/names",
@@ -280,10 +279,10 @@ def generate_markdown_report_locally(analysis: dict, ioc: str, ioc_type: str) ->
     This avoids JSON parsing errors caused by large markdown strings in LLM output.
     """
     try:
-        md = f"# IOC Triage Report\n\n"
+        md = f"## IOC Triage Report\n\n"
         
         # 1. IOC Summary
-        md += "## IOC Summary\n"
+        md += "### IOC Summary\n"
         md += f"*   **IOC Type:** {ioc_type}\n"
         md += f"*   **IOC Value:** `{ioc}`\n"
         md += f"*   **Verdict:** {analysis.get('verdict', 'Unknown')}\n"
@@ -292,19 +291,19 @@ def generate_markdown_report_locally(analysis: dict, ioc: str, ioc_type: str) ->
         md += f"*   **Threat Score:** {analysis.get('threat_score', 'N/A')}\n\n"
         
         # 2. Executive Summary
-        md += "## Executive Summary\n"
+        md += "### Executive Summary\n"
         md += f"{analysis.get('executive_summary', 'No summary provided.')}\n\n"
         
         # 3. Key Findings
         if analysis.get("key_findings"):
-            md += "## Key Findings\n"
+            md += "### Key Findings\n"
             for finding in analysis["key_findings"]:
                 md += f"*   {finding}\n"
             md += "\n"
             
         # 4. Threat Context
         context = analysis.get("threat_context", {})
-        md += "## Threat Context\n"
+        md += "### Threat Context\n"
         if context.get("campaigns"):
             md += f"*   **Campaigns:** {', '.join(context['campaigns'])}\n"
         if context.get("threat_actors"):
@@ -325,7 +324,7 @@ def generate_markdown_report_locally(analysis: dict, ioc: str, ioc_type: str) ->
         # 5. Priority Entities table
         entities = analysis.get("priority_entities", [])
         if entities:
-            md += "## Priority Entities\n"
+            md += "### Priority Entities\n"
             md += "| Entity ID | Entity Type | Reason |\n"
             md += "| :--- | :--- | :--- |\n"
             for e in entities:
@@ -334,7 +333,7 @@ def generate_markdown_report_locally(analysis: dict, ioc: str, ioc_type: str) ->
             
         # 6. Investigation Notes
         if analysis.get("investigation_notes"):
-            md += "## Investigation Notes\n"
+            md += "### Investigation Notes\n"
             md += f"{analysis.get('investigation_notes')}\n"
             
         return md
@@ -410,8 +409,6 @@ Perform comprehensive first-level triage analysis now.
         clean_content = final_text.replace("```json", "").replace("```", "").strip()
         analysis = json.loads(clean_content)
         
-        # [FIX] Generate Markdown Report Locally
-        # This is more robust than asking the LLM to put markdown inside JSON
         analysis["markdown_report"] = generate_markdown_report_locally(analysis, ioc, ioc_type)
         analysis["_llm_reasoning"] = final_text  # Store for transparency
         
@@ -671,7 +668,8 @@ async def triage_node(state: AgentState):
             "severity": analysis.get("severity"),
             "investigation_notes": analysis.get("investigation_notes", ""),
             "markdown_report": analysis.get("markdown_report", ""),
-            "_llm_reasoning": analysis.get("_llm_reasoning")
+            "_llm_reasoning": analysis.get("_llm_reasoning"),
+            "subtasks": analysis.get("subtasks", [])  # Store for frontend timeline
         }
         
         # Maintain backward compatibility

@@ -75,6 +75,9 @@ Project Harimau is an automated threat intelligence investigation system that an
 - **Triage**: Quick assessment, relationship discovery
 - **Specialists**: Deep domain expertise, intelligence gathering
 - **Lead Hunter**: Strategic synthesis, campaign tracking, and iterative investigation (2 rounds)
+- **OSINT Agent**: Helps with OSINT research / Attribution
+- **Detection Agent**: Helps with detection engineering and creation of hunt package
+- **SOC Agent**: Connects to SIEM and SOAR platforms to hunt internally with the help of the hunt package (Might combine with Detection Agent)
 
 ## Documentation
 * [Product Requirements (PRD)](docs/PRD.md)

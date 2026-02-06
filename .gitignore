@@ -42,3 +42,4 @@ venv.bak/
 debugs/
 *.pyc
 *.backup
+test_*

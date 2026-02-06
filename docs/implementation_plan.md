@@ -86,9 +86,9 @@ This document tracks the progress of the Harimau rebuild.
         *   "I see a file hash. Let me check for parent domains."
     *   State Update: Every tool result enriches the `state["metadata"]["rich_intel"]` and implicitly builds the graph.
     *   Full expansion of initial IOC relationships, populate the graph, and Triage Agent will do first cut analysis for the specialist agents. 
-*   **Step 5: Triage Report** [IN-PROGRESS]
+*   **Step 5: Triage Report** [COMPLETED]
     *   Agent generates a `summary` explaining the verdict and key associations.
-*   **Step 6: Specialist Handoff** [IN-PROGRESS]
+*   **Step 6: Specialist Handoff** [COMPLETED]
     *   Agent generates `subtasks` to route to `malware_specialist` or `infrastructure_specialist` for deep dive.
 
 #### [COMPLETED] [Malware Specialist](backend/agents/malware.py)
@@ -98,7 +98,7 @@ This document tracks the progress of the Harimau rebuild.
 *   **Automatic Indicator Sync**: Discovered indicators (C2s, dropped files) are automatically pushed to both the NetworkX cache and LangGraph state for immediate frontend visibility.
 *   **Source-Aware Graphing**: Links shared infrastructure (e.g., common C2 IPs) back to the specific malware hash that contacted them.
 
-#### [NEW] [Infrastructure Specialist](backend/agents/infrastructure.py)
+#### [COMPLETED] [Infrastructure Specialist](backend/agents/infrastructure.py)
 *   Receives IP/Domain.
 *   Tools: `get_ip_report`, `get_domain_report`, Passive DNS resolution.
 *   Task: Map infrastructure, find pivoting points.
@@ -250,7 +250,7 @@ This document tracks the progress of the Harimau rebuild.
 - Reduced "System Error" failures from ~40% to <5%
 - Comprehensive troubleshooting documentation for future issues
 
-## Phase 5: Iterative Investigation Workflow [IN PROGRESS]
+## Phase 5: Iterative Investigation Workflow [COMPLETED]
 
 ### Phase 5.1: Specialist Agent Enhancements [COMPLETED]
 **Goal**: Enable specialists to read triage context and expand the investigation graph.
@@ -267,26 +267,27 @@ This document tracks the progress of the Harimau rebuild.
 
 ---
 
-### Phase 5.2: Lead Threat Hunter Agent [IN PROGRESS]
-**Goal**: Orchestrate iterative investigations (max 3 iterations).
+### Phase 5.2: Lead Threat Hunter Agent [COMPLETED]
+**Goal**: Orchestrate iterative investigations (max 2 iterations).
+**Completion Date**: Jan 2026
 
 **See**: `docs/agent_implementation.md` for full technical specification.
 
-**Core Tasks**:
-- [ ] Create `backend/agents/lead_hunter.py` with LLM-based orchestration logic
-- [ ] Add `get_uninvestigated_nodes()` to InvestigationCache
-- [ ] Update workflow: Add gate and lead hunter nodes, implement iteration loop
-- [ ] Add `iteration` and `lead_hunter_report` to AgentState
-- [ ] Testing: Unit, integration, end-to-end
-- [ ] Deploy and verify iteration behavior
+**Completed Tasks**:
+- [x] Created `backend/agents/lead_hunter_synthesis.py` with LLM-based orchestration logic
+- [x] Added `get_uninvestigated_nodes()` to InvestigationCache
+- [x] Updated workflow: Added gate and lead hunter nodes, implemented iteration loop
+- [x] Added `iteration` and `lead_hunter_report` to AgentState
+- [x] Testing: Integration and end-to-end verification
+- [x] Deployed and verified iteration behavior
 
 **Lead Hunter Responsibilities**:
 1. Review triage + specialist reports
 2. Analyze graph to find uninvestigated entities
 3. Prioritize high-value targets (malicious, attack-chain-relevant)
 4. Create subtasks for next iteration
-5. Generate holistic synthesis report
-6. Decide: continue (if iteration < 3 and targets exist) or end
+5. Generate holistic synthesis report with markdown and graphviz diagrams
+6. Decide: continue (if iteration ≤ 2 and targets exist) or end
 
 **Workflow**:
 ```
@@ -295,16 +296,61 @@ Iteration 1: Gate → [Malware, Infra] → Lead Hunter → Decision
 Iteration 2: Gate → [Malware, Infra] → Lead Hunter → END (max reached)
 ```
 
+**Impact**:
+- Investigations now run iteratively with dynamic task generation
+- Lead Hunter synthesizes findings across all agents
+
 ---
 
-### Phase 5.3: Autonomy & Fine-Tuning [PLANNED]
-- [ ] Advanced prompting for autonomous decisions
-- [ ] Adaptive iteration limits
-- [ ] Cost-aware investigation
-- [ ] Hunt package generation (YARA/Sigma)
-- [ ] Timeline reconstruction
+### Phase 5.3: Production Fixes & Cloud Run Optimization [COMPLETED]
+**Goal**: Fix critical production issues preventing investigations from completing.
+**Completion Date**: Feb 2026
 
-**Upon completion of Phase 5, product is ready for MVP release**
+#### Async Background Processing Implementation
+**Problem**: Investigations taking 8+ minutes exceeded Cloud Run HTTP connection timeout (60-300s), causing 503 errors in frontend.
+
+**Solution**:
+- [x] Modified `backend/main.py` POST /api/investigate to return immediately with job_id
+- [x] Investigation runs via `asyncio.create_task` in background
+- [x] Frontend polls GET /api/investigations/{job_id} every 10 seconds
+- [x] Progress bar calculates based on elapsed time (~8.5 min average), caps at 95%
+
+**Impact**:
+- Zero connection timeout errors
+- Investigations complete reliably end-to-end
+- Improved user experience with real-time status updates
+
+#### Parallel Specialist Execution Fixes
+**Problem**: Malware and Infrastructure agents ran in parallel but data was being overwritten, timeline/tasks not displaying.
+
+**Solutions**:
+- [x] **Graph Reducer**: Added custom reducer to deep-merge parallel specialist findings in NetworkX cache
+- [x] **Iteration Logic**: Fixed Lead Hunter condition from `>= max_iterations` to `> max_iterations` to allow synthesis at final iteration
+- [x] **Subtask Preservation**: Subtasks now stored in `metadata["rich_intel"]["triage_analysis"]["subtasks"]` to survive Lead Hunter state clearing
+- [x] **Backend Retrieval**: Backend extracts subtasks from metadata fallback when state array is empty
+
+**Impact**:
+- Frontend timeline and agent tasks now display correctly
+- Parallel execution confirmed working
+- No more missing investigation data
+
+#### Malware Agent Enhancements
+**Capabilities Added**:
+- [x] **get_file_report** tool - Full static analysis report from GTI
+- [x] **Vulnerabilities enrichment** - get_attribution now fetches CVEs and exploits
+- [x] **Target limiting** - Added `max_analysis_targets = 5` (separate from `malware_iterations = 10`)
+
+**Impact**:
+- Richer threat intelligence with vulnerability context
+- Investigations stay within API/token limits
+- Controlled analysis depth without overwhelming system
+
+**Total Deployments**: 20+ iterations to production in Feb 2026
+
+**Phase 5 is complete - Product is production-ready as of Feb 2026**
+>Constraint - iteration is currently 2, not 3. Will be updating it in the near future. 
+
+**Current Workflow Implementation**:
 ```
 graph TD
     Start([IOC Submitted]) --> Triage[Triage Agent]
@@ -333,23 +379,15 @@ Infra --> LeadReview
 - [ ] **Advanced Error Handling**: Implement exponential backoff for GTI API and automatic agent retries.
 - [ ] **Authentication Hardening**: Switch from `--allow-unauthenticated` to IAP/IAM.
 - [ ] **Crash Recovery**: Implement LangGraph Postgres Checkpointing to resume jobs after Cloud Run restarts.
-- [ ] **Smart Entity Filtering (Option B)**: Implement user-configurable filters at investigation start to prioritize malicious/high-score entities by threat score, verdict, and recency.
-- [ ] **Structured Output Enhancement**: Consider migrating to LangChain's `with_structured_output()` for final agent responses.
-    - **Context**: Currently using enhanced prompts to ensure JSON output; LLM sometimes provides narrative explanations when tools fail.
-    - **Proposal**: Use structured output only for final iteration response while maintaining AI-led investigation during tool-use loop.
-    - **Benefits**: Guaranteed valid JSON parsing, type safety via Pydantic schemas, elimination of JSON parsing errors.
-    - **Trade-off**: Slightly more deterministic output format, but preserves agentic decision-making during investigation.
-    - **Implementation Pattern**: 
-      ```python
-      # Iterations 1-6: Fully AI-led with tools
-      llm_with_tools = ChatVertexAI(...).bind_tools(tools)
-      
-      # Final iteration: Structured output for reliability
-      llm_structured = ChatVertexAI(...).with_structured_output(AgentAnalysisSchema)
-      ```
-    - **Status**: Prompt-based approach working well (Feb 2026); re-evaluate if JSON parsing failures increase.
+- [ ] **Smart Entity Filtering**: Implement user-configurable filters at investigation start to prioritize malicious/high-score entities by threat score, verdict, and recency.
+- [ ] **Enhance security**: Implement security measures 
+- [ ] **Ongoing Efforts**
+    - [ ] Advanced prompting for autonomous decisions
+    - [ ] Adaptive iteration limits
+    - [ ] Hunt package generation (YARA/Sigma)
+    - [ ] Timeline reconstruction
 
-## Phase 6: Long-Term Enhancements
+## Long-Term Enhancements
 - [ ] **Advanced Graph Visualization**: Migrate from `streamlit-agraph` to more professional library:
     - **Option 1**: Pyvis (quick upgrade, better physics/interactivity)
     - **Option 2**: Plotly + NetworkX (enterprise-grade, actively maintained)
@@ -382,7 +420,7 @@ graph TD
     LeadReview -->|Satisfied| Consolidation
     
     Consolidation -->|Synthesize Narrative| ReportGenerator[Lead Report Generator]
-    ReportGenerator --> HuntPack[Hunt_pack_agent]
+    ReportGenerator --> Detection[detection_agent]
     ReportGenerator -->|Final Markdown + Diagrams| End([Threat Intel Threat Hunt Complete])
 
     %% Styling for visual clarity
@@ -394,6 +432,6 @@ graph TD
     style Osint fill:#dfd,stroke:#333,stroke-width:1px
     style LeadReview fill:#fdd,stroke:#333,stroke-width:1px
     style Consolidation fill:#f96,stroke:#333,stroke-width:2px
-    style HuntPack fill:#6fb,stroke:#333,stroke-width:2px
+    style Detection fill:#6fb,stroke:#333,stroke-width:2px
 
 ```

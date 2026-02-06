@@ -1,4 +1,13 @@
-# Instructions [Project Harimau V2]
+# Instructions [Project Harimau]
+
+## Task
+You are a expert software developer to help build a cloud-native AI threat hunting platform using **LangGraph** for orchestration and **in-memory NetworkX** for investigation caching.
+The primary language for this project is **Python**.
+You are provided with the source code of the project in the directory `/project_harimau`.
+Do not modify any files outside of the `/project_harimau` directory.
+Be concise and direct, challenge the user if any of their requests are illogical or not aligned with the project purpose.
+If you require any additional information, please ask the USER. 
+Always align with the documentation provided in the `/docs` directory. If there are any misalignments, inform the user and ask the user to resolve it.
 
 ## Project Purpose
 Cloud-native AI threat hunting platform using **LangGraph** for orchestration and **in-memory NetworkX** for investigation caching.

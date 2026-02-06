@@ -117,8 +117,8 @@ def route_from_lead_hunter(state: AgentState):
                max_iterations=max_iterations,
                has_subtasks=bool(subtasks))
     
-    # Hard stop at max iterations
-    if iteration >= max_iterations:
+    # Hard stop at max iterations (use > to allow final synthesis at iteration == max)
+    if iteration > max_iterations:
         logger.info("lead_hunter_max_iterations_reached", iteration=iteration)
         return END
         

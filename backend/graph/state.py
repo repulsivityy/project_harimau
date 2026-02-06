@@ -16,6 +16,34 @@ def concat_reports(a: Optional[str], b: Optional[str]) -> Optional[str]:
     if not b: return a
     return f"{a}\n\n{b}"
 
+def merge_graphs(a: Optional[Any], b: Optional[Any]) -> Optional[Any]:
+    """
+    Merge two NetworkX graphs (for parallel specialist execution).
+    When specialists run in parallel, both expand the graph independently.
+    This ensures both sets of updates are preserved.
+    """
+    if a is None: return b
+    if b is None: return a
+    
+    # Import here to avoid circular deps
+    import networkx as nx
+    
+    # Merge nodes (b's attributes win on conflicts)
+    combined = a.copy()
+    for node, data in b.nodes(data=True):
+        if node in combined:
+            # Node exists - merge attributes
+            combined.nodes[node].update(data)
+        else:
+            # New node - add it
+            combined.add_node(node, **data)
+    
+    # Merge edges
+    for u, v, key, data in b.edges(keys=True, data=True):
+        combined.add_edge(u, v, key=key, **data)
+    
+    return combined
+
 class AgentState(TypedDict):
     """
     State schema for the Harimau Investigation Graph.
@@ -45,7 +73,8 @@ class AgentState(TypedDict):
     
     # Investigation Graph: NetworkX cache for full entity storage
     # Stores complete GTI attributes for all entities and relationships
-    investigation_graph: Annotated[Optional[Any], last_value]  # nx.MultiDiGraph (using Any to avoid import)
+    # CRITICAL: Uses merge_graphs to preserve updates from parallel specialists
+    investigation_graph: Annotated[Optional[Any], merge_graphs]  # nx.MultiDiGraph (using Any to avoid import)
     
     # Iteration Control
     loop_count: Annotated[int, operator.add]

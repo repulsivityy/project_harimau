@@ -55,21 +55,6 @@ Project Harimau is an automated threat intelligence investigation system that an
 -   **Reliability**: Dual-fallback JSON parsing and guaranteed format delivery.
 -   **Efficiency**: Parallel specialist execution with iterative synthesis.
 
-## Quick Start (Local)
-
-   # Add GTI_API_KEY
-   ```
-
-2. **Run Backend**:
-   ```bash
-   cd backend && uvicorn main:app --reload
-   ```
-
-3. **Run Frontend**:
-   ```bash
-   cd app && streamlit run main.py
-   ```
-
 ## Architecture Principles
 
 ### Multi-Agent Intelligence Workflow

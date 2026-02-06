@@ -82,24 +82,8 @@ def generate_infrastructure_markdown_report(result: dict, ioc: str) -> str:
     """
     try:
         md = "## Infrastructure Specialist Analysis\n\n"
-        #md += f"### Target: `{ioc}`\n\n"
         
-        # 1. Verdict & Context
-        #verdict = result.get("verdict", "Unknown")
-        #score = result.get("threat_score", "N/A")
-        #owner = result.get("asn_or_registrar", "Unknown")
-        
-        #icon = "🔴" if str(verdict).lower() == "malicious" else "🟡" if str(verdict).lower() == "suspicious" else "🟢"
-        
-        #md += f"**Verdict:** {icon} {verdict} (Score: {score})\n"
-        #md += f"**Owner/ASN:** {owner}\n"
-        
-        #cats = result.get("categories", [])
-        #if cats:
-        #    md += f"**Categories:** {', '.join(cats)}\n"
-        #md += "\n"
-        
-        # 2. Executive Summary
+        # Executive Summary
         md += "### Executive Summary\n"
         md += f"{result.get('summary', 'No summary provided.')}\n\n"
         
@@ -144,7 +128,7 @@ async def infrastructure_node(state: AgentState):
         cache_stats_before = cache.get_stats()
         logger.info("infra_cache_loaded", stats=cache_stats_before)
         
-        # [NEW] Retrieve Triage Context
+        # Retrieve Triage Context
         triage_context = state.get("metadata", {}).get("rich_intel", {}).get("triage_analysis", {})
         triage_summary = triage_context.get("executive_summary", "No triage summary available.")
         key_findings = triage_context.get("key_findings", [])
@@ -313,7 +297,7 @@ async def infrastructure_node(state: AgentState):
             
             llm = ChatVertexAI(model="gemini-2.5-flash", temperature=0.0, project=project_id, location=location).bind_tools(tools)
             
-            # [NEW] Format Triage Context for LLM
+            # Format Triage Context for LLM
             triage_context_str = f"""**TRIAGE SUMMARY:**
 {triage_summary}
 
@@ -496,7 +480,7 @@ Analyze the following infrastructure indicators based on the triage context abov
                     except Exception as e:
                         logger.warning("infra_indicator_parse_error", error=str(e))
                 
-                # [NEW] RELATIONSHIP EXPANSION
+                # Relationship Expansion
                 # For each analyzed entity, fetch its relationships and expand the graph
                 from backend.tools import gti
                 import re
@@ -559,7 +543,7 @@ Analyze the following infrastructure indicators based on the triage context abov
                     except Exception as expand_err:
                         logger.error("infra_expansion_error", target=target_value, error=str(expand_err))
                 
-                # [NEW] Mark all analyzed targets as investigated (for Lead Hunter tracking)
+                # Mark all analyzed targets as investigated (for Lead Hunter tracking)
                 for target_info in unique_targets:
                     cache.mark_as_investigated(target_info["value"], "infrastructure")
                     logger.info("infra_marked_investigated", entity=target_info["value"])

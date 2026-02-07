@@ -70,18 +70,26 @@ Where relevant, include the indicators that highlight that particular attack cha
 - Show infrastructure relationships (domains -> IPs -> ASNs)
 - Show attack progression (example: delivery -> execution -> C2 -> objectives)
 - Show the full ioc (sha256, IP Address, URL, Domain), do not truncate them. 
-- Make sure the rankdir is TB (top to bottom)
+- **Layout Optimization:**
+    - Use `rankdir=LR` (left to right) for a clearer, horizontal flow.
+    - Set `graph [splines=ortho];` for cleaner lines if many connections exist.
+    - If the graph is too wide, use `unflatten` logic (grouping nodes) or suggest multiple connected subgraphs.
 
 **Example:**
 ```dot
 digraph AttackChain {
-  rankdir=TB;
+  rankdir=LR;
+  ranksep=0.6;
+  nodesep=0.3;
+  center=true;
+  concentrate=true;
   bgcolor="ghostwhite"
-  node [shape=box, style=filled, fillcolor=lightgray];
+  node [shape=box, style=filled, fillcolor=lightgray, fontname="Arial", fontsize=10];
+  edge [fontname="Arial", fontsize=9];
   
   "Phishing Email" -> "malicious.doc" [label="Drops"];
   "malicious.doc" -> "C2 Domain" [label="Connects"];
-  "C2 Domain" -> "1.2.3.4" [label="Resolves"];
+  "C2 Domain" -> "IP: 1.2.3.4" [label="Resolves"];
 }
 ```
 
@@ -97,6 +105,15 @@ digraph AttackChain {
 ### 8. Additional Notes
 *   Include any additional relevant information or insights.
 *   Include 3-5 hunt hypotheses to hunt for the same threat actor in the future.
+
+### 9. Appendix
+*   Include all IOCs in a table format 
+| IOC Type | Value | Notes | Confidence |
+| --- | --- | --- | --- |
+| Domain | example.com | C2 Domain | Medium |
+| IP Address | [IP_ADDRESS] | Open Directory to drop files | Low |
+| URL | https://example.com | Phishing URL | High |
+| File Hash | example.exe | Ransomware | High |
 
 ## Output Instructions:
 - Return ONLY the Markdown text.

@@ -1,15 +1,9 @@
-"""
-Lead Threat Hunter Agent - Simplified (Synthesis Only)
-Responsibility: Synthesize findings from specialist agents into a final cohesive report.
-"""
 import os
 from langchain_google_vertexai import ChatVertexAI
-
 from backend.graph.state import AgentState
 from backend.utils.logger import get_logger
 from backend.utils.graph_cache import InvestigationCache
 
-# [NEW] Import Logic Logic from Split Modules
 from backend.agents.lead_hunter_planning import run_planning_phase
 from backend.agents.lead_hunter_synthesis import generate_final_report_llm
 
@@ -27,10 +21,10 @@ async def lead_hunter_node(state: AgentState):
     location = os.getenv("GOOGLE_CLOUD_REGION", "asia-southeast1")
     
     llm = ChatVertexAI(
-        model="gemini-2.5-flash",
+        model="gemini-2.5-pro",
         temperature=0.1, # Slightly creative for writing/planning
         project=project_id,
-        location=location
+        location="global" # Using global endpoint for Gemini 2.5 Pro
     )
     
     # Initialize Cache to read graph state
@@ -40,8 +34,6 @@ async def lead_hunter_node(state: AgentState):
     current_iteration = state.get("iteration", 0)
     
     # Max iterations is controlled by workflow.py (hunt_iterations), 
-    # but we need to know when to stop locally to switch modes.
-    # Hardcoded to 2 for now to match workflow default.
     MAX_ITERATIONS = 2 
     
     if current_iteration < MAX_ITERATIONS:

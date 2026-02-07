@@ -432,10 +432,6 @@ if st.session_state.current_job_id:
                     use_container_width=True
                 )
             
-            # st.markdown(report) -> Replaced with Graphviz-aware rendering
-            
-            # Split content by graphviz blocks
-            # Pattern: ```dot ... ``` or ```graphviz ... ```
             import re
             
             # Regex to find graphviz/dot blocks
@@ -452,11 +448,11 @@ if st.session_state.current_job_id:
                     clean_code = part.strip()
                     
                     # [COMMENTED OUT] Debug: Show the graphviz code in an expander
-                    # with st.expander("🐛 Debug: View Graphviz Code", expanded=False):
-                    #     st.code(clean_code, language="dot")
+                    with st.expander("🐛 Debug: View Graphviz Code", expanded=False):
+                        st.code(clean_code, language="dot")
                     
                     # Render using native Streamlit Graphviz
-                    st.graphviz_chart(clean_code, use_container_width=False)
+                    st.graphviz_chart(clean_code, use_container_width=True)
         
         with tab5:
             st.subheader("Investigation Timeline")

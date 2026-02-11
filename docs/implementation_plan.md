@@ -386,6 +386,11 @@ Infra --> LeadReview
     - [ ] Adaptive iteration limits
     - [ ] Hunt package generation (YARA/Sigma)
     - [ ] Timeline reconstruction
+    - [ ] Tools - Webrisk
+    - [ ] Tools - URLScan
+    - [ ] Tools - Shodan
+    - [ ] Tools - OpenCTI
+    - [ ] Tools - Google SecOps
 
 ## Long-Term Enhancements
 - [ ] **Advanced Graph Visualization**: Migrate from `streamlit-agraph` to more professional library:

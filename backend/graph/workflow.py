@@ -7,7 +7,7 @@ from backend.agents.lead_hunter import lead_hunter_node
 from backend.utils.logger import get_logger
 
 ## Global Variables
-hunt_iterations = 2 # Changed from 1 to 2 for additional investigation round
+hunt_iterations = 3 # Changed from 1 to 2 for additional investigation round
 
 logger = get_logger("workflow_graph")
 

@@ -78,9 +78,7 @@ Where relevant, include the indicators that highlight that particular attack cha
 **Example:**
 ```dot
 digraph AttackChain {
-  rankdir=LR;
-  ranksep=0.6;
-  nodesep=0.3;
+  rankdir=TB;
   center=true;
   concentrate=true;
   bgcolor="ghostwhite"

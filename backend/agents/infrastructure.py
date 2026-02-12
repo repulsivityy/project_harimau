@@ -8,6 +8,7 @@ from backend.graph.state import AgentState
 from backend.mcp.client import mcp_manager
 from backend.utils.logger import get_logger
 from backend.utils.graph_cache import InvestigationCache
+import backend.tools.webrisk as webrisk
 
 ## Global Variables
 infra_iterations = 10 # number of iterations the infra agent goes through per set of investigation
@@ -38,7 +39,9 @@ Analyze the provided network indicator (Domain, IP, or URL) to assess its malici
 - `get_url_report`: Get verdict and analysis stats for a URL.
 - `get_entities_related_to_a_domain`: Pivot from a domain (e.g., to resolutions, subdomains).
 - `get_entities_related_to_an_ip_address`: Pivot from an IP (e.g., to resolutions, communicating_files).
+
 - `get_entities_related_to_an_url`: Pivot from a URL (e.g., to network_location, downloaded_files).
+- `get_webrisk_report`: Check URL for Social Engineering, Malware, or Unwanted Software.
 
 **Example Output (JSON):**
 {
@@ -288,11 +291,22 @@ async def infrastructure_node(state: AgentState):
                     return res.content[0].text if res.content else "[]"
                 except Exception as e: return str(e)
 
+
+
+            @tool
+            async def get_webrisk_report(url: str):
+                """Check URL against Google Web Risk (Social Engineering/Malware)."""
+                try:
+                    res = await webrisk.evaluate_uri(url)
+                    return json.dumps(res)
+                except Exception as e: return str(e)
+
             # Build LLM
             tools = [
                 get_domain_report, get_entities_related_to_a_domain,
                 get_ip_address_report, get_entities_related_to_an_ip_address,
-                get_url_report, get_entities_related_to_an_url
+                get_url_report, get_entities_related_to_an_url,
+                get_webrisk_report
             ]
             
             llm = ChatVertexAI(model="gemini-2.5-flash", temperature=0.0, project=project_id, location=location).bind_tools(tools)
@@ -360,6 +374,7 @@ Analyze the following infrastructure indicators based on the triage context abov
                         elif tool_name == "get_entities_related_to_an_ip_address": result_txt = await get_entities_related_to_an_ip_address.ainvoke(args)
                         elif tool_name == "get_url_report": result_txt = await get_url_report.ainvoke(args)
                         elif tool_name == "get_entities_related_to_an_url": result_txt = await get_entities_related_to_an_url.ainvoke(args)
+                        elif tool_name == "get_webrisk_report": result_txt = await get_webrisk_report.ainvoke(args)
                         else:
                             result_txt = f"Error: Tool {tool_name} not found"
                             logger.warning("infra_unknown_tool", tool=tool_name)

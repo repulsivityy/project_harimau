@@ -14,15 +14,16 @@ echo "🐯 Deploying Project Harimau to GCP ($PROJECT_ID)..."
 echo "Ensuring APIs are enabled..."
 gcloud services enable run.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com secretmanager.googleapis.com aiplatform.googleapis.com || true
 
-# 2. Setup Secrets (GTI_API_KEY)
+# 2. Setup Secrets (GTI_API_KEY & WEBRISK_API_KEY)
 SECRET_NAME="harimau-gti-api-key"
+WEBRISK_SECRET_NAME="harimau-webrisk-api-key"
 SERVICE_ACCOUNT_EMAIL="$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')-compute@developer.gserviceaccount.com"
 
 # Check if user wants to update secrets
 if [ -n "$GTI_API_KEY" ]; then
     read -p "❓ Local GTI_API_KEY found. Update Secret Manager? [y/N] " response
     if [[ "$response" =~ ^[yY]$ ]]; then
-        echo "🔄 Updating secret..."
+        echo "🔄 Updating secret ($SECRET_NAME)..."
         if ! gcloud secrets describe $SECRET_NAME --quiet > /dev/null 2>&1; then
             printf "$GTI_API_KEY" | gcloud secrets create $SECRET_NAME --data-file=-
         else
@@ -36,23 +37,54 @@ else
     echo "⚠️  GTI_API_KEY not set locally. Assuming secret exists..."
 fi
 
+if [ -n "$WEBRISK_API_KEY" ]; then
+    read -p "❓ Local WEBRISK_API_KEY found. Update Secret Manager? [y/N] " response
+    if [[ "$response" =~ ^[yY]$ ]]; then
+        echo "🔄 Updating secret ($WEBRISK_SECRET_NAME)..."
+        if ! gcloud secrets describe $WEBRISK_SECRET_NAME --quiet > /dev/null 2>&1; then
+            printf "$WEBRISK_API_KEY" | gcloud secrets create $WEBRISK_SECRET_NAME --data-file=-
+        else
+            printf "$WEBRISK_API_KEY" | gcloud secrets versions add $WEBRISK_SECRET_NAME --data-file=-
+        fi
+        echo "✅ Secret updated."
+    else
+        echo "⏭️  Skipping secret update (using existing version)."
+    fi
+else
+    echo "⚠️  WEBRISK_API_KEY not set locally. Assuming secret exists..."
+fi
+
 # Final check to ensure secret exists before deploying
 if ! gcloud secrets describe $SECRET_NAME --quiet > /dev/null 2>&1; then
     echo "❌ Error: Secret '$SECRET_NAME' does not exist in Cloud and no local key provided."
+    exit 1
+fi
+if ! gcloud secrets describe $WEBRISK_SECRET_NAME --quiet > /dev/null 2>&1; then
+    echo "❌ Error: Secret '$WEBRISK_SECRET_NAME' does not exist in Cloud and no local key provided."
     exit 1
 fi
 
 # Grant Access to Cloud Run SA (Secret Manager + Vertex AI)
 # Note: Check if binding exists to avoid redundant updates
 
-# Secret Manager Access
+# Secret Manager Access (GTI)
 if ! gcloud secrets get-iam-policy $SECRET_NAME --format=json | grep -q "$SERVICE_ACCOUNT_EMAIL"; then
-    echo "🔐 Granting Secret Access..."
+    echo "🔐 Granting Secret Access ($SECRET_NAME)..."
     gcloud secrets add-iam-policy-binding $SECRET_NAME \
         --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
         --role="roles/secretmanager.secretAccessor" --quiet > /dev/null
 else
-    echo "✅ Secret Access already granted."
+    echo "✅ Secret Access ($SECRET_NAME) already granted."
+fi
+
+# Secret Manager Access (WebRisk)
+if ! gcloud secrets get-iam-policy $WEBRISK_SECRET_NAME --format=json | grep -q "$SERVICE_ACCOUNT_EMAIL"; then
+    echo "🔐 Granting Secret Access ($WEBRISK_SECRET_NAME)..."
+    gcloud secrets add-iam-policy-binding $WEBRISK_SECRET_NAME \
+        --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
+        --role="roles/secretmanager.secretAccessor" --quiet > /dev/null
+else
+    echo "✅ Secret Access ($WEBRISK_SECRET_NAME) already granted."
 fi
 
 # Vertex AI Access
@@ -75,7 +107,7 @@ if [[ "$TARGET" == "backend" || "$TARGET" == "all" ]]; then
         --region $REGION \
         --allow-unauthenticated \
         --set-env-vars "LOG_LEVEL=DEBUG,MAX_DEPTH=2,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_REGION=${REGION}" \
-        --set-secrets "VT_APIKEY=${SECRET_NAME}:latest,GTI_API_KEY=${SECRET_NAME}:latest" \
+        --set-secrets "VT_APIKEY=${SECRET_NAME}:latest,GTI_API_KEY=${SECRET_NAME}:latest,WEBRISK_API_KEY=${WEBRISK_SECRET_NAME}:latest" \
         --command "uvicorn" \
         --args "backend.main:app,--host,0.0.0.0,--port,8080" \
         --quiet

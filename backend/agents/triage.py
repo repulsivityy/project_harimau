@@ -8,6 +8,7 @@ from langchain_google_vertexai import ChatVertexAI
 from backend.graph.state import AgentState
 from backend.utils.logger import get_logger
 import backend.tools.gti as gti
+import backend.tools.webrisk as webrisk
 from backend.utils.graph_cache import InvestigationCache
 
 logger = get_logger("agent_triage")
@@ -330,6 +331,28 @@ def generate_markdown_report_locally(analysis: dict, ioc: str, ioc_type: str) ->
             md += "### Investigation Notes\n"
             md += f"{analysis.get('investigation_notes')}\n"
             
+            
+        # 7. WebRisk Analysis (if available)
+        wr_result = analysis.get("webrisk_result")
+        if wr_result:
+            md += "### Google Web Risk Analysis\n"
+            if "scores" in wr_result:
+                is_safe = True
+                for score in wr_result["scores"]:
+                    threat = score.get("threatType", "Unknown")
+                    confidence = score.get("confidenceLevel", "Unknown")
+                    md += f"*   **{threat}:** {confidence}\n"
+                    if confidence != "SAFE":
+                        is_safe = False
+                
+                if not is_safe:
+                    md += "\n> ⚠️ **WebRisk Warning**: One or more threat types detected.\n"
+            elif "error" in wr_result:
+                 md += f"⚠️ API Error: {wr_result['error']}\n"
+            else:
+                 md += "✅ No threats detected by WebRisk.\n"
+            md += "\n"
+            
         return md
     except Exception as e:
         return f"Error generating markdown report: {str(e)}"
@@ -402,6 +425,25 @@ Perform comprehensive first-level triage analysis now.
         
         clean_content = final_text.replace("```json", "").replace("```", "").strip()
         analysis = json.loads(clean_content)
+        
+        # [NEW] WebRisk Check for URLs
+        if ioc_type == "URL":
+            verdict = analysis.get("verdict", "").lower()
+            reasoning = final_text.lower()
+            should_check = (
+                verdict in ["suspicious", "malicious"] or
+                "phishing" in reasoning or
+                "social engineering" in reasoning
+            )
+            
+            if should_check:
+                logger.info("triage_webrisk_check_triggered", ioc=ioc)
+                try:
+                    wr_result = await webrisk.evaluate_uri(ioc)
+                    analysis["webrisk_result"] = wr_result
+                except Exception as e:
+                    logger.error("triage_webrisk_failed", error=str(e))
+                    analysis["webrisk_result"] = {"error": str(e)}
         
         analysis["markdown_report"] = generate_markdown_report_locally(analysis, ioc, ioc_type)
         analysis["_llm_reasoning"] = final_text  # Store for transparency

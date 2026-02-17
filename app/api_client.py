@@ -55,3 +55,37 @@ class HarimauAPIClient:
         res = requests.get(f"{self.base_url}/api/investigations/{job_id}/report")
         res.raise_for_status()
         return res.text
+
+    def stream_investigation_events(self, job_id: str):
+        """
+        Streams Server-Sent Events for investigation progress.
+        
+        Yields event dictionaries as they arrive from the backend.
+        Falls back to None if SSE is unavailable (caller should use polling).
+        
+        Usage:
+            for event in api.stream_investigation_events(job_id):
+                if event is None:
+                    # SSE failed, fall back to polling
+                    break
+                print(event['event_type'], event['data'])
+        """
+        try:
+            import sseclient
+            
+            url = f"{self.base_url}/api/investigations/{job_id}/stream"
+            response = requests.get(url, stream=True, timeout=600)  # 10-minute timeout
+            response.raise_for_status()
+            
+            client = sseclient.SSEClient(response)
+            for event in client.events():
+                if event.data:
+                    try:
+                        import json
+                        yield json.loads(event.data)
+                    except json.JSONDecodeError:
+                        continue  # Skip malformed events
+                        
+        except (requests.exceptions.RequestException, ImportError) as e:
+            # SSE failed or sseclient not installed, signal fallback
+            yield None

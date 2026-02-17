@@ -7,8 +7,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install specific dependencies for Frontend
-RUN pip install streamlit requests streamlit-agraph streamlit-mermaid
+# Copy and install frontend dependencies
+COPY app/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Copy Frontend Code
 COPY app /app/frontend

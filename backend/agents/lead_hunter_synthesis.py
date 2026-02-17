@@ -74,7 +74,7 @@ Where relevant, include the indicators that highlight that particular attack cha
 - Show attack progression (example: delivery -> execution -> C2 -> objectives)
 - Show the full ioc (sha256, IP Address, URL, Domain), do not truncate them. 
 - **Layout Optimization:**
-    - Use `rankdir=LR` (left to right) for a clearer, horizontal flow.
+    - Use `rankdir=TB` (top to bottom) for a clearer, vertical flow.
     - Set `graph [splines=ortho];` for cleaner lines if many connections exist.
     - If the graph is too wide, use `unflatten` logic (grouping nodes) or suggest multiple connected subgraphs.
 

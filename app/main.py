@@ -528,10 +528,21 @@ if st.session_state.current_job_id:
                     # Create timeline entry
                     col_num, col_time, col_agent, col_task = st.columns([1, 2, 2, 6])
                     
+                    # Format timestamp
+                    time_str = "Unknown time"
+                    if timestamp != 'Unknown time':
+                        try:
+                            dt = datetime.fromisoformat(timestamp)
+                            time_str = dt.strftime("%H:%M:%S")
+                        except ValueError:
+                            time_str = timestamp
+
                     with col_num:
                         st.markdown(f"**{idx}**")
                     with col_time:
-                        st.caption(timestamp if timestamp != 'Unknown time' else f"Step {idx}")
+                        st.caption(f"{time_str}")
+                        if duration != "N/A":
+                            st.caption(f"⏱️ {duration}")
                     with col_agent:
                         st.markdown(f"🤖 `{agent}`")
                     with col_task:

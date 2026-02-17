@@ -1,6 +1,7 @@
 import os
 import json
 import uuid
+from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
@@ -103,26 +104,68 @@ async def _run_investigation_background(job_id: str, ioc: str):
         
         final_state = await app_graph.ainvoke(initial_state)
         
-        # Preserve subtasks from triage for frontend display
-        # The Lead Hunter clears subtasks at the end, but the frontend needs them for timeline
-        # So we extract them from specialist_results which has the original task assignments
+        # Generate detailed timeline from SSE event history
+        timeline_events = sse_manager.get_events(job_id)
         initial_subtasks = []
-        specialist_results = final_state.get("specialist_results", {})
         
-        # Reconstruct subtasks from what each specialist was assigned
+        # Map agent names to specific tasks from triage results
+        specialist_results = final_state.get("specialist_results", {})
+        specialist_tasks = {}
         for agent_name, agent_data in specialist_results.items():
             if isinstance(agent_data, dict) and agent_data.get("task"):
-                initial_subtasks.append({
-                    "agent": agent_name,
-                    "task": agent_data.get("task", ""),
-                    "status": "completed"
-                })
+                specialist_tasks[agent_name] = agent_data.get("task")
+
+        # Track start times to calculate duration
+        start_times = {}
         
-        # Fallback: Try to get from metadata if available
+        # Process events to build timeline
+        for event in timeline_events:
+            evt_type = event.get("event_type", "")
+            data = event.get("data", {})
+            timestamp = event.get("timestamp")
+            
+            if "_started" in evt_type:
+                agent = data.get("agent")
+                if agent:
+                    start_times[agent] = timestamp
+            
+            elif "_completed" in evt_type:
+                agent = data.get("agent")
+                if agent:
+                    # Calculate duration
+                    duration = "N/A"
+                    if agent in start_times:
+                        try:
+                            start_dt = datetime.fromisoformat(start_times[agent])
+                            end_dt = datetime.fromisoformat(timestamp)
+                            duration = f"{(end_dt - start_dt).total_seconds():.2f}s"
+                        except ValueError:
+                            pass
+                    
+                    # Get specific task description if available, else generic message
+                    # For Triage/Lead Hunter, use the message. For Specialists, use the assigned task.
+                    task_desc = specialist_tasks.get(agent, data.get("message", ""))
+                    
+                    initial_subtasks.append({
+                        "agent": agent,
+                        "task": task_desc,
+                        "status": "completed",
+                        "timestamp": timestamp,
+                        "duration": duration
+                    })
+        
+        # Fallback: If no events found (shouldn't happen with SSE), use old method
         if not initial_subtasks:
-            metadata = final_state.get("metadata", {})
-            triage_data = metadata.get("rich_intel", {}).get("triage_analysis", {})
-            initial_subtasks = triage_data.get("subtasks", [])
+            logger.warning("sse_no_history_found", job_id=job_id)
+            for agent_name, agent_data in specialist_results.items():
+                if isinstance(agent_data, dict) and agent_data.get("task"):
+                    initial_subtasks.append({
+                        "agent": agent_name,
+                        "task": agent_data.get("task", ""),
+                        "status": "completed",
+                        "timestamp": datetime.now().isoformat(),
+                        "duration": "N/A"
+                    })
         
         # Update Job with results
         result = {

@@ -2,9 +2,10 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install dependencies (curl for healthcheck if needed)
+# Install dependencies (curl for healthcheck if needed, graphviz for charts)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    graphviz \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy and install frontend dependencies

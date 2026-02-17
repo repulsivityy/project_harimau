@@ -468,8 +468,8 @@ graph TD
   - Added missing asyncio import
 
 **Remaining**:
-- [ ] **Frontend SSE Client**: Replace polling loop in `app/main.py` with EventSource
-- [ ] **Fallback Mechanism**: Auto-fallback to polling if SSE connection fails
+- [x] **Frontend SSE Client**: Replaced polling loop in `app/main.py` with EventSource
+- [x] **Fallback Mechanism**: Auto-fallback to polling implemented
 - [ ] **Enhanced Events**:
   - [ ] Graph update events (when new entities discovered)
   - [ ] Agent reasoning stream (LLM thinking process)

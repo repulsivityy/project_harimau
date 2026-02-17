@@ -24,16 +24,19 @@ class SSEEventManager:
     
     def __init__(self):
         self._subscribers: Dict[str, list] = {}  # job_id -> list of subscriber queues
+        self._event_history: Dict[str, list] = {} # job_id -> list of past events
     
     def create_queue(self, job_id: str):
-        """Create subscriber list for a new investigation."""
+        """Create subscriber list and history for a new investigation."""
         if job_id not in self._subscribers:
             self._subscribers[job_id] = []
+            self._event_history[job_id] = []
             logger.info("sse_subscriber_list_created", job_id=job_id)
     
     async def emit_event(self, job_id: str, event_type: str, data: Dict[str, Any]):
         """
         Broadcast an event to all subscribers of this job_id.
+        Also stores the event in history for timeline generation.
         
         Args:
             job_id: Investigation job ID
@@ -41,8 +44,8 @@ class SSEEventManager:
             data: Event payload
         """
         if job_id not in self._subscribers:
-            logger.warning("sse_emit_no_subscribers", job_id=job_id, event_type=event_type)
-            return
+            # If no subscribers yet, create the entry so we can at least store history
+            self.create_queue(job_id)
         
         event = {
             "event_type": event_type,
@@ -50,12 +53,20 @@ class SSEEventManager:
             "data": data
         }
         
+        # Store in history
+        if job_id in self._event_history:
+            self._event_history[job_id].append(event)
+        
         # Broadcast to ALL subscribers
         for subscriber_queue in self._subscribers[job_id]:
             await subscriber_queue.put(event)
         
         logger.debug("sse_event_broadcast", job_id=job_id, event_type=event_type, 
                     subscriber_count=len(self._subscribers[job_id]))
+
+    def get_events(self, job_id: str) -> list:
+        """Retrieve the full event history for a job."""
+        return self._event_history.get(job_id, [])
     
     async def subscribe(self, job_id: str) -> AsyncGenerator[str, None]:
         """
@@ -118,6 +129,13 @@ class SSEEventManager:
                 if not self._subscribers[job_id]:
                     del self._subscribers[job_id]
                     logger.info("sse_subscriber_list_cleaned", job_id=job_id)
+
+
+    def clear_history(self, job_id: str):
+        """Clear event history for a job to free memory."""
+        if job_id in self._event_history:
+            del self._event_history[job_id]
+            logger.debug("sse_history_cleared", job_id=job_id)
 
 
 # Global singleton instance

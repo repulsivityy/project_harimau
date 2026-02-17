@@ -1,6 +1,7 @@
 import os
 import json
 import uuid
+from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
@@ -72,8 +73,20 @@ async def run_investigation(request: InvestigationRequest):
     }
 
 async def _run_investigation_background(job_id: str, ioc: str):
-    """Background task that runs the actual investigation."""
+    """Background task that runs the actual investigation with SSE event streaming."""
+    from backend.utils.sse_manager import sse_manager
+    
     try:
+        # Create SSE queue for this investigation
+        sse_manager.create_queue(job_id)
+        
+        # Emit: Investigation started
+        await sse_manager.emit_event(job_id, "investigation_started", {
+            "job_id": job_id,
+            "ioc": ioc,
+            "message": "Investigation started"
+        })
+        
         initial_state = {
             "job_id": job_id,
             "ioc": ioc,
@@ -83,28 +96,76 @@ async def _run_investigation_background(job_id: str, ioc: str):
             "metadata": {}
         }
         
+        # Emit: Workflow execution started
+        await sse_manager.emit_event(job_id, "workflow_started", {
+            "message": "LangGraph workflow initiated",
+            "progress": 5
+        })
+        
         final_state = await app_graph.ainvoke(initial_state)
         
-        # Preserve subtasks from triage for frontend display
-        # The Lead Hunter clears subtasks at the end, but the frontend needs them for timeline
-        # So we extract them from specialist_results which has the original task assignments
+        # Generate detailed timeline from SSE event history
+        timeline_events = sse_manager.get_events(job_id)
         initial_subtasks = []
-        specialist_results = final_state.get("specialist_results", {})
         
-        # Reconstruct subtasks from what each specialist was assigned
+        # Map agent names to specific tasks from triage results
+        specialist_results = final_state.get("specialist_results", {})
+        specialist_tasks = {}
         for agent_name, agent_data in specialist_results.items():
             if isinstance(agent_data, dict) and agent_data.get("task"):
-                initial_subtasks.append({
-                    "agent": agent_name,
-                    "task": agent_data.get("task", ""),
-                    "status": "completed"
-                })
+                specialist_tasks[agent_name] = agent_data.get("task")
+
+        # Track start times to calculate duration
+        start_times = {}
         
-        # Fallback: Try to get from metadata if available
+        # Process events to build timeline
+        for event in timeline_events:
+            evt_type = event.get("event_type", "")
+            data = event.get("data", {})
+            timestamp = event.get("timestamp")
+            
+            if "_started" in evt_type:
+                agent = data.get("agent")
+                if agent:
+                    start_times[agent] = timestamp
+            
+            elif "_completed" in evt_type:
+                agent = data.get("agent")
+                if agent:
+                    # Calculate duration
+                    duration = "N/A"
+                    if agent in start_times:
+                        try:
+                            start_dt = datetime.fromisoformat(start_times[agent])
+                            end_dt = datetime.fromisoformat(timestamp)
+                            duration = f"{(end_dt - start_dt).total_seconds():.2f}s"
+                        except ValueError:
+                            pass
+                    
+                    # Get specific task description if available, else generic message
+                    # For Triage/Lead Hunter, use the message. For Specialists, use the assigned task.
+                    task_desc = specialist_tasks.get(agent, data.get("message", ""))
+                    
+                    initial_subtasks.append({
+                        "agent": agent,
+                        "task": task_desc,
+                        "status": "completed",
+                        "timestamp": timestamp,
+                        "duration": duration
+                    })
+        
+        # Fallback: If no events found (shouldn't happen with SSE), use old method
         if not initial_subtasks:
-            metadata = final_state.get("metadata", {})
-            triage_data = metadata.get("rich_intel", {}).get("triage_analysis", {})
-            initial_subtasks = triage_data.get("subtasks", [])
+            logger.warning("sse_no_history_found", job_id=job_id)
+            for agent_name, agent_data in specialist_results.items():
+                if isinstance(agent_data, dict) and agent_data.get("task"):
+                    initial_subtasks.append({
+                        "agent": agent_name,
+                        "task": agent_data.get("task", ""),
+                        "status": "completed",
+                        "timestamp": datetime.now().isoformat(),
+                        "duration": "N/A"
+                    })
         
         # Update Job with results
         result = {
@@ -124,10 +185,28 @@ async def _run_investigation_background(job_id: str, ioc: str):
         JOBS[job_id] = result
         logger.info("investigation_complete", job_id=job_id, status="completed")
         
+        # Emit: Investigation completed
+        await sse_manager.emit_event(job_id, "investigation_completed", {
+            "job_id": job_id,
+            "status": "completed",
+            "message": "Investigation completed successfully",
+            "progress": 100,
+            "ioc_type": result.get("ioc_type"),
+            "risk_level": result.get("risk_level")
+        })
+        
     except Exception as e:
         logger.error("investigation_failed", job_id=job_id, error=str(e))
         JOBS[job_id]["status"] = "failed"
         JOBS[job_id]["error"] = str(e)
+        
+        # Emit: Investigation failed
+        await sse_manager.emit_event(job_id, "investigation_failed", {
+            "job_id": job_id,
+            "status": "failed",
+            "error": str(e),
+            "message": f"Investigation failed: {str(e)}"
+        })
 
 @app.get("/api/investigations/{job_id}")
 async def get_investigation(job_id: str):
@@ -138,6 +217,42 @@ async def get_investigation(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+@app.get("/api/investigations/{job_id}/stream")
+async def stream_investigation(job_id: str):
+    """
+    SSE endpoint for real-time investigation progress streaming.
+    
+    Streams events as the investigation progresses:
+    - investigation_started
+    - workflow_started
+    - triage_started / triage_completed
+    - specialist_started / specialist_completed
+    - lead_hunter_started / lead_hunter_completed
+    - investigation_completed / investigation_failed
+    
+    Usage:
+        EventSource: new EventSource('/api/investigations/{job_id}/stream')
+        Curl: curl -N /api/investigations/{job_id}/stream
+    """
+    from fastapi.responses import StreamingResponse
+    from backend.utils.sse_manager import sse_manager
+    
+    # Check if job exists
+    if job_id not in JOBS:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    logger.info("sse_stream_requested", job_id=job_id)
+    
+    return StreamingResponse(
+        sse_manager.subscribe(job_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable buffering for Cloud Run
+        }
+    )
 
 @app.get("/api/debug/investigation/{job_id}")
 async def debug_investigation(job_id: str):
@@ -890,3 +1005,82 @@ async def test_tool_directly(ioc: str):
             }
     except Exception as e:
         return {"error": str(e)}
+
+# ============================================
+# SSE Compatibility Test Endpoint
+# ============================================
+
+@app.get("/api/test/sse")
+async def test_sse_compatibility():
+    """
+    Test endpoint to validate SSE works on Cloud Run.
+    
+    This endpoint:
+    1. Streams 10 events over 60 seconds (6 seconds apart)
+    2. Includes keepalive pings every 3 seconds
+    3. Uses proper headers to prevent buffering
+    
+    Test with:
+        curl -N https://your-backend-url/api/test/sse
+    
+    Expected behavior:
+    - Events should appear every 6 seconds in real-time
+    - If events arrive in a burst at the end, Cloud Run is buffering (problem)
+    - If events stream smoothly, SSE is compatible (success)
+    """
+    import asyncio
+    import time
+    from datetime import datetime
+    from fastapi.responses import StreamingResponse
+    
+    async def event_generator():
+        """Generate test events with keepalive pings."""
+        logger.info("sse_test_started", message="Client connected to SSE test endpoint")
+        
+        try:
+            for i in range(10):
+                # Send numbered event
+                timestamp = datetime.now().isoformat()
+                event_data = {
+                    "event_number": i + 1,
+                    "timestamp": timestamp,
+                    "message": f"Test event {i + 1}/10"
+                }
+                
+                event_payload = f"data: {json.dumps(event_data)}\n\n"
+                logger.info("sse_test_event", event_number=i + 1)
+                yield event_payload
+                
+                # Wait 6 seconds, but send keepalive pings every 3 seconds
+                for _ in range(2):
+                    await asyncio.sleep(3)
+                    # Send keepalive comment (ignored by EventSource clients)
+                    yield ": keepalive\n\n"
+            
+            # Send completion event
+            completion_data = {
+                "event_number": "final",
+                "timestamp": datetime.now().isoformat(),
+                "message": "Test completed successfully",
+                "status": "complete"
+            }
+            yield f"data: {json.dumps(completion_data)}\n\n"
+            logger.info("sse_test_completed", message="All events sent successfully")
+            
+        except asyncio.CancelledError:
+            logger.info("sse_test_cancelled", message="Client disconnected")
+            raise
+        except Exception as e:
+            logger.error("sse_test_error", error=str(e))
+            error_data = {"error": str(e), "status": "failed"}
+            yield f"data: {json.dumps(error_data)}\n\n"
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx/proxy buffering
+        }
+    )

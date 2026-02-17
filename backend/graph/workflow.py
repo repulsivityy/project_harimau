@@ -1,15 +1,22 @@
 from langgraph.graph import StateGraph, END
 from backend.graph.state import AgentState
-from backend.agents.triage import triage_node
-from backend.agents.malware import malware_node
-from backend.agents.infrastructure import infrastructure_node
-from backend.agents.lead_hunter import lead_hunter_node
+from backend.agents.triage import triage_node as _triage_node
+from backend.agents.malware import malware_node as _malware_node
+from backend.agents.infrastructure import infrastructure_node as _infra_node
+from backend.agents.lead_hunter import lead_hunter_node as _lead_hunter_node
+from backend.graph.sse_wrappers import with_sse_events
 from backend.utils.logger import get_logger
 
 ## Global Variables
 hunt_iterations = 3 # Changed from 1 to 2 for additional investigation round
 
 logger = get_logger("workflow_graph")
+
+# Wrap nodes with SSE event emissions
+triage_node = with_sse_events("triage")(_triage_node)
+malware_node = with_sse_events("malware_specialist")(_malware_node)
+infrastructure_node = with_sse_events("infrastructure_specialist")(_infra_node)
+lead_hunter_node = with_sse_events("lead_hunter")(_lead_hunter_node)
 
 def build_graph():
     """

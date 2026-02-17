@@ -890,3 +890,82 @@ async def test_tool_directly(ioc: str):
             }
     except Exception as e:
         return {"error": str(e)}
+
+# ============================================
+# SSE Compatibility Test Endpoint
+# ============================================
+
+@app.get("/api/test/sse")
+async def test_sse_compatibility():
+    """
+    Test endpoint to validate SSE works on Cloud Run.
+    
+    This endpoint:
+    1. Streams 10 events over 60 seconds (6 seconds apart)
+    2. Includes keepalive pings every 3 seconds
+    3. Uses proper headers to prevent buffering
+    
+    Test with:
+        curl -N https://your-backend-url/api/test/sse
+    
+    Expected behavior:
+    - Events should appear every 6 seconds in real-time
+    - If events arrive in a burst at the end, Cloud Run is buffering (problem)
+    - If events stream smoothly, SSE is compatible (success)
+    """
+    import asyncio
+    import time
+    from datetime import datetime
+    from fastapi.responses import StreamingResponse
+    
+    async def event_generator():
+        """Generate test events with keepalive pings."""
+        logger.info("sse_test_started", message="Client connected to SSE test endpoint")
+        
+        try:
+            for i in range(10):
+                # Send numbered event
+                timestamp = datetime.now().isoformat()
+                event_data = {
+                    "event_number": i + 1,
+                    "timestamp": timestamp,
+                    "message": f"Test event {i + 1}/10"
+                }
+                
+                event_payload = f"data: {json.dumps(event_data)}\n\n"
+                logger.info("sse_test_event", event_number=i + 1)
+                yield event_payload
+                
+                # Wait 6 seconds, but send keepalive pings every 3 seconds
+                for _ in range(2):
+                    await asyncio.sleep(3)
+                    # Send keepalive comment (ignored by EventSource clients)
+                    yield ": keepalive\n\n"
+            
+            # Send completion event
+            completion_data = {
+                "event_number": "final",
+                "timestamp": datetime.now().isoformat(),
+                "message": "Test completed successfully",
+                "status": "complete"
+            }
+            yield f"data: {json.dumps(completion_data)}\n\n"
+            logger.info("sse_test_completed", message="All events sent successfully")
+            
+        except asyncio.CancelledError:
+            logger.info("sse_test_cancelled", message="Client disconnected")
+            raise
+        except Exception as e:
+            logger.error("sse_test_error", error=str(e))
+            error_data = {"error": str(e), "status": "failed"}
+            yield f"data: {json.dumps(error_data)}\n\n"
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx/proxy buffering
+        }
+    )

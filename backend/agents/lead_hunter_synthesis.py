@@ -27,11 +27,11 @@ Produce a comprehensive Markdown report that reads like a high-level Threat Inte
 
 ### Lead Threat Hunter - Investigation Synthesis
 
-### 1. Executive Summary (3-4 sentences)
-High-level overview: What threat infrastructure was discovered, malware capabilities identified, and key findings.
+### 1. Executive Summary
+High-level overview in 3-4 sentences: What threat infrastructure was discovered, malware capabilities identified, and key findings.
 
-### 2. Attack Narrative (4-8 sentences)
-How does the attack chain work? Connect the malware behavior to the infrastructure. 
+### 2. Attack Narrative:
+Provide the attack narrative in 6-8 sentences: How does the attack chain work? Connect the malware behavior to the infrastructure. 
 Explain the complete kill chain from delivery through post-exploitation. 
 
 ### 3. Investigation Timeline (Bullet Points)
@@ -47,13 +47,16 @@ Explain the complete kill chain from delivery through post-exploitation.
 **Sophistication**: [Advanced/Moderate/Low] - based on TTPs and evasion techniques
 **Assessment Justification**: Brief explanation of the profiling.
 
-#### 4.2. Malware Profile (Integrate Malware Specialist Findings)
+#### 4.2. Malware Profile
+NOTE: Integrate findings from Malware Specialist
 **Family/Verdict**: [e.g., Emotet / Malicious]
-**Capabilities**: Summarize key capabilities (e.g., "Screenshots", "Keylogging", "Credential Theft").
+**Capabilities**: Summarize key capabilities (e.g., "Screenshots", "Keylogging", "Credential Theft", "Ransomware", "Data Exfiltration").
 **Sophistication**: [Advanced/Moderate/Low] - based on TTPs and evasion techniques
+**Relationships**: Did the malware drop any files (eg, a ransom note?)? Did it use a malicious driver or DLL? Was a living-off-the-land binary used?  
 **Assessment Justification**: Brief explanation of the profiling.
 
-#### 4.3. Infrastructure Mapping (Integrate Infra Specialist Findings)
+#### 4.3. Infrastructure Mapping    
+NOTE: Integrate findings from Infrastructure Specialist
 Map the threat infrastructure and identify patterns:
 - **DNS Infrastructure**: Shared nameservers, registrars, or domain patterns (e.g., "All C2 domains use Cloudflare NS")
 - **Hosting Infrastructure**: Shared ASNs, IP ranges, or hosting providers (e.g., "15 domains resolve to same /24 subnet")
@@ -100,11 +103,14 @@ digraph AttackChain {
 *   Mention any overlaps with known threat actors or campaigns.
 *   Cite specific TTPs or infrastructure patterns that match known groups.
 
-### 8. Additional Notes
+### 8. Final Assessment
+Provide a final assessment of the investigation including any recommendations.
+
+### 9. Additional Notes
 *   Include any additional relevant information or insights.
 *   Include 3-5 hunt hypotheses to hunt for the same threat actor in the future.
 
-### 9. Appendix
+### 10. Appendix
 *   Include all IOCs in a table format 
 | IOC Type | Value | Notes | Confidence |
 | --- | --- | --- | --- |

@@ -72,8 +72,20 @@ async def run_investigation(request: InvestigationRequest):
     }
 
 async def _run_investigation_background(job_id: str, ioc: str):
-    """Background task that runs the actual investigation."""
+    """Background task that runs the actual investigation with SSE event streaming."""
+    from backend.utils.sse_manager import sse_manager
+    
     try:
+        # Create SSE queue for this investigation
+        sse_manager.create_queue(job_id)
+        
+        # Emit: Investigation started
+        await sse_manager.emit_event(job_id, "investigation_started", {
+            "job_id": job_id,
+            "ioc": ioc,
+            "message": "Investigation started"
+        })
+        
         initial_state = {
             "job_id": job_id,
             "ioc": ioc,
@@ -82,6 +94,12 @@ async def _run_investigation_background(job_id: str, ioc: str):
             "specialist_results": {},
             "metadata": {}
         }
+        
+        # Emit: Workflow execution started
+        await sse_manager.emit_event(job_id, "workflow_started", {
+            "message": "LangGraph workflow initiated",
+            "progress": 5
+        })
         
         final_state = await app_graph.ainvoke(initial_state)
         
@@ -124,10 +142,28 @@ async def _run_investigation_background(job_id: str, ioc: str):
         JOBS[job_id] = result
         logger.info("investigation_complete", job_id=job_id, status="completed")
         
+        # Emit: Investigation completed
+        await sse_manager.emit_event(job_id, "investigation_completed", {
+            "job_id": job_id,
+            "status": "completed",
+            "message": "Investigation completed successfully",
+            "progress": 100,
+            "ioc_type": result.get("ioc_type"),
+            "risk_level": result.get("risk_level")
+        })
+        
     except Exception as e:
         logger.error("investigation_failed", job_id=job_id, error=str(e))
         JOBS[job_id]["status"] = "failed"
         JOBS[job_id]["error"] = str(e)
+        
+        # Emit: Investigation failed
+        await sse_manager.emit_event(job_id, "investigation_failed", {
+            "job_id": job_id,
+            "status": "failed",
+            "error": str(e),
+            "message": f"Investigation failed: {str(e)}"
+        })
 
 @app.get("/api/investigations/{job_id}")
 async def get_investigation(job_id: str):
@@ -138,6 +174,42 @@ async def get_investigation(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+@app.get("/api/investigations/{job_id}/stream")
+async def stream_investigation(job_id: str):
+    """
+    SSE endpoint for real-time investigation progress streaming.
+    
+    Streams events as the investigation progresses:
+    - investigation_started
+    - workflow_started
+    - triage_started / triage_completed
+    - specialist_started / specialist_completed
+    - lead_hunter_started / lead_hunter_completed
+    - investigation_completed / investigation_failed
+    
+    Usage:
+        EventSource: new EventSource('/api/investigations/{job_id}/stream')
+        Curl: curl -N /api/investigations/{job_id}/stream
+    """
+    from fastapi.responses import StreamingResponse
+    from backend.utils.sse_manager import sse_manager
+    
+    # Check if job exists
+    if job_id not in JOBS:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    logger.info("sse_stream_requested", job_id=job_id)
+    
+    return StreamingResponse(
+        sse_manager.subscribe(job_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable buffering for Cloud Run
+        }
+    )
 
 @app.get("/api/debug/investigation/{job_id}")
 async def debug_investigation(job_id: str):

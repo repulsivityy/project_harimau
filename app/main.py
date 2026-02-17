@@ -80,6 +80,14 @@ if st.session_state.current_job_id:
             status_text = st.empty()
             progress_details = st.empty()
             
+            # Agent Activity Log (Transparency Feature)
+            activity_expander = st.expander("🔍 Agent Activity Log", expanded=False)
+            activity_log_container = activity_expander.empty()
+            
+            # Initialize session state for activity log
+            if "activity_log" not in st.session_state:
+                st.session_state.activity_log = []
+            
             # Try SSE first, fallback to polling if unavailable
             use_sse = True
             complete = False
@@ -125,6 +133,30 @@ if st.session_state.current_job_id:
                         elif "started" in event_type:
                             # Agent started
                             status_text.info(f"🤖 {message}")
+                        elif event_type == "tool_invocation":
+                            # Tool call transparency
+                            tool = data.get("tool", "unknown")
+                            agent_name = data.get("agent", "unknown")
+                            args = data.get("args", {})
+                            log_entry = f"🔧 **{agent_name}**: Calling `{tool}`"
+                            st.session_state.activity_log.append(log_entry)
+                            # Update activity log display
+                            with activity_log_container:
+                                for entry in st.session_state.activity_log[-20:]:  # Show last 20 entries
+                                    st.caption(entry)
+                        elif event_type == "agent_reasoning":
+                            # LLM reasoning transparency
+                            agent_name = data.get("agent", "unknown")
+                            thought = data.get("thought", "")
+                            log_entry = f"💭 **{agent_name}**: Generated reasoning ({len(thought)} chars)"
+                            st.session_state.activity_log.append({"type": "reasoning", "agent": agent_name, "thought": thought})
+                            # Update activity log display
+                            with activity_log_container:
+                                for entry in st.session_state.activity_log[-20:]:
+                                    if isinstance(entry, dict) and entry.get("type") == "reasoning":
+                                        st.caption(f"💭 **{entry['agent']}**: [Reasoning available - {len(entry['thought'])} chars]")
+                                    else:
+                                        st.caption(entry)
                         else:
                             # Generic status update
                             status_text.info(f"🔄 {message}")
@@ -173,7 +205,7 @@ if st.session_state.current_job_id:
         subtasks = res.get("subtasks", [])
                 
         # Tabs for different views
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📝 Triage & Plan", "🕸️ Graph", "🤖 Specialist Reports", "📄 Final Report", "⏱️ Timeline"])
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📝 Triage & Plan", "🕸️ Graph", "🤖 Specialist Reports", "📄 Final Report", "⏱️ Timeline", "🧠 Agent Thinking & Tools"])
         
         with tab1:
             st.subheader("Triage Assessment")
@@ -552,6 +584,49 @@ if st.session_state.current_job_id:
                         st.markdown("<div style='border-left: 2px solid #444; height: 10px; margin-left: 20px;'></div>", unsafe_allow_html=True)
             else:
                 st.info("No timeline data available for this investigation.")
+        
+        # Tab 6: Agent Thinking & Tools
+        with tab6:
+            st.subheader("Agent Transparency Log")
+            st.caption("Full record of agent reasoning and tool invocations during the investigation")
+            
+            # Check if transparency log exists
+            transparency_log = res.get("transparency_log", [])
+            
+            if transparency_log:
+                st.info(f"📊 **{len(transparency_log)} transparency events recorded**")
+                
+                # Display each event
+                for idx, event in enumerate(transparency_log, 1):
+                    event_type = event.get("type")
+                    agent = event.get("agent", "unknown")
+                    timestamp = event.get("timestamp", "")
+                    
+                    # Format timestamp
+                    time_str = ""
+                    if timestamp:
+                        try:
+                            dt = datetime.fromisoformat(timestamp)
+                            time_str = dt.strftime("%H:%M:%S.%f")[:-3]  # Show milliseconds
+                        except ValueError:
+                            time_str = timestamp
+                    
+                    if event_type == "tool":
+                        tool = event.get("tool", "unknown")
+                        args = event.get("args", {})
+                        
+                        with st.expander(f"🔧 **{idx}.** `{agent}` → `{tool}` ({time_str})", expanded=False):
+                            st.json(args)
+                    
+                    elif event_type == "reasoning":
+                        thought = event.get("thought", "")
+                        preview = thought[:100] + "..." if len(thought) > 100 else thought
+                        
+                        with st.expander(f"💭 **{idx}.** `{agent}` LLM Reasoning ({len(thought)} chars) - {time_str}", expanded=False):
+                            st.markdown(f"```\n{thought}\n```")
+            else:
+                st.info("No transparency log available for this investigation.")
+                st.caption("This feature requires investigation to run with transparency events enabled.")
 
     except requests.exceptions.ConnectionError:
         st.error("🔌 Cannot connect to backend server")

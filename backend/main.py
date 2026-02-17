@@ -167,6 +167,26 @@ async def _run_investigation_background(job_id: str, ioc: str):
                         "duration": "N/A"
                     })
         
+        # Extract transparency log from SSE event history
+        transparency_log = []
+        for event in timeline_events:
+            event_type = event.get("event_type", "")
+            if event_type == "tool_invocation":
+                transparency_log.append({
+                    "type": "tool",
+                    "timestamp": event.get("timestamp"),
+                    "agent": event.get("data", {}).get("agent"),
+                    "tool": event.get("data", {}).get("tool"),
+                    "args": event.get("data", {}).get("args", {})
+                })
+            elif event_type == "agent_reasoning":
+                transparency_log.append({
+                    "type": "reasoning",
+                    "timestamp": event.get("timestamp"),
+                    "agent": event.get("data", {}).get("agent"),
+                    "thought": event.get("data", {}).get("thought", "")
+                })
+        
         # Update Job with results
         result = {
             "job_id": job_id,
@@ -180,7 +200,8 @@ async def _run_investigation_background(job_id: str, ioc: str):
             "rich_intel": final_state.get("metadata", {}).get("rich_intel", {}),
             "specialist_results": specialist_results,
             "metadata": final_state.get("metadata", {}),
-            "investigation_graph": final_state.get("investigation_graph")  # Add graph to result
+            "investigation_graph": final_state.get("investigation_graph"),  # Add graph to result
+            "transparency_log": transparency_log  # Agent transparency events
         }
         JOBS[job_id] = result
         logger.info("investigation_complete", job_id=job_id, status="completed")

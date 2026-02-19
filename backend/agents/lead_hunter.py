@@ -1,5 +1,6 @@
 import os
 from langchain_google_vertexai import ChatVertexAI
+#from langchain_google_genai import ChatGoogleGenerativeAI # preperation for migration
 from backend.graph.state import AgentState
 from backend.utils.logger import get_logger
 from backend.utils.graph_cache import InvestigationCache
@@ -26,7 +27,12 @@ async def lead_hunter_node(state: AgentState):
         project=project_id,
         location="global" # Using global endpoint for Gemini 2.5 Pro
     )
-    
+    """
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-3.1-pro-preview",
+        project=project_id,
+    )
+    """
     # Initialize Cache to read graph state
     cache = InvestigationCache(state.get("investigation_graph"))
     

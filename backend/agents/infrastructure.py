@@ -8,6 +8,7 @@ from backend.graph.state import AgentState
 from backend.mcp.client import mcp_manager
 from backend.utils.logger import get_logger
 from backend.utils.graph_cache import InvestigationCache
+from backend.utils.transparency import emit_tool_call, emit_reasoning
 import backend.tools.webrisk as webrisk
 
 ## Global Variables
@@ -367,6 +368,11 @@ Analyze the following infrastructure indicators based on the triage context abov
                         args = tc["args"]
                         logger.info("infra_invoking_tool", iteration=iteration, tool=tool_name, args=args)
                         
+                        # Emit tool call transparency
+                        job_id = state.get("job_id")
+                        if job_id:
+                            await emit_tool_call(job_id, "infrastructure", tool_name, args)
+                        
                         # Invoke the right tool
                         result_txt = ""
                         if tool_name == "get_domain_report": result_txt = await get_domain_report.ainvoke(args)
@@ -471,6 +477,11 @@ Analyze the following infrastructure indicators based on the triage context abov
                 
                 # Generate Report
                 result["markdown_report"] = generate_infrastructure_markdown_report(result, ioc)
+                
+                # Emit final LLM reasoning for transparency (matches triage pattern)
+                job_id = state.get("job_id")
+                if job_id and 'final_text' in locals():
+                    await emit_reasoning(job_id, "infrastructure", final_text)
                 
                 # --- Graph Population (Related Indicators) ---
                 related = result.get("related_indicators", [])

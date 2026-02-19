@@ -10,6 +10,7 @@ from backend.utils.logger import get_logger
 import backend.tools.gti as gti
 import backend.tools.webrisk as webrisk
 from backend.utils.graph_cache import InvestigationCache
+from backend.utils.transparency import emit_tool_call, emit_reasoning
 
 logger = get_logger("agent_triage")
 
@@ -361,7 +362,8 @@ async def comprehensive_triage_analysis(
     ioc: str,
     ioc_type: str,
     triage_data: dict,
-    relationships_data: dict
+    relationships_data: dict,
+    state: dict = None  # Added to access job_id
 ) -> dict:
     """
     PHASE 2: Comprehensive first-level analysis by triage LLM.
@@ -411,6 +413,15 @@ Perform comprehensive first-level triage analysis now.
         """)
     ]
     
+    # Emit reasoning event before LLM call
+    job_id = state.get("job_id") if 'state' in locals() else None
+    if job_id:
+        await emit_tool_call(job_id, "triage", "comprehensive_analysis_llm", {
+            "model": "gemini-2.5-flash",
+            "ioc": ioc,
+            "relationships_count": len(relationships_data)
+        })
+    
     response = await llm.ainvoke(messages)
     
     # Parse response
@@ -439,6 +450,10 @@ Perform comprehensive first-level triage analysis now.
             if should_check:
                 logger.info("triage_webrisk_check_triggered", ioc=ioc)
                 try:
+                    # Emit WebRisk tool call
+                    if job_id:
+                        await emit_tool_call(job_id, "triage", "webrisk.evaluate_uri", {"url": ioc})
+                    
                     wr_result = await webrisk.evaluate_uri(ioc)
                     analysis["webrisk_result"] = wr_result
                 except Exception as e:
@@ -447,6 +462,10 @@ Perform comprehensive first-level triage analysis now.
         
         analysis["markdown_report"] = generate_markdown_report_locally(analysis, ioc, ioc_type)
         analysis["_llm_reasoning"] = final_text  # Store for transparency
+        
+        # Emit LLM reasoning for real-time transparency
+        if job_id:
+            await emit_reasoning(job_id, "triage", final_text)
         
         logger.info("phase2_analysis_complete",
                    verdict=analysis.get("verdict"),
@@ -518,6 +537,14 @@ async def triage_node(state: AgentState):
         
         # 2. Get base facts AND relationships in one Super-Bundle call
         logger.info("triage_fetching_super_bundle", ioc=ioc, rel_count=len(priority_rels))
+        
+        # Emit tool invocation for transparency
+        job_id = state.get("job_id")
+        if job_id:
+            await emit_tool_call(job_id, "triage", f"gti.{config['direct_tool'].__name__}", {
+                "ioc": ioc,
+                "relationships": priority_rels[:5]  # Show first 5 to avoid huge logs
+            })
         
         # Pass priority_rels to the tool to trigger bundling
         base_data = await config["direct_tool"](ioc, relationships=priority_rels)
@@ -687,7 +714,8 @@ async def triage_node(state: AgentState):
             ioc=ioc,
             ioc_type=config["type"],
             triage_data=triage_data,
-            relationships_data=relationships_data
+            relationships_data=relationships_data,
+            state=state  # Pass state for job_id access
         )
         
         # Update state with comprehensive analysis

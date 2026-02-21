@@ -40,7 +40,7 @@ async def lead_hunter_node(state: AgentState):
     current_iteration = state.get("iteration", 0)
     
     # Max iterations is controlled by workflow.py (hunt_iterations), 
-    MAX_ITERATIONS = 2 
+    MAX_ITERATIONS = 3 
     
     if current_iteration < MAX_ITERATIONS:
         # --- PLANNING MODE ---

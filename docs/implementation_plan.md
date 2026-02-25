@@ -374,7 +374,7 @@ Infra --> LeadReview
 
 
 ## Phase 6: Near-Term Roadmap (Post-MVP)
-- [ ] **Real-Time Streaming**: Refactor Frontend/Backend to use SSE (Server-Sent Events) instead of polling.
+- [X] **Real-Time Streaming**: Refactor Frontend/Backend to use SSE (Server-Sent Events) instead of polling.
 - [ ] **Microservices Split**: *If* scaling requires it, extract the MCP server into a dedicated Cloud Run service (Sidecar).
 - [ ] **Advanced Error Handling**: Implement exponential backoff for GTI API and automatic agent retries.
 - [ ] **Authentication Hardening**: Switch from `--allow-unauthenticated` to IAP/IAM.
@@ -385,8 +385,8 @@ Infra --> LeadReview
     - [ ] Advanced prompting for autonomous decisions
     - [ ] Adaptive iteration limits
     - [ ] Hunt package generation (YARA/Sigma)
-    - [ ] Timeline reconstruction
-    - [ ] Tools - Webrisk
+    - [X] Timeline reconstruction
+    - [X] Tools - Webrisk
     - [ ] Tools - URLScan
     - [ ] Tools - Shodan
     - [ ] Tools - OpenCTI

@@ -30,10 +30,15 @@ graph TD
 ### 2.1 Frontend (`/app`)
 * **Technology**: Streamlit (Python).
 * **Role**: Pure presentation layer.
+* **Architecture**: Component-based modularity.
+  - `main.py`: Application entry point and orchestrator.
+  - `components/sidebar.py`: Settings, health-checks, graph controls.
+  - `components/investigation_tracker.py`: Job polling and SSE progress streaming.
+  - `components/results_tabs.py`: Renders Triage, Graph, Specialists, and Timeline tabs.
 * **Authentication**: Google IAP / IAM (via Cloud Run).
 * **Logic**:
   - Submits jobs to Backend (`POST /api/investigate`).
-  - Polls for status updates.
+  - Polls for status updates via tracker component.
   - Visualizes graph with rich tooltips (threat scores, filenames, categories).
 
 ### 2.2 Backend (`/backend`)

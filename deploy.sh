@@ -1,4 +1,40 @@
 #!/bin/bash
+# =============================================================================
+# Project Harimau — Deployment Script
+# =============================================================================
+#
+# USAGE:
+#   ./deploy.sh [backend|frontend|all]
+#
+#   backend   — Deploy backend Cloud Run service only
+#   frontend  — Deploy frontend Cloud Run service only
+#   all       — Deploy both (default)
+#
+# REQUIRED ENV VARS (export before running):
+#   GTI_API_KEY        Google Threat Intelligence API key
+#                      Saved to Secret Manager as 'harimau-gti-api-key'
+#
+#   WEBRISK_API_KEY    Google Web Risk API key
+#                      Saved to Secret Manager as 'harimau-webrisk-api-key'
+#
+# OPTIONAL ENV VARS:
+#   DETECTION_AGENT_URL   A2A endpoint of the detection agent Cloud Run service.
+#                         When set, backend is deployed with DETECTION_AGENT_ENABLED=true
+#                         so completed investigations are forwarded to the detection agent.
+#                         When unset, DETECTION_AGENT_ENABLED=false (default — no forwarding).
+#
+#                         Example:
+#                           export DETECTION_AGENT_URL=https://detection-agent-<PROJECT_ID>.asia-southeast1.run.app
+#                           ./deploy.sh backend
+#
+#                         To toggle without redeploying:
+#                           gcloud run services update harimau-backend \
+#                             --set-env-vars DETECTION_AGENT_ENABLED=true,DETECTION_AGENT_URL=https://...
+#
+# NOTES:
+#   - Requires gcloud CLI authenticated and project set (gcloud config set project <PROJECT_ID>)
+#   - Region defaults to asia-southeast1. Change REGION below if needed.
+# =============================================================================
 set -e
 
 # Configuration
@@ -99,14 +135,25 @@ fi
 
 
 
-# 4. Deploy Logic
+# 4. Detection Agent Integration (optional)
+# Set DETECTION_AGENT_URL locally to enable forwarding completed investigations to the detection agent.
+# Example: export DETECTION_AGENT_URL=https://detection-agent-<PROJECT_ID>.asia-southeast1.run.app
+if [ -n "$DETECTION_AGENT_URL" ]; then
+    echo "🔗 Detection Agent integration enabled: $DETECTION_AGENT_URL"
+    DETECTION_AGENT_VARS=",DETECTION_AGENT_ENABLED=true,DETECTION_AGENT_URL=${DETECTION_AGENT_URL}"
+else
+    echo "ℹ️  DETECTION_AGENT_URL not set. Detection Agent integration disabled."
+    DETECTION_AGENT_VARS=",DETECTION_AGENT_ENABLED=false"
+fi
+
+# 5. Deploy Logic
 if [[ "$TARGET" == "backend" || "$TARGET" == "all" ]]; then
     echo "🚀 Deploying Backend..."
     gcloud run deploy $BACKEND_SERVICE \
         --source . \
         --region $REGION \
         --allow-unauthenticated \
-        --set-env-vars "LOG_LEVEL=DEBUG,MAX_DEPTH=2,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_REGION=${REGION}" \
+        --set-env-vars "LOG_LEVEL=DEBUG,MAX_DEPTH=2,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_REGION=${REGION}${DETECTION_AGENT_VARS}" \
         --set-secrets "VT_APIKEY=${SECRET_NAME}:latest,GTI_API_KEY=${SECRET_NAME}:latest,WEBRISK_API_KEY=${WEBRISK_SECRET_NAME}:latest" \
         --command "uvicorn" \
         --args "backend.main:app,--host,0.0.0.0,--port,8080" \

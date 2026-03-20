@@ -38,12 +38,13 @@ async with mcp_manager.get_session("gti") as session:
 ```python
     llm = ChatVertexAI(model="gemini-2.5-flash", temperature=0)
     llm_with_tools = llm.bind_tools([tool1, tool2, ...])
-    
+
     messages = [SystemMessage(content=PROMPT), HumanMessage(content=task)]
     final_content = None
-    
-    for iteration in range(7):
-        if iteration == 6:
+    max_iterations = malware_iterations  # or infra_iterations = 10
+
+    for iteration in range(max_iterations):
+        if iteration == max_iterations - 1:
             messages.append(HumanMessage(
                 content="Final iteration. Provide comprehensive JSON structure."
             ))
@@ -347,6 +348,77 @@ llm.bind_tools([get_file_behavior, get_dropped_files, get_attribution, get_file_
 
 ---
 
+## Infrastructure Specialist Tools
+
+The Infrastructure agent has access to 7 GTI/WebRisk tools via MCP:
+
+1. **get_domain_report** - Full threat intelligence report for a domain
+   ```python
+   @tool
+   async def get_domain_report(domain: str):
+       res = await session.call_tool("get_domain_report", arguments={"domain": domain})
+   ```
+
+2. **get_entities_related_to_a_domain** - Fetch related entities for a domain (resolutions, subdomains, communicating files, etc.)
+   ```python
+   @tool
+   async def get_entities_related_to_a_domain(domain: str, relationship: str):
+       res = await session.call_tool("get_entities_related_to_a_domain", arguments={
+           "domain": domain, "relationship_name": relationship
+       })
+   ```
+
+3. **get_ip_address_report** - Full threat intelligence report for an IP address
+   ```python
+   @tool
+   async def get_ip_address_report(ip_address: str):
+       res = await session.call_tool("get_ip_address_report", arguments={"ip_address": ip_address})
+   ```
+
+4. **get_entities_related_to_an_ip_address** - Fetch related entities for an IP (communicating files, resolutions, etc.)
+   ```python
+   @tool
+   async def get_entities_related_to_an_ip_address(ip_address: str, relationship: str):
+       res = await session.call_tool("get_entities_related_to_an_ip_address", arguments={
+           "ip_address": ip_address, "relationship_name": relationship
+       })
+   ```
+
+5. **get_url_report** - Full threat intelligence report for a URL
+   ```python
+   @tool
+   async def get_url_report(url: str):
+       res = await session.call_tool("get_url_report", arguments={"url": url})
+   ```
+
+6. **get_entities_related_to_an_url** - Fetch related entities for a URL (redirects, referrers, etc.)
+   ```python
+   @tool
+   async def get_entities_related_to_an_url(url: str, relationship: str):
+       res = await session.call_tool("get_entities_related_to_an_url", arguments={
+           "url": url, "relationship_name": relationship
+       })
+   ```
+
+7. **get_webrisk_report** - Google Web Risk reputation check for a URL
+   ```python
+   @tool
+   async def get_webrisk_report(url: str):
+       res = await session.call_tool("get_webrisk_report", arguments={"url": url})
+   ```
+
+**Tool Binding:**
+```python
+llm.bind_tools([
+    get_domain_report, get_entities_related_to_a_domain,
+    get_ip_address_report, get_entities_related_to_an_ip_address,
+    get_url_report, get_entities_related_to_an_url,
+    get_webrisk_report
+])
+```
+
+---
+
 ## Related Documents
 
 - [agent_debugging_guide.md](./agent_debugging_guide.md) - Troubleshooting
@@ -357,9 +429,19 @@ llm.bind_tools([get_file_behavior, get_dropped_files, get_attribution, get_file_
 
 ## Lead Hunter Implementation
 
+### File Structure
+
+The Lead Hunter is split across three files for separation of concerns:
+
+| File | Role |
+|------|------|
+| `backend/agents/lead_hunter.py` | LangGraph node entry point — mode switch (plan vs synthesize) |
+| `backend/agents/lead_hunter_planning.py` | Planning phase — generates subtasks for the next specialist round |
+| `backend/agents/lead_hunter_synthesis.py` | Synthesis phase — writes the final Markdown threat intelligence report |
+
 ### Workflow Integration
 
-The Lead Hunter orchestrates the iterative investigation loop (max 2 iterations).
+The Lead Hunter orchestrates the iterative investigation loop (max 3 iterations).
 
 ```mermaid
 graph TD
@@ -369,36 +451,49 @@ graph TD
     Malware --> LeadHunter
     Infra --> LeadHunter
     LeadHunter{Decision}
-    LeadHunter -->|Continue| Gate
-    LeadHunter -->|End| END
+    LeadHunter -->|Continue - Planning Mode| Gate
+    LeadHunter -->|End - Synthesis Mode| END
 ```
 
-### Decision Logic
+### Mode Switch Logic (`lead_hunter.py`)
 
 ```python
-def should_continue_investigation(state: AgentState) -> str:
-    """
-    Lead Hunter decides: Continue or End
-    """
-    iteration = state.get("iteration", 0)
-    max_iterations = 2  # Hard limit
-    subtasks = state.get("subtasks", [])
-    
-    # Hard stop AFTER max iterations (allow synthesis at iteration 2)
-    if iteration > max_iterations:  # Fixed Feb 2026: was >=
-        return END
-    
-    # No new work identified
-    if not subtasks:
-        return END
-    
-    # Continue to next iteration
-    return "continue"
+MAX_ITERATIONS = 3
+
+if current_iteration < MAX_ITERATIONS:
+    # PLANNING MODE: generate subtasks for next specialist round
+    plan = await run_planning_phase(state, llm, cache)
+    ...
+else:
+    # SYNTHESIS MODE: write final report
+    final_report = await generate_final_report_llm(state, llm)
+    state["subtasks"] = []  # clear to stop the loop
 ```
+
+### Planning Phase (`lead_hunter_planning.py`)
+
+Runs when `iteration < 3`. Responsibilities:
+1. Gathers triage context + specialist summaries.
+2. Queries NetworkX graph for all uninvestigated `file/ip/domain/url` nodes (up to 50).
+3. Prompts the LLM to generate new `subtasks` JSON for the next round.
+4. Returns `{"subtasks": [...]}` or `{"subtasks": []}` if no leads remain (triggers early synthesis).
+
+### Synthesis Phase (`lead_hunter_synthesis.py`)
+
+Runs at the final iteration (or if planning returns no tasks). Produces a comprehensive Markdown report:
+- Executive Summary
+- Attack Narrative (kill chain)
+- Investigation Timeline
+- Threat Profile, Malware Profile, Infrastructure Mapping
+- Graphviz attack flow diagram
+- Intelligence Gaps & Pivots
+- Attribution and Context
+- Hunt Hypotheses
+- IOC Appendix (table format)
 
 ### Core Responsibilities
 1.  **Review Work**: Analyzes specialist reports from current iteration.
 2.  **Analyze Graph**: Identifies uninvestigated entities in the NetworkX cache.
 3.  **Prioritize**: Selects high-value targets (malicious, central nodes).
-4.  **Direct**: Generates subtasks for next iteration.
-5.  **Synthesize**: Updates the holistic intelligence report.
+4.  **Direct**: Generates subtasks for next iteration (planning mode).
+5.  **Synthesize**: Writes holistic threat intelligence report (synthesis mode).

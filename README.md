@@ -19,7 +19,7 @@ The application takes an IOC (like a file hash, URL, or IP address) and kicks of
 ## Architecture
 * **Frontend**: Streamlit (Cloud Run Service) - Interactive investigation dashboard
 * **Backend**: FastAPI + LangGraph (Cloud Run Service) - Multi-agent orchestration
-* **MCP**: Embedded GTI Server (stdio/Direct API) - Direct connection to threat intelligence
+* **MCP**: Embedded GTI + WebRisk Servers (stdio/Direct API) - Direct connection to threat intelligence
 * **Brain**: Gemini 2.5 Flash / Pro - Powered by advanced AI reasoning
 * **Investigation Cache**: NetworkX (in-memory graph per investigation)
 
@@ -35,8 +35,11 @@ The application takes an IOC (like a file hash, URL, or IP address) and kicks of
 1. **Prerequisites**: `gcloud` CLI installed and authenticated.
 2. **Configuration**:
    ```bash
-   # Export your GTI API Key (saved to Secret Manager)
+   # Required: Google Threat Intelligence API Key
    export GTI_API_KEY="your_actual_key_here"
+
+   # Required: Google Web Risk API Key
+   export WEBRISK_API_KEY="your_webrisk_key_here"
    ```
 3. **Deploy**:
    ```bash
@@ -56,10 +59,10 @@ The application takes an IOC (like a file hash, URL, or IP address) and kicks of
 ## 📊 Status
 -   **Phase 1 (Infrastructure)**: ✅ Complete
 -   **Phase 2 (The Brain)**: ✅ Complete
--   **Phase 3 (Interface)**: ✅ Complete
--   **Phase 4 (Hybrid Triage + Token Optimization)**: ✅ Complete
--   **Phase 5 (Enhanced Visualization + NetworkX Cache)**: ✅ Complete
--   **Phase 6 (Threat Intelligence Refinement)**: ✅ Complete
+-   **Phase 3 (Interface + Hybrid Triage + Token Optimization)**: ✅ Complete
+-   **Phase 4 (Specialist Agents)**: ✅ Complete
+-   **Phase 5 (Iterative Investigation Workflow)**: ✅ Complete
+-   **Phase 6 (Real-Time Updates & Multi-User Architecture)**: 🚧 In Progress
 
 ### 🛠️ Code Quality Overhaul
 -   **Robustness**: Consolidated state, deep-merge cache deduplication, and specific exception handling.
@@ -85,7 +88,7 @@ The application takes an IOC (like a file hash, URL, or IP address) and kicks of
 ### Agent Philosophy
 - **Triage**: Quick assessment, relationship discovery
 - **Specialists**: Deep domain expertise, intelligence gathering
-- **Lead Hunter**: Strategic synthesis, campaign tracking, and iterative investigation (2 rounds)
+- **Lead Hunter**: Strategic synthesis, campaign tracking, and iterative investigation (3 rounds)
 - **OSINT Agent**: Helps with OSINT research / Attribution
 - **Detection Agent**: Helps with detection engineering and creation of hunt package
 - **SOC Agent**: Connects to SIEM platforms to hunt internally with the help of the hunt package (Might combine with Detection Agent)
@@ -100,6 +103,22 @@ The application takes an IOC (like a file hash, URL, or IP address) and kicks of
 - **API**: FastAPI
 - **UI**: Streamlit
 - **LLM**: Vertex AI (Gemini 2.5)
-- **Cache**: NetworkX (in-memory)
+- **Cache**: NetworkX (in-memory, per investigation)
 - **Deployment**: Google Cloud Run
 - **Secrets**: Google Secret Manager
+
+## 🔌 Integrations
+
+### Detection Agent (Phase 6)
+Harimau can forward completed investigations to an external detection agent via the A2A protocol. This is controlled **entirely on the backend** — the frontend is unaware of this integration.
+
+Toggle without redeploying:
+```bash
+gcloud run services update harimau-backend \
+  --set-env-vars DETECTION_AGENT_ENABLED=true,DETECTION_AGENT_URL=https://detection-agent-<PROJECT_ID>.asia-southeast1.run.app
+```
+
+| Variable | Default | Description |
+|---|---|---|
+| `DETECTION_AGENT_ENABLED` | `false` | Enable/disable forwarding to detection agent |
+| `DETECTION_AGENT_URL` | _(empty)_ | A2A endpoint of the detection agent Cloud Run service |

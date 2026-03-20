@@ -213,7 +213,7 @@ except Exception as e:
 ### Agent Loop Configuration
 
 ```python
-max_iterations = 7  # Empirically determined
+max_iterations = malware_iterations  # or infra_iterations = 10
 
 if iteration == max_iterations - 1:
     # Force wrap-up

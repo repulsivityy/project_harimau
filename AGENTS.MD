@@ -19,21 +19,27 @@ Cloud-native AI threat hunting platform using **LangGraph** for orchestration an
 2. **MCP Strategy**:
    * **Deployment**: Embedded within Backend container (Monolith).
    * **Transport**: `stdio` + Direct `aiohttp` (Parallel Super-Bundle) for zero-latency.
-   * **Source**: Official GTI server from `elevate_2025` + Optimized Direct Fast-Path.
-3. **Orchestrator**: LangGraph with `MAX_DEPTH` recursion control.
-4. **Investigation Cache**: **NetworkX MultiDiGraph** (in-memory, per-job).
+   * **Source**: Official MCP servers (Google Threat Intelligence) + Optimized Direct Fast-Path.
+   * **Note**: Google Web Risk is **not** an MCP — it is called directly via API as a `@tool` in the Infrastructure agent.
+3. **A2A Integration** (Phase 6):
+   * **Inbound**: Harimau exposes A2A-compatible endpoints (`/.well-known/agent.json` Agent Card + `POST /a2a/tasks/send`) so external agents (e.g. detection_agent) can trigger investigations.
+   * **Outbound**: On investigation completion, Harimau optionally forwards the report to the detection_agent via A2A.
+   * **Control**: Backend-only via `DETECTION_AGENT_ENABLED` + `DETECTION_AGENT_URL` env vars on the Cloud Run service. Frontend is unaware.
+   * **Toggle without redeployment**: `gcloud run services update harimau-backend --set-env-vars DETECTION_AGENT_ENABLED=true,DETECTION_AGENT_URL=https://...`
+4. **Orchestrator**: LangGraph with `MAX_DEPTH` recursion control.
+5. **Investigation Cache**: **NetworkX MultiDiGraph** (in-memory, per-job).
    * Stores full entity attributes from GTI API.
    * LLM queries minimal fields; specialists query full data.
    * Graph persists in LangGraph state for entire investigation.
-5. **Compute**: Google Cloud Run (Serverless).
-6. **Deployment**: Selective updates via `deploy.sh` (Backend/Frontend/All).
+6. **Compute**: Google Cloud Run (Serverless).
+7. **Deployment**: Selective updates via `deploy.sh` (Backend/Frontend/All).
 
 ## Agent Strategy
 * **Tiered Models**: Gemini 2.5 Flash (Triage) vs Gemini 2.5 Pro (Analysis).
 * **Division of Labor**:
   - **Triage**: Breadth-first (11 critical relationships, minimal enrichment, token-optimized).
   - **Specialists**: Depth-first (full enrichment from cache, targeted pivots).
-* **Config-Driven**: Agent behaviors defined in `agents.yaml`.
+* **Config-Driven**: Agent tuning parameters (model, iterations, max targets, feature flags) to be defined in `agents.yaml` (Phase 6). Currently hardcoded per agent.
 * **Tool Registry**: Dynamic loading via `mcp_registry.json`.
 
 ## Data Flow Pattern (Alpha-Inspired)
@@ -57,12 +63,10 @@ Cloud-native AI threat hunting platform using **LangGraph** for orchestration an
   - URL categories
   - Verdict
 
-## Recent Bug Fixes
-* **UnboundLocalError**: Fixed variable shadowing (`gti` → `gti_data`) in triage agent.
-* **Empty Tooltips**: Added rich entity fields for mouseover.
-* **Truncated URLs**: Now storing and displaying full URLs.
-
 ## Roadmap & Reliability
-* **Investigation Cache**: NetworkX (MVP) → FalkorDB (Production, when ready).
-* **Authentication**: Polling (MVP) → SSE (Phase 5).
-* **Resiliency**: LangGraph Checkpointing (Phase 5) for crash recovery.
+* **Investigation Cache**: NetworkX (MVP) → FalkorDB (Phase 7, cross-investigation graph queries).
+* **Persistence**: Cloud SQL PostgreSQL (Phase 6) for investigation storage + LangGraph checkpointing.
+* **Artifact Storage**: GCS bucket for completed reports and graph state (Phase 6).
+* **Authentication**: Polling (MVP) → SSE (Phase 6, partially implemented).
+* **Resiliency**: LangGraph Checkpointing (Phase 6) for crash recovery.
+* **Long-Term**: Explore Cloud Spanner + SpannerGraph as a unified replacement for Cloud SQL + FalkorDB.

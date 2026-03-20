@@ -47,14 +47,18 @@ graph TD
 * **Modules**:
   - `main.py`: API Endpoints with enhanced graph visualization.
   - `graph/workflow.py`: LangGraph State Machine (Iterative Loop).
-  - `graph/state.py`: AgentState definition (includes NetworkX graph)## 3. Data Layer: Investigation Cache
+  - `graph/state.py`: AgentState definition (includes NetworkX graph).
+  - `agents/`: Agent implementations (Triage, Malware, Infrastructure).
+  - `tools/`: Direct GTI API wrappers with async support.
+* **Logging**: Structured JSON logging (`utils/logger.py`).
 
-### 3.1 NetworkX Graph (Phase 5 - Current)
+#### Data Layer: Store First, Summarize Second
+
+NetworkX Graph (Phase 5 - Current):
 * **Storage**: In-memory `MultiDiGraph` stored in LangGraph state.
 * **Lifecycle**: Created per investigation, persists for entire job.
 * **Contents**: Full entity attributes from GTI API.
 
-#### Interaction Model: Store First, Summarize Second
 To maintain token efficiency, Agents strictly follow this order of operations:
 1. **Fetch**: Agent calls GTI API tool (e.g., `get_file_report`).
 2. **Store (Data Layer)**: Agent *immediately* writes the full, heavy JSON response into NetworkX. This acts as the "Hard Drive".
@@ -70,7 +74,7 @@ To maintain token efficiency, Agents strictly follow this order of operations:
 raw_data = gti_api.get(entity)
 
 # 2. CACHE (NetworkX) - Store the heavy data here
-cache.add_entity(entity, raw_data) 
+cache.add_entity(entity, raw_data)
 
 # 3. SUMMARIZE (LangGraph) - Tell the LLM what we found
 summary = f"Found entity {entity.id} with verdict {entity.verdict}"
@@ -79,15 +83,9 @@ summary = f"Found entity {entity.id} with verdict {entity.verdict}"
 return {"messages": [summary]}
 ```
 
-### 3.2 Future: FalkorDB (Phase 6 - Planned)
+Future: FalkorDB (Phase 6 - Planned):
 * **Purpose**: Persistent storage across investigations.
 * **Benefits**: Multi-container support, rich Cypher queries, historical analysis.
-
----
-
-  - `agents/`: Agent implementations (Triage, Malware, Infrastructure).
-  - `tools/`: Direct GTI API wrappers with async support.
-* **Logging**: Structured JSON logging (`utils/logger.py`).
 
 ### 2.3 Embedded MCP Server (`/backend/mcp`)
 * **Technology**: Python (`mcp` library).
@@ -367,11 +365,19 @@ Verdict: {entity['verdict']}
 
 ### Phase 5 (Current)
 - [x] NetworkX investigation cache
-- [ ] Enhanced specialist agents
+- [x] Enhanced specialist agents
 - [ ] Historical investigation queries
 
 ### Phase 6 (Planned)
-- [ ] Migrate to FalkorDB for persistence
+- [ ] Cloud SQL (PostgreSQL) — investigation persistence + LangGraph checkpointing (`PostgresSaver`)
+- [x] Real-time SSE updates
+- [ ] Authentication hardening (IAP/IAM)
+- [ ] A2A protocol support — expose Agent Card + inbound task endpoint; optional outbound handoff to detection_agent (enable/disable via `DETECTION_AGENT_ENABLED` env var)
+
+### Phase 7 (Future)
+- [ ] FalkorDB — cross-investigation graph queries (IOC/campaign correlation across investigations)
 - [ ] Multi-container support
-- [ ] Real-time SSE updates
 - [ ] Advanced graph queries (Cypher)
+
+### Long-Term Exploration
+- [ ] Migrate from Cloud SQL + FalkorDB to **Cloud Spanner + SpannerGraph** — single database for both relational and graph workloads. Pending confirmation of LangGraph checkpointer compatibility with Spanner's PostgreSQL dialect.

@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Future agent roadmap documented: OSINT, Detection Engineering, SOC agents
 
 ### Changed
+- Increased agent iteration limit from 7 to 10 (`malware_iterations`, `infra_iterations`) for deeper analysis coverage
 - **Code Cleanup**: Removed 49 lines of commented-out code across `malware.py`, `infrastructure.py`, `triage.py`
 - **Code Cleanup**: Removed 9 outdated `[NEW]` markers from Jan 2026 features (now production-stable)
 - **Code Cleanup**: Updated TODO comments to reference roadmap items (Phase 6)
@@ -53,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Syntax errors from aggressive variable renaming (`reiteration` → `return`)
 
 ### Changed
-- Increased agent iteration limit from 3 to 7 for comprehensive analysis
+- Increased agent iteration limit from 3 to 7 for comprehensive analysis (subsequently increased to 10 — see v0.3.1)
 - Aligned Malware and Infrastructure agent code structures
 - Removed Pydantic BaseModel schemas to prevent deployment crashes
 - Enhanced error reporting from 500 to 2000 characters
@@ -100,7 +101,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Technical Stack
 - **Frontend**: Streamlit (Python)
 - **Backend**: FastAPI + LangGraph + NetworkX
-- **LLM**: Google Vertex AI (Gemini 2.0)
+- **LLM**: Google Vertex AI (Gemini 2.5)
 - **API**: Google Threat Intelligence (via MCP)
 - **Deployment**: Google Cloud Run
 - **Graph Storage**: In-memory NetworkX MultiDiGraph

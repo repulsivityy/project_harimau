@@ -33,11 +33,11 @@ services:
     image: python:3.11-slim
     working_dir: /app
     volumes:
-      - ./frontend:/app/frontend
+      - ./app:/app/app
       - ./backend:/app/backend # Sharing types/models if needed
     environment:
       - BACKEND_URL=http://backend:8080
-    command: sh -c "pip install streamlit requests && streamlit run frontend/main.py"
+    command: sh -c "pip install streamlit requests && streamlit run app/main.py"
     ports:
       - "8501:8501"
     depends_on:

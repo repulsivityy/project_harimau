@@ -21,7 +21,7 @@
 ### 3.1 Architecture & Modularity
 *   **Split Services**: Frontend (UI) and Backend (Logic) run as separate Cloud Run services
 *   **Embedded MCP**: GTI MCP server runs inside Backend container via `stdio`
-*   **Config-Driven Agents**: Specialist agents defined in `agents.yaml`
+*   **Config-Driven Agents**: Agent tuning parameters (model, iterations, max targets, feature flags) defined in `agents.yaml` (Phase 6). Currently hardcoded per agent.
 *   **MCP Registry**: GTI tools loaded dynamically from `mcp_registry.json`
 
 ### 3.2 Threat Intelligence Workflow
@@ -31,7 +31,7 @@
 4.  **Specialist Agents** (parallel execution):
     - **Malware Specialist**: Behavioral analysis, capability assessment, attribution
     - **Infrastructure Specialist**: DNS mapping, hosting analysis, pivot detection
-5.  **Lead Hunter**: Cross-domain synthesis, intelligence report generation, and iterative investigation (2 rounds)
+5.  **Lead Hunter**: Cross-domain synthesis, intelligence report generation, and iterative investigation (3 rounds)
 
 **Intelligence Report Requirements:**
 The Lead Hunter must produce a **comprehensive threat intelligence analysis**, not just a malware scan. The report must include:
@@ -67,16 +67,12 @@ The Lead Hunter must produce a **comprehensive threat intelligence analysis**, n
     *   **Control Layer (LangGraph)**: Acts as the "RAM". Stores **token-optimized summaries** (<5% of data). Agents write to this *second*.
 *   **Rule**: "Store First, Summarize Second". Agents never pass raw API JSON into the LangGraph state `messages` or `context` to prevent context window exhaustion.
 
-### 3.4 The Librarian (Async)
-*   Runs *after* investigation completion.
-*   Proposes Schema Cleanups (e.g. merging edge types).
-*   Requires **Human Approval** via UI.
-
-### 3.5 Artifact Persistence (Report & Graph)
+### 3.4 Artifact Persistence (Report & Graph) *(Phase 6 - Planned)*
 *   **Storage**: Google Cloud Storage (GCS) Bucket.
-*   **Graph Image**: Backend renders graph state to `graphviz` -> PNG.
-*   **Report**: Backend saves final markdown to `.md`.
-*   **Structure**: `gs://[bucket]/[job_id]/report.md` & `graph.png`.
+*   **Report**: Backend saves final markdown report to `.md` after investigation completes.
+*   **Graph**: Backend saves graph state to `.json` for replay/reference.
+*   **Structure**: `gs://[bucket]/[job_id]/report.md` & `graph.json`.
+*   **Status**: Not yet implemented — investigations currently held in-memory (`JOBS` dict). Planned alongside Cloud SQL persistence in Phase 6.
 
 ## 4. Operational Requirements
 *   **Deployment**: Support `deploy.sh` (selective backend/frontend updates) and `terraform/`.

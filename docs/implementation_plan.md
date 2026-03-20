@@ -29,11 +29,11 @@ This document tracks the progress of the Harimau rebuild.
 - [x] **MCP Registry**: Implement `MCPClientManager` using Registry Pattern.
     - [x] MVP: `mcp_registry.json` mapping tools to `stdio` commands.
     - [ ] Roadmap: Support `sse` for future Serverless Function tools.
-- [x] **Config Engine**: Implement `agents.yaml` loader (Basic).
+- [ ] **Config Engine**: `agents.yaml` loader scaffolded in `backend/utils/config.py` but not yet wired up — agent behaviors currently hardcoded per agent. To be completed in Phase 6 (see below).
 - [x] **Nodes (MVP)**:
     - [x] `Triage Agent` (Gemini Flash + Vertex AI).
 - [x] **Orchestrator**: Build the LangGraph workflow (Start -> Triage -> End).
-- [x] **API Integration**: Expose `POST /investigate` endpoint.
+- [x] **API Integration**: Expose `POST /api/investigate` endpoint.
 - [x] **Verify**:
     - [x] **Cloud Verification**: Run `deploy.sh` and test endpoint (`curl -X POST https://.../investigate -d '{"ioc":"1.1.1.1"}'`).
     - [ ] Run `pytest tests/unit/test_agents.py` (Mocked LLM inputs).
@@ -268,7 +268,7 @@ This document tracks the progress of the Harimau rebuild.
 ---
 
 ### Phase 5.2: Lead Threat Hunter Agent [COMPLETED]
-**Goal**: Orchestrate iterative investigations (max 2 iterations).
+**Goal**: Orchestrate iterative investigations (max 3 iterations).
 **Completion Date**: Jan 2026
 
 **See**: `docs/agent_implementation.md` for full technical specification.
@@ -287,13 +287,13 @@ This document tracks the progress of the Harimau rebuild.
 3. Prioritize high-value targets (malicious, attack-chain-relevant)
 4. Create subtasks for next iteration
 5. Generate holistic synthesis report with markdown and graphviz diagrams
-6. Decide: continue (if iteration ≤ 2 and targets exist) or end
+6. Decide: continue (if iteration ≤ 3 and targets exist) or end
 
 **Workflow**:
 ```
 Iteration 0: Triage → Gate → [Malware, Infra] → Lead Hunter → Decision
 Iteration 1: Gate → [Malware, Infra] → Lead Hunter → Decision
-Iteration 2: Gate → [Malware, Infra] → Lead Hunter → END (max reached)
+Iteration 3: Gate → [Malware, Infra] → Lead Hunter → END (max reached)
 ```
 
 **Impact**:
@@ -348,7 +348,6 @@ Iteration 2: Gate → [Malware, Infra] → Lead Hunter → END (max reached)
 **Total Deployments**: 20+ iterations to production in Feb 2026
 
 **Phase 5 is complete - Product is production-ready as of Feb 2026**
->Constraint - iteration is currently 2, not 3. Will be updating it in the near future. 
 
 **Current Workflow Implementation**:
 ```
@@ -374,13 +373,40 @@ Infra --> LeadReview
 
 
 ## Phase 6: Near-Term Roadmap (Post-MVP)
+
+### Phase 6.0: Agent Configuration (`agents.yaml`)
+**Goal**: Centralize agent tuning parameters into a config file, removing hardcoded constants from agent code.
+
+**Why**: Currently, key operational parameters are scattered across individual agent files (e.g., `malware_iterations = 10` in `malware.py`, model names hardcoded per agent). As the agent count grows (OSINT, Detection, SOC agents planned), per-file management becomes unwieldy. Model selection (Flash vs Pro) and iteration limits are tuning concerns, not code concerns — changing them should not require a deployment.
+
+**What goes in `agents.yaml` vs stays in code:**
+
+| In `agents.yaml` | Stays in code |
+|---|---|
+| Model name per agent (flash vs pro) | System prompts (too long, no syntax support in YAML) |
+| Iteration limits | Tool definitions |
+| Max targets | LangGraph node logic |
+| Temperature | Error handling |
+| Feature flags (e.g., `detection_agent_enabled`) | |
+
+**Tasks:**
+- [ ] Define `backend/config/agents.yaml` schema with triage, malware, infrastructure, lead_hunter entries
+- [ ] Update each agent to read model, iterations, max targets, and temperature from config via `load_agents_config()`
+- [ ] Add `detection_agent_enabled` and `detection_agent_url` as config entries (alongside env var support)
+- [ ] Validate config on startup with clear error messages for missing/invalid values
 - [X] **Real-Time Streaming**: Refactor Frontend/Backend to use SSE (Server-Sent Events) instead of polling.
-- [ ] **Microservices Split**: *If* scaling requires it, extract the MCP server into a dedicated Cloud Run service (Sidecar).
-- [ ] **Advanced Error Handling**: Implement exponential backoff for GTI API and automatic agent retries.
+- [ ] **Investigation Persistence**: Deploy Cloud SQL (PostgreSQL) for investigation job storage and LangGraph checkpointing (`PostgresSaver`) to resume jobs after Cloud Run restarts.
+- [ ] **Artifact Persistence (GCS)**: Save completed investigation reports and graph state to GCS bucket after each investigation. Structure: `gs://[bucket]/[job_id]/report.md` & `graph.json`. Replaces current in-memory `JOBS` dict as the source of truth for completed investigations.
+- [ ] **A2A Integration**: Expose Harimau as an A2A-compatible agent:
+    - Publish `/.well-known/agent.json` Agent Card
+    - Add inbound A2A task endpoint (`POST /a2a/tasks/send`) to trigger investigations from external agents
+    - Add optional outbound handoff to detection_agent on investigation completion
+    - Controlled by `DETECTION_AGENT_ENABLED` + `DETECTION_AGENT_URL` env vars on the **backend Cloud Run service only** — the frontend is unaware of this integration
+    - Toggle live without redeploying: `gcloud run services update harimau-backend --set-env-vars DETECTION_AGENT_ENABLED=true,DETECTION_AGENT_URL=https://...`
 - [ ] **Authentication Hardening**: Switch from `--allow-unauthenticated` to IAP/IAM.
-- [ ] **Crash Recovery**: Implement LangGraph Postgres Checkpointing to resume jobs after Cloud Run restarts.
+- [ ] **Advanced Error Handling**: Implement exponential backoff for GTI API and automatic agent retries.
 - [ ] **Smart Entity Filtering**: Implement user-configurable filters at investigation start to prioritize malicious/high-score entities by threat score, verdict, and recency.
-- [ ] **Enhance security**: Implement security measures 
+- [ ] **Enhance security**: Implement security measures
 - [ ] **Ongoing Efforts**
     - [ ] Advanced prompting for autonomous decisions
     - [ ] Adaptive iteration limits
@@ -391,6 +417,15 @@ Infra --> LeadReview
     - [ ] Tools - Shodan
     - [ ] Tools - OpenCTI
     - [ ] Tools - Google SecOps
+
+## Phase 7: Cross-Investigation Intelligence (Future)
+- [ ] **FalkorDB**: Persistent graph database for cross-investigation IOC and campaign correlation. Replaces per-investigation NetworkX for historical analysis.
+- [ ] **Multi-container support**: Share investigation graph state across Cloud Run instances.
+- [ ] **Advanced graph queries**: Cypher-based queries across historical investigations (e.g., "find all investigations linked to this C2 IP").
+- [ ] **Microservices Split**: *If* scaling requires it, extract the MCP server into a dedicated Cloud Run service (Sidecar).
+
+## Long-Term Exploration
+- [ ] **Cloud Spanner + SpannerGraph**: Potential migration path from Cloud SQL + FalkorDB to a single GCP-native database handling both relational and graph workloads. Evaluate once LangGraph checkpointer compatibility with Spanner's PostgreSQL dialect is confirmed.
 
 ## Long-Term Enhancements
 - [ ] **Advanced Graph Visualization**: Migrate from `streamlit-agraph` to more professional library:

@@ -418,6 +418,128 @@ Infra --> LeadReview
     - [ ] Tools - OpenCTI
     - [ ] Tools - Google SecOps
 
+### Phase 6.2: Multi-User Support & Persistence
+
+> **Status**: Planned for Phase 6 — design documented below
+> **Current MVP**: Single-user, ephemeral architecture
+
+#### Requirements
+
+**1. User Authentication & Authorization**
+- [ ] **Identity**: Implement user authentication via Google IAP/IAM
+- [ ] **Job Ownership**: Associate each `job_id` with a `user_id`
+- [ ] **Access Control**: Users can only stream/view their own investigations
+  ```python
+  # Future: Verify user owns this job before allowing SSE subscription
+  if JOBS[job_id]["user_id"] != current_user_id:
+      raise HTTPException(403, "Unauthorized")
+  ```
+
+**2. SSE Event Routing**
+- [ ] **Per-User Isolation**: Events must only stream to authorized subscribers
+  - Current: Broadcast to all subscribers of a `job_id` (works for single-user MVP)
+  - Future: Verify user identity before adding to subscriber list
+
+**3. Investigation Persistence (LangGraph Checkpointing)**
+- [ ] **State Persistence**: Store investigation state across restarts
+  - **Technology**: `langgraph.checkpoint.postgres.PostgresSaver` (Cloud SQL)
+  - **Purpose**: Resume interrupted investigations, replay past investigations, support "expand this IOC" from old jobs
+- [ ] **Implementation**:
+  ```python
+  from langgraph.checkpoint.postgres import PostgresSaver
+
+  checkpointer = PostgresSaver(connection_string="postgresql://...")
+  app_graph = workflow.compile(checkpointer=checkpointer)
+  ```
+
+**4. Job History & Retrieval**
+- [ ] **Database Schema**: Replace in-memory `JOBS` dict with Cloud SQL (PostgreSQL)
+  ```sql
+  CREATE TABLE investigations (
+      job_id UUID PRIMARY KEY,
+      user_id VARCHAR(255) NOT NULL,
+      status VARCHAR(50),
+      ioc VARCHAR(255),
+      created_at TIMESTAMP,
+      completed_at TIMESTAMP,
+      final_report TEXT,
+      investigation_graph JSONB,
+      metadata JSONB
+  );
+
+  CREATE INDEX idx_user_jobs ON investigations(user_id, created_at DESC);
+  ```
+- [ ] **Job Listing API**: `GET /api/investigations?user_id={user_id}&limit=50`
+- [ ] **Job Retrieval**: `GET /api/investigations/{job_id}` (verify ownership)
+
+**5. Event History Replay**
+- [ ] Store SSE events in PostgreSQL on emission; replay to late subscribers on connection
+
+#### Recommended Tech Stack
+
+| Component | Technology | Rationale |
+|---|---|---|
+| **User Auth** | Google IAP/IAM | GCP-native, enforced at Cloud Run level |
+| **Database** | Cloud SQL (PostgreSQL) | Persistent, supports JSONB, LangGraph compatibility |
+| **Checkpointing** | `langgraph.checkpoint.postgres.PostgresSaver` | Official LangGraph support |
+| **Event Storage** | Same PostgreSQL (separate table) | Simple, consistent |
+| **Session Management** | Redis (Cloud Memorystore) | Fast ephemeral data for active investigations |
+
+#### Architecture
+
+**Current (MVP - Single User)**:
+```
+┌─────────────┐
+│  Browser    │──SSE──┐
+└─────────────┘       │
+                      ▼
+┌─────────────────────────────────┐
+│  FastAPI Backend                │
+│  ┌───────────────────────────┐  │
+│  │  In-Memory JOBS Dict      │  │
+│  │  sse_manager._subscribers │  │
+│  └───────────────────────────┘  │
+│  ┌───────────────────────────┐  │
+│  │  LangGraph (No Checkpoint)│  │
+│  └───────────────────────────┘  │
+└─────────────────────────────────┘
+```
+
+**Future (Multi-User + Persistence)**:
+```
+┌─────────────┐
+│  Browser    │──Auth Token──┐
+│  (User A)   │──SSE─────────┼──┐
+└─────────────┘              │  │
+┌─────────────┐              │  │
+│  Browser    │──SSE─────────┼──┤
+│  (User B)   │              │  │
+└─────────────┘              │  │
+                             ▼  ▼
+┌─────────────────────────────────────────┐
+│  FastAPI Backend                        │
+│  ┌───────────────────────────────────┐  │
+│  │  Auth Middleware (verify user_id) │  │
+│  └───────────────────────────────────┘  │
+│  ┌───────────────────────────────────┐  │
+│  │  SSE Manager (user-aware routing) │  │
+│  └───────────────────────────────────┘  │
+│  ┌───────────────────────────────────┐  │
+│  │  LangGraph + PostgresSaver        │  │
+│  └───────────────────────────────────┘  │
+└─────────────┬───────────────────────────┘
+              │
+              ▼
+┌─────────────────────────────┐
+│  Cloud SQL (PostgreSQL)     │
+│  ┌─────────────────────────┐│
+│  │  investigations table   ││
+│  │  event_history table    ││
+│  │  langgraph_checkpoints  ││
+│  └─────────────────────────┘│
+└─────────────────────────────┘
+```
+
 ## Phase 7: Cross-Investigation Intelligence (Future)
 - [ ] **FalkorDB**: Persistent graph database for cross-investigation IOC and campaign correlation. Replaces per-investigation NetworkX for historical analysis.
 - [ ] **Multi-container support**: Share investigation graph state across Cloud Run instances.
@@ -476,235 +598,3 @@ graph TD
 
 ```
 
----
-
-## Phase 6: Real-Time Updates & Multi-User Architecture [FUTURE]
-
-### Phase 6.1: Server-Sent Events (SSE) Migration [IN PROGRESS]
-**Goal**: Replace HTTP polling with real-time SSE streaming for investigation progress.
-
-**Completed**:
-- [x] **SSE Test Endpoint**: Created `/api/test/sse` to validate Cloud Run compatibility
-  - Verified: No buffering issues, keepalive working, 60-minute timeout sufficient
-- [x] **SSE Infrastructure**: 
-  - `backend/utils/sse_manager.py` - Event broadcast manager
-  - `backend/graph/sse_wrappers.py` - Node event decorators
-  - `/api/investigations/{job_id}/stream` - SSE streaming endpoint
-- [x] **Event Emissions**: All workflow nodes emit start/complete events
-  - `investigation_started`, `workflow_started`
-  - `triage_started`, `triage_completed`
-  - `malware_specialist_started/completed`
-  - `infrastructure_specialist_started/completed`  
-  - `lead_hunter_started/completed`
-  - `investigation_completed`, `investigation_failed`
-- [x] **Bug Fixes**:
-  - Fixed broadcast pattern (events now go to all subscribers, not round-robin)
-  - Fixed async/sync deadlock (single async wrapper with `run_in_executor`)
-  - Added missing asyncio import
-
-**Remaining**:
-- [x] **Frontend SSE Client**: Replaced polling loop in `app/main.py` with EventSource
-- [x] **Fallback Mechanism**: Auto-fallback to polling implemented
-- [ ] **Enhanced Events**:
-  - [ ] Graph update events (when new entities discovered)
-  - [ ] Agent reasoning stream (LLM thinking process)
-  - [ ] Token usage metrics in real-time
-
-**Current Limitation (MVP - Single User)**:
-- In-memory event queues (`sse_manager._subscribers`)
-- No persistence of past events
-- Late subscribers miss events that occurred before connection
-
----
-
-### Phase 6.2: Multi-User Support & Persistence [FUTURE]
-
-> **Status**: Documented for post-MVP (Phase 7+)  
-> **Current MVP**: Single-user, ephemeral architecture
-
-#### Requirements
-
-**1. User Authentication & Authorization**
-- [ ] **Identity**: Implement user authentication (Google OAuth, API keys, or Firebase Auth)
-- [ ] **Job Ownership**: Associate each `job_id` with a `user_id`
-- [ ] **Access Control**: Users can only stream/view their own investigations
-  ```python
-  # Future: Verify user owns this job before allowing SSE subscription
-  if JOBS[job_id]["user_id"] != current_user_id:
-      raise HTTPException(403, "Unauthorized")
-  ```
-
-**2. SSE Event Routing**
-- [ ] **Per-User Isolation**: Events must only stream to authorized subscribers
-  - Current: Broadcast to all subscribers of a `job_id` (works for single-user MVP)
-  - Future: Verify user identity before adding to subscriber list
-  ```python
-  # Pseudocode
-  async def subscribe(self, job_id: str, user_id: str):
-      if job_owner(job_id) != user_id:
-          raise Unauthorized
-      # ... rest of subscription logic
-  ```
-
-**3. Investigation Persistence (LangGraph Checkpointing)**
-- [ ] **State Persistence**: Store investigation state across restarts
-  - **Technology**: LangGraph Checkpointer (Redis, Postgres, or Firestore)
-  - **Purpose**: 
-    - Resume interrupted investigations
-    - Replay past investigations
-    - Support "expand this IOC" from old jobs
-- [ ] **Implementation**:
-  ```python
-  from langgraph.checkpoint.postgres import PostgresSaver
-  
-  checkpointer = PostgresSaver(connection_string="postgresql://...")
-  app_graph = workflow.compile(checkpointer=checkpointer)
-  ```
-  - Each investigation gets a `thread_id` (can use `job_id`)
-  - State is automatically persisted at each node execution
-  - Enables time-travel debugging and state inspection
-
-**4. Job History & Retrieval**
-- [ ] **Database Schema**: Replace in-memory `JOBS` dict with persistent storage
-  ```sql
-  CREATE TABLE investigations (
-      job_id UUID PRIMARY KEY,
-      user_id VARCHAR(255) NOT NULL,
-      status VARCHAR(50),
-      ioc VARCHAR(255),
-      created_at TIMESTAMP,
-      completed_at TIMESTAMP,
-      final_report TEXT,
-      investigation_graph JSONB,
-      metadata JSONB
-  );
-  
-  CREATE INDEX idx_user_jobs ON investigations(user_id, created_at DESC);
-  ```
-- [ ] **Job Listing API**: `GET /api/investigations?user_id={user_id}&limit=50`
-- [ ] **Job Retrieval**: `GET /api/investigations/{job_id}` (verify ownership)
-- [ ] **Expand Old Jobs**: Re-run investigation from a specific checkpoint
-  ```python
-  # Resume from checkpoint (e.g., after triage, investigate a new IOC)
-  final_state = await app_graph.ainvoke(
-      new_input,
-      config={"configurable": {"thread_id": original_job_id}}
-  )
-  ```
-
-**5. Event History Replay**
-- [ ] **Problem**: Current SSE only streams live events. Late subscribers miss past events.
-- [ ] **Solution Options**:
-  - **Option A**: Store events in database, replay on connection
-    ```python
-    # On subscribe, send all past events first
-    past_events = db.get_events(job_id)
-    for event in past_events:
-        yield f"data: {json.dumps(event)}\n\n"
-    # Then subscribe to live events
-    ```
-  - **Option B**: Reconstruct events from LangGraph checkpoints
-    - Query checkpointer for state history
-    - Synthesize progress events from state transitions
-  - **Recommendation**: Option A (simpler, more flexible)
-
-#### Architecture Changes
-
-**Current (MVP - Single User)**:
-```
-┌─────────────┐
-│  Browser    │──SSE──┐
-└─────────────┘       │
-                      ▼
-┌─────────────────────────────────┐
-│  FastAPI Backend                │
-│  ┌───────────────────────────┐  │
-│  │  In-Memory JOBS Dict      │  │
-│  │  sse_manager._subscribers │  │
-│  └───────────────────────────┘  │
-│  ┌───────────────────────────┐  │
-│  │  LangGraph (No Checkpoint)│  │
-│  └───────────────────────────┘  │
-└─────────────────────────────────┘
-```
-
-**Future (Multi-User + Persistence)**:
-```
-┌─────────────┐
-│  Browser    │──Auth Token──┐
-│  (User A)   │──SSE─────────┼──┐
-└─────────────┘              │  │
-┌─────────────┐              │  │
-│  Browser    │──SSE─────────┼──┤
-│  (User B)   │              │  │
-└─────────────┘              │  │
-                             ▼  ▼
-┌─────────────────────────────────────────┐
-│  FastAPI Backend                        │
-│  ┌───────────────────────────────────┐  │
-│  │  Auth Middleware (verify user_id) │  │
-│  └───────────────────────────────────┘  │
-│  ┌───────────────────────────────────┐  │
-│  │  SSE Manager (user-aware routing) │  │
-│  └───────────────────────────────────┘  │
-│  ┌───────────────────────────────────┐  │
-│  │  LangGraph + PostgresSaver        │  │
-│  └───────────────────────────────────┘  │
-└─────────────┬───────────────────────────┘
-              │
-              ▼
-┌─────────────────────────────┐
-│  PostgreSQL / Firestore     │
-│  ┌─────────────────────────┐│
-│  │  investigations table   ││
-│  │  event_history table    ││
-│  │  langgraph_checkpoints  ││
-│  └─────────────────────────┘│
-└─────────────────────────────┘
-```
-
-#### Recommended Tech Stack
-
-| Component | Technology | Rationale |
-|-----------|-----------|-----------|
-| **User Auth** | Firebase Auth or Cloud Identity | Integrates with GCP, minimal setup |
-| **Database** | Cloud SQL (PostgreSQL) | Persistent, supports JSONB, LangGraph compatibility |
-| **Checkpointing** | `langgraph.checkpoint.postgres.PostgresSaver` | Official LangGraph support |
-| **Event Storage** | Same PostgreSQL (separate table) | Simple, consistent |
-| **Session Management** | Redis (Cloud Memorystore) | Fast ephemeral data for active investigations |
-
-#### Implementation Phases
-
-**Phase 6.2.1: Database Migration**
-- Replace in-memory `JOBS` with PostgreSQL
-- Implement job listing and retrieval APIs
-- Add user_id to all job records
-
-**Phase 6.2.2: LangGraph Checkpointing**
-- Configure PostgresSaver
-- Test checkpoint persistence and resumption
-- Implement "expand from this node" feature
-
-**Phase 6.2.3: User Authentication**
-- Add Firebase Auth or OAuth
-- Update all endpoints to require authentication
-- Implement user_id verification for job access
-
-**Phase 6.2.4: SSE Event History**
-- Create event_history table
-- Persist SSE events on emission
-- Replay past events on late subscription
-
-**Phase 6.2.5: Multi-User SSE Routing**
-- Update sse_manager to verify user ownership
-- Add user_id to subscription logic
-- Test concurrent multi-user investigations
-
-#### Testing Strategy
-
-- **Load Testing**: Simulate 100+ concurrent users with active investigations
-- **Security Testing**: Verify users cannot access other users' jobs
-- **Checkpoint Testing**: Verify investigations can resume from any node
-- **Event Replay**: Confirm late subscribers receive complete event history
-
----

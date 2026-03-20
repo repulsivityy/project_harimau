@@ -374,7 +374,277 @@ Infra --> LeadReview
 
 ## Phase 6: Near-Term Roadmap (Post-MVP)
 
-### Phase 6.0: Agent Configuration (`agents.yaml`)
+### Phase 6.1: Cloud SQL + LangGraph Checkpointing
+**Goal**: Replace the ephemeral in-memory `JOBS` dict with Cloud SQL (PostgreSQL) and wire LangGraph `PostgresSaver` so investigations persist across Cloud Run restarts and can be retrieved at any time.
+
+**Why**: Cloud Run scales to zero — any in-memory state is lost on restart. All investigation results, graph data, and mid-investigation state currently disappear on container restart. Cloud SQL is external to the container and persists indefinitely.
+
+**Current state summary**:
+- `JOBS = {}` dict defined at `backend/main.py` line 44 — all reads/writes go through this
+- `app_graph` imported from `backend/graph/workflow.py` — compiled at line 72 with no checkpointer: `return workflow.compile()`
+- `backend/requirements.txt` has no PostgreSQL or LangGraph checkpoint dependencies
+- `terraform/main.tf` has Cloud Run services only — no Cloud SQL resources
+- `docker-compose.yml` has FalkorDB (unused) and backend/frontend — no PostgreSQL service
+
+---
+
+#### Step 1: Add Dependencies
+**File**: `backend/requirements.txt`
+
+Add the following lines:
+```
+asyncpg
+psycopg[binary]
+langgraph-checkpoint-postgres
+```
+
+---
+
+#### Step 2: Add PostgreSQL to `docker-compose.yml` (Local Dev)
+**File**: `docker-compose.yml`
+
+Add a `postgres` service so local development mirrors Cloud SQL:
+```yaml
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: harimau
+      POSTGRES_USER: harimau
+      POSTGRES_PASSWORD: harimau
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+```
+
+Add `postgres_data` to the `volumes` block at the bottom.
+
+Add to the `backend` service:
+- `depends_on: [postgres]`
+- Environment variable: `DATABASE_URL=postgresql://harimau:harimau@postgres:5432/harimau`
+
+Also remove or comment out the `falkordb` service and its `FALKORDB_HOST`/`FALKORDB_PORT` env vars from the backend — FalkorDB is Phase 7 and currently unused.
+
+---
+
+#### Step 3: Provision Cloud SQL via Terraform
+**File**: `terraform/main.tf`
+
+Add the following resources after the existing Cloud Run service definitions:
+
+```hcl
+# Enable Cloud SQL API
+resource "google_project_service" "sqladmin_api" {
+  service            = "sqladmin.googleapis.com"
+  disable_on_destroy = false
+}
+
+# Cloud SQL PostgreSQL instance
+resource "google_sql_database_instance" "harimau_db" {
+  name             = "harimau-db"
+  database_version = "POSTGRES_15"
+  region           = var.region
+  depends_on       = [google_project_service.sqladmin_api]
+
+  settings {
+    tier = "db-f1-micro"
+    ip_configuration {
+      ipv4_enabled = false  # No public IP — use Cloud SQL Auth Proxy
+    }
+  }
+
+  deletion_protection = false  # Set true for production
+}
+
+resource "google_sql_database" "harimau" {
+  name     = "harimau"
+  instance = google_sql_database_instance.harimau_db.name
+}
+
+resource "google_sql_user" "harimau_user" {
+  name     = "harimau"
+  instance = google_sql_database_instance.harimau_db.name
+  password = var.db_password  # Add variable "db_password" {} to the vars block
+}
+
+# Grant Cloud Run SA access to Cloud SQL
+resource "google_project_iam_member" "cloudsql_client" {
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${data.google_compute_default_service_account.default.email}"
+}
+
+data "google_compute_default_service_account" "default" {}
+```
+
+Add `variable "db_password" {}` to the variables block.
+
+---
+
+#### Step 4: Store Connection String in Secret Manager
+**Script** (run once manually or add to `deploy.sh`):
+
+```bash
+# Connection string format for Cloud SQL Auth Proxy
+DB_URL="postgresql://harimau:YOUR_DB_PASSWORD@/harimau?host=/cloudsql/${PROJECT_ID}:asia-southeast1:harimau-db"
+printf "$DB_URL" | gcloud secrets create harimau-db-url --data-file=-
+gcloud secrets add-iam-policy-binding harimau-db-url \
+  --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
+  --role="roles/secretmanager.secretAccessor"
+```
+
+---
+
+#### Step 5: Update `deploy.sh` for Backend Deploy
+**File**: `deploy.sh`
+
+In the backend `gcloud run deploy` command (currently around the `--set-secrets` line), add:
+```bash
+--set-secrets "...,DATABASE_URL=harimau-db-url:latest" \
+--add-cloudsql-instances ${PROJECT_ID}:${REGION}:harimau-db \
+```
+
+Also add `sqladmin.googleapis.com` to the `gcloud services enable` line at the top of the script.
+
+---
+
+#### Step 6: Create DB Schema on Startup
+**File**: `backend/main.py`
+
+Add a `db_pool` global and schema creation to the `lifespan` context manager (currently lines 15–21):
+
+```python
+import asyncpg
+import os
+
+db_pool = None  # global connection pool
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global db_pool
+    # Startup
+    db_url = os.environ.get("DATABASE_URL")
+    if db_url:
+        db_pool = await asyncpg.create_pool(db_url)
+        async with db_pool.acquire() as conn:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS investigations (
+                    job_id       TEXT PRIMARY KEY,
+                    status       VARCHAR(50)  NOT NULL DEFAULT 'running',
+                    ioc          VARCHAR(255) NOT NULL,
+                    ioc_type     VARCHAR(50),
+                    risk_level   VARCHAR(50),
+                    gti_score    INTEGER,
+                    created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+                    completed_at TIMESTAMPTZ,
+                    final_report TEXT,
+                    metadata     JSONB
+                );
+                CREATE INDEX IF NOT EXISTS idx_investigations_created
+                    ON investigations(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_investigations_status
+                    ON investigations(status);
+            """)
+        logger.info("database_connected", status="pool_created")
+    else:
+        logger.warning("database_not_configured", fallback="in-memory JOBS dict")
+    yield
+    # Shutdown
+    if db_pool:
+        await db_pool.close()
+```
+
+**Important**: Keep `JOBS = {}` as a fallback for local dev without a database. Use `db_pool` when available, fall back to `JOBS` when not.
+
+---
+
+#### Step 7: Replace `JOBS` Dict Reads/Writes
+**File**: `backend/main.py`
+
+Add a helper to abstract DB vs in-memory:
+```python
+async def save_job(job_id: str, data: dict):
+    if db_pool:
+        async with db_pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO investigations (job_id, status, ioc, metadata)
+                VALUES ($1, $2, $3, $4::jsonb)
+                ON CONFLICT (job_id) DO UPDATE
+                SET status = $2, metadata = $4::jsonb, completed_at = NOW()
+            """, job_id, data.get("status"), data.get("ioc"), json.dumps(data))
+    else:
+        JOBS[job_id] = data
+
+async def get_job(job_id: str):
+    if db_pool:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM investigations WHERE job_id = $1", job_id)
+            return dict(row) if row else None
+    else:
+        return JOBS.get(job_id)
+```
+
+Replace all direct `JOBS[job_id] = ...` and `JOBS.get(job_id)` calls with `await save_job(...)` and `await get_job(...)`:
+
+| Current (main.py) | Replace with |
+|---|---|
+| Line 58: `JOBS[job_id] = {...}` | `await save_job(job_id, {...})` |
+| Line 206: `JOBS[job_id] = result` | `await save_job(job_id, result)` |
+| Lines 221–222: `JOBS[job_id]["status"] = "failed"` | `await save_job(job_id, {"status": "failed", ...})` |
+| Line 237: `JOBS.get(job_id)` | `await get_job(job_id)` |
+| Line 263: `job_id not in JOBS` | `await get_job(job_id) is None` |
+
+---
+
+#### Step 8: Wire LangGraph `PostgresSaver`
+**File**: `backend/graph/workflow.py`
+
+Current line 72: `return workflow.compile()`
+
+Change to accept an optional checkpointer:
+```python
+from langgraph.checkpoint.postgres import PostgresSaver
+
+def create_graph(checkpointer=None):
+    workflow = StateGraph(AgentState)
+    # ... all existing node/edge definitions unchanged ...
+    return workflow.compile(checkpointer=checkpointer)
+```
+
+**File**: `backend/main.py`
+
+On startup (inside `lifespan`, after pool creation), create the graph with checkpointer:
+```python
+from langgraph.checkpoint.postgres import PostgresSaver
+
+# Inside lifespan, after db_pool is created:
+checkpointer = PostgresSaver(db_pool)
+await checkpointer.setup()  # creates langgraph checkpoint tables
+app_graph = create_graph(checkpointer=checkpointer)
+```
+
+Pass `thread_id` in every `graph.ainvoke()` call in `_run_investigation_background`:
+```python
+config = {"configurable": {"thread_id": job_id}}
+result = await app_graph.ainvoke(inputs, config=config)
+```
+
+This means if Cloud Run restarts mid-investigation, the same `job_id` resumes from the last completed node.
+
+---
+
+#### Verification Checklist (before deploying to Cloud Run)
+- [ ] `docker-compose up` starts `postgres` + `backend` without errors
+- [ ] `POST /api/investigate` returns `job_id` and row appears in `investigations` table
+- [ ] `GET /api/investigations/{job_id}` returns result after completion
+- [ ] Kill backend mid-investigation (`docker-compose restart backend`), verify job resumes from last checkpoint
+- [ ] `GET /api/investigations/{job_id}` still works after restart (reads from DB, not JOBS dict)
+- [ ] Deploy to Cloud Run with `DATABASE_URL` secret and `--add-cloudsql-instances` — verify same behaviour
+
+---
+
+### Phase 6.2: Agent Configuration (`agents.yaml`)
 **Goal**: Centralize agent tuning parameters into a config file, removing hardcoded constants from agent code.
 
 **Why**: Currently, key operational parameters are scattered across individual agent files (e.g., `malware_iterations = 10` in `malware.py`, model names hardcoded per agent). As the agent count grows (OSINT, Detection, SOC agents planned), per-file management becomes unwieldy. Model selection (Flash vs Pro) and iteration limits are tuning concerns, not code concerns — changing them should not require a deployment.
@@ -395,8 +665,7 @@ Infra --> LeadReview
 - [ ] Add `detection_agent_enabled` and `detection_agent_url` as config entries (alongside env var support)
 - [ ] Validate config on startup with clear error messages for missing/invalid values
 - [X] **Real-Time Streaming**: Refactor Frontend/Backend to use SSE (Server-Sent Events) instead of polling.
-- [ ] **Investigation Persistence**: Deploy Cloud SQL (PostgreSQL) for investigation job storage and LangGraph checkpointing (`PostgresSaver`) to resume jobs after Cloud Run restarts.
-- [ ] **Artifact Persistence (GCS)**: Save completed investigation reports and graph state to GCS bucket after each investigation. Structure: `gs://[bucket]/[job_id]/report.md` & `graph.json`. Replaces current in-memory `JOBS` dict as the source of truth for completed investigations.
+
 - [ ] **A2A Integration**: Expose Harimau as an A2A-compatible agent:
     - Publish `/.well-known/agent.json` Agent Card
     - Add inbound A2A task endpoint (`POST /a2a/tasks/send`) to trigger investigations from external agents
@@ -418,7 +687,7 @@ Infra --> LeadReview
     - [ ] Tools - OpenCTI
     - [ ] Tools - Google SecOps
 
-### Phase 6.2: Multi-User Support & Persistence
+### Phase 6.3: Multi-User Support & Persistence
 
 > **Status**: Planned for Phase 6 — design documented below
 > **Current MVP**: Single-user, ephemeral architecture

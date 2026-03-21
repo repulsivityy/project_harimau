@@ -809,23 +809,15 @@ This means if Cloud Run restarts mid-investigation, the same `job_id` resumes fr
 └─────────────────────────────┘
 ```
 
-## Phase 7: Cross-Investigation Intelligence (Future)
-- [ ] **FalkorDB**: Persistent graph database for cross-investigation IOC and campaign correlation. Replaces per-investigation NetworkX for historical analysis.
-- [ ] **Multi-container support**: Share investigation graph state across Cloud Run instances.
-- [ ] **Advanced graph queries**: Cypher-based queries across historical investigations (e.g., "find all investigations linked to this C2 IP").
-- [ ] **Microservices Split**: *If* scaling requires it, extract the MCP server into a dedicated Cloud Run service (Sidecar).
+## Phase 7: Detached Detection Agent Architecture [MOVED]
 
-## Long-Term Exploration
-- [ ] **Cloud Spanner + SpannerGraph**: Potential migration path from Cloud SQL + FalkorDB to a single GCP-native database handling both relational and graph workloads. Evaluate once LangGraph checkpointer compatibility with Spanner's PostgreSQL dialect is confirmed.
+### Goal:
+Automate the feedback loop between Google SecOps SIEM (lagging indicators) and Project Harimau (forward threat indicators). 
 
-## Long-Term Enhancements
-- [ ] **Advanced Graph Visualization**: Migrate from `streamlit-agraph` to more professional library:
-    - **Option 1**: Pyvis (quick upgrade, better physics/interactivity)
-    - **Option 2**: Plotly + NetworkX (enterprise-grade, actively maintained)
-    - **Option 3**: Custom D3.js component (ultimate flexibility for threat intel workflows)
-    - **Option 4**: Streamlit-Cytoscape, but haven't been actively maintained. 
-    - Evaluation criteria: performance with 150+ nodes, layout algorithms (hierarchical, timeline), clustering capabilities
-- [ ] **Future Investigation Workflow**: Full investigation flow with creation of hunt package
+> **NOTICE**: As of Phase 7, the Detection Agent has been completely decoupled from the Project Harimau monolithic repository. 
+> 
+> All implementation details, code, and documentation (PRD, AGENT.MD, implementation_plan.md) for this bidirectional feedback loop are now tracked in the separate `/detection_agent` repository. 
+> Harimau will implement an *optional* `HTTP-JSON-RPC` push webhook via the Lead Hunter to support this architecture, controlled entirely by environment variables.
 
 ```
 graph TD

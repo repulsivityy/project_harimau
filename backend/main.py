@@ -111,7 +111,14 @@ async def save_job(job_id: str, data: dict):
     if db_pool:
         try:
             async with db_pool.acquire() as conn:
-                metadata = data.get("metadata", {})
+                # Pack top-level fields INTO metadata so they survive DB round-trip.
+                # get_job() unpacks them back to top-level on retrieval.
+                metadata = dict(data.get("metadata", {}))
+                metadata["subtasks"] = data.get("subtasks", metadata.get("subtasks", []))
+                metadata["rich_intel"] = data.get("rich_intel", metadata.get("rich_intel", {}))
+                metadata["specialist_results"] = data.get("specialist_results", metadata.get("specialist_results", {}))
+                metadata["transparency_log"] = data.get("transparency_log", metadata.get("transparency_log", []))
+
                 await conn.execute("""
                     INSERT INTO investigations (
                         job_id, status, ioc, ioc_type, risk_level, gti_score, final_report, metadata
@@ -132,7 +139,7 @@ async def save_job(job_id: str, data: dict):
                 data.get("risk_level"),
                 str(data.get("gti_score", "N/A")),
                 data.get("final_report"),
-                json.dumps(data.get("metadata", {}))
+                json.dumps(metadata)
                 )
         except Exception as e:
             logger.error("save_job_db_failed", job_id=job_id, error=str(e))
@@ -156,6 +163,16 @@ async def get_job(job_id: str):
                     # Parse JSONB metadata
                     if isinstance(job_data.get("metadata"), str):
                         job_data["metadata"] = json.loads(job_data["metadata"])
+                    
+                    # Unpack fields from metadata to top-level for consistent shape.
+                    # This ensures callers get the same dict shape whether from DB or JOBS dict.
+                    metadata = job_data.get("metadata") or {}
+                    if metadata:
+                        job_data.setdefault("subtasks", metadata.get("subtasks", []))
+                        job_data.setdefault("rich_intel", metadata.get("rich_intel", {}))
+                        job_data.setdefault("specialist_results", metadata.get("specialist_results", {}))
+                        job_data.setdefault("transparency_log", metadata.get("transparency_log", []))
+
                     return job_data
         except Exception as e:
             logger.error("get_job_db_failed", job_id=job_id, error=str(e))

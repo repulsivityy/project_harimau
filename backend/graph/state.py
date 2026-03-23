@@ -28,9 +28,13 @@ def merge_graphs(a: Optional[Any], b: Optional[Any]) -> Optional[Any]:
     # Import here to avoid circular deps
     import networkx as nx
     
+    # Deserialized graphs from dicts if necessary
+    graph_a = nx.node_link_graph(a) if isinstance(a, dict) else a
+    graph_b = nx.node_link_graph(b) if isinstance(b, dict) else b
+    
     # Merge nodes (b's attributes win on conflicts)
-    combined = a.copy()
-    for node, data in b.nodes(data=True):
+    combined = nx.MultiDiGraph(graph_a)
+    for node, data in graph_b.nodes(data=True):
         if node in combined:
             # Node exists - merge attributes
             combined.nodes[node].update(data)
@@ -39,10 +43,11 @@ def merge_graphs(a: Optional[Any], b: Optional[Any]) -> Optional[Any]:
             combined.add_node(node, **data)
     
     # Merge edges
-    for u, v, key, data in b.edges(keys=True, data=True):
+    for u, v, key, data in graph_b.edges(keys=True, data=True):
         combined.add_edge(u, v, key=key, **data)
     
-    return combined
+    # Return as dict for state persistence
+    return nx.node_link_data(combined)
 
 class AgentState(TypedDict):
     """

@@ -705,7 +705,7 @@ async def triage_node(state: AgentState):
         # Store in state for graph building
         state["metadata"]["rich_intel"]["relationships"] = relationships_data
         state["metadata"]["tool_call_trace"] = tool_call_trace
-        state["investigation_graph"] = cache.graph  # Persist cache in state
+        state["investigation_graph"] = cache.get_state()  # Persist cache in state
         
         # ========================================
         # PHASE 2: Comprehensive Triage Analysis

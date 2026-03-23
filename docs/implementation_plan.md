@@ -656,6 +656,36 @@ This means if Cloud Run restarts mid-investigation, the same `job_id` resumes fr
 
 ---
 
+### Phase 6.1.1: Configurable Investigation Depth (`max_iterations`) [COMPLETED]
+**Goal**: Move hardcoded `max_iterations` / `hunt_iterations` constants into `AgentState`, allowing per-request configuration from the frontend.
+**Completion Date**: Mar 2026
+
+**Problem**: Two separate constants controlled the same loop limit:
+- `workflow.py`: `hunt_iterations = 3` used by `route_from_lead_hunter`
+- `lead_hunter.py`: `MAX_ITERATIONS = 3` used by `lead_hunter_node`
+
+They were not linked — a drift would silently break loop logic. Users also had no way to tune cost vs. depth per investigation.
+
+**Completed Tasks**:
+- [x] **`backend/config.py`** (new): `DEFAULT_HUNT_ITERATIONS` reads `HUNT_ITERATIONS` env var, defaults to 3. Gives operators Cloud Run-level control without redeployment.
+- [x] **`backend/graph/state.py`**: Added `max_iterations: Annotated[int, last_value]` to `AgentState`. Uses `last_value` reducer so the initial value persists unchanged through every loop iteration.
+- [x] **`backend/main.py`**: Added `max_iterations: int = DEFAULT_HUNT_ITERATIONS` to `InvestigationRequest`; updated `_run_investigation_background` signature; added `"max_iterations": max_iterations` to `initial_state`.
+- [x] **`backend/graph/workflow.py`**: Removed `hunt_iterations = 3` module-level constant; `route_from_lead_hunter` now reads `state.get("max_iterations", DEFAULT_HUNT_ITERATIONS)`.
+- [x] **`backend/agents/lead_hunter.py`**: Removed `MAX_ITERATIONS = 3`; reads `state.get("max_iterations", DEFAULT_HUNT_ITERATIONS)`.
+- [x] **`app/components/sidebar.py`**: Added "Investigation Depth" slider (1–5, default 3); returned in `graph_settings`.
+- [x] **`app/api_client.py`**: `submit_investigation` accepts and passes `max_iterations` in the POST payload.
+- [x] **`app/main.py`**: Passes `graph_settings["max_iterations"]` to `submit_investigation`.
+- [x] **`tests/test_max_iterations.py`** (new): 7 unit tests covering env var reading, request model, initial state, routing logic, lead hunter mode selection, and edge cases at iterations 1 and 5.
+
+**Operator default** (no redeployment needed):
+```bash
+gcloud run services update harimau-backend --set-env-vars HUNT_ITERATIONS=5
+```
+
+**Impact**: Single source of truth for iteration depth. Users can choose fast triage (`max_iterations=1`) or deep investigation (`max_iterations=5`) per job.
+
+---
+
 ### Phase 6.2: Agent Configuration (`agents.yaml`)
 **Goal**: Centralize agent tuning parameters into a config file, removing hardcoded constants from agent code.
 

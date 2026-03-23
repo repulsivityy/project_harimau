@@ -195,9 +195,12 @@ Verdict: {entity['verdict']}
 **Request**:
 ```json
 {
-  "ioc": "44d88612fea8a8f36de82e1278abb02f"
+  "ioc": "44d88612fea8a8f36de82e1278abb02f",
+  "max_iterations": 3
 }
 ```
+
+`max_iterations` is optional — defaults to the `HUNT_ITERATIONS` env var (default: 3). Controls investigation depth: 1 = fast triage, 5 = deep investigation.
 
 **Response** (200 OK - Returns immediately):
 ```json
@@ -373,6 +376,13 @@ Verdict: {entity['verdict']}
 - **Data Integrity**: Optimized `save_job` to exclude binary objects (NetworkX graph) and improved error handling to prevent "split-brain" states.
 - **Impact**: Investigations are now durable and survive infrastructure interruptions.
 
+### Configurable Investigation Depth / `max_iterations` (Mar 2026)
+- **Problem**: `hunt_iterations` (workflow.py) and `MAX_ITERATIONS` (lead_hunter.py) were two separate hardcoded constants controlling the same loop limit — prone to silent drift.
+- **Solution**: Unified into a single `max_iterations` field in `AgentState`, set once from `POST /api/investigate` and carried unchanged through the entire LangGraph loop.
+- **Operator default**: `HUNT_ITERATIONS` env var on the Cloud Run service (no redeployment for tuning).
+- **User control**: Sidebar slider (1–5) passed as `max_iterations` in the POST payload.
+- **Impact**: Single source of truth for depth. Cost vs. thoroughness is now a per-investigation analyst decision.
+
 ---
 
 ## 7. Roadmap
@@ -385,6 +395,7 @@ Verdict: {entity['verdict']}
 ### Phase 6 (Current)
 - [x] Cloud SQL (PostgreSQL) — investigation persistence + LangGraph checkpointing (`AsyncPostgresSaver`)
 - [x] Real-time SSE updates
+- [x] Configurable `max_iterations` — per-request investigation depth via `AgentState` + frontend slider
 - [ ] Authentication hardening (IAP/IAM)
 - [ ] A2A protocol support — expose Agent Card + inbound task endpoint; optional outbound handoff to detection_agent (enable/disable via `DETECTION_AGENT_ENABLED` env var)
 

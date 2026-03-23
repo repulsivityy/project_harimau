@@ -21,6 +21,7 @@ The application takes an IOC (like a file hash, URL, or IP address) and kicks of
 * **Backend**: FastAPI + LangGraph (Cloud Run Service) - Multi-agent orchestration
 * **MCP**: Embedded GTI + WebRisk Servers (stdio/Direct API) - Direct connection to threat intelligence
 * **Brain**: Gemini 2.5 Flash / Pro - Powered by advanced AI reasoning
+* **Database**: Cloud SQL (PostgreSQL) - Persistent investigation results & LangGraph checkpoints
 * **Investigation Cache**: NetworkX (in-memory graph per investigation)
 
 ## Core Capabilities
@@ -62,7 +63,7 @@ The application takes an IOC (like a file hash, URL, or IP address) and kicks of
 -   **Phase 3 (Interface + Hybrid Triage + Token Optimization)**: ✅ Complete
 -   **Phase 4 (Specialist Agents)**: ✅ Complete
 -   **Phase 5 (Iterative Investigation Workflow)**: ✅ Complete
--   **Phase 6 (Real-Time Updates & Multi-User Architecture)**: 🚧 In Progress
+-   **Phase 6 (Core Infrastructure & A2A Integration)**: 🚧 In Progress (6.1 Cloud SQL Persistence ✅)
 
 ### 🛠️ Code Quality Overhaul
 -   **Robustness**: Consolidated state, deep-merge cache deduplication, and specific exception handling.

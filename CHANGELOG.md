@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-23
+
+### Added
+- **Cloud SQL Persistence**: Replaced in-memory `JOBS` dictionary with Cloud SQL (PostgreSQL) for durable investigation storage.
+- **LangGraph Checkpointing**: Integrated `AsyncPostgresSaver` to persist investigation state snapshots, enabling survival across container restarts.
+- **Durable Error Handling**: Hardened background task error handler to ensure failed investigations are always recorded in the database.
+- **Advanced Logging**: Enhanced `save_job` error logs with `data_keys` and `metadata_keys` for rapid serialization debugging.
+
+### Fixed
+- **State Initialization**: Fixed `initial_state` missing core fields (`iteration`, `loop_count`, `investigation_graph`) that prevented workflow execution.
+- **Serialization Safety**: Explicitly excluded non-serializable NetworkX graph objects from database persistence (reconstructed from `rich_intel` for UI).
+- **Split-Brain Prevention**: Modified `get_job` to return `None` on database failure instead of falling back to potentially stale in-memory data.
+- **Background Failures**: Fixed a race condition where investigations could be silently lost if the initial database save failed.
+
+### Technical Details
+- **Deployment**: Integrated `asyncpg` for app data and `psycopg` for LangGraph checkpoints.
+- **Resiliency**: Investigations now resume from the last completed node after a crash or scale-down.
+- **Integrity**: 22 new unit tests covering persistence flow logic and error boundaries.
+
 ## [0.3.1] - 2026-02-07
 
 ### Added
@@ -123,3 +142,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 00136-2b2 | 2026-01-30 | 0.2.4 | Fallback logic fix |
 | 00135-dzs | 2026-01-30 | 0.2.3 | Structural alignment |
 | 00134-2rj | 2026-01-29 | 0.2.2 | Pydantic removal |
+| 00155-sql | 2026-03-23 | 0.4.0 | Cloud SQL + Checkpointing |

@@ -26,7 +26,7 @@ Cloud-native AI threat hunting platform using **LangGraph** for orchestration an
    * **Outbound**: On investigation completion, Harimau optionally forwards the report to the detection_agent via A2A.
    * **Control**: Backend-only via `DETECTION_AGENT_ENABLED` + `DETECTION_AGENT_URL` env vars on the Cloud Run service. Frontend is unaware.
    * **Toggle without redeployment**: `gcloud run services update harimau-backend --set-env-vars DETECTION_AGENT_ENABLED=true,DETECTION_AGENT_URL=https://...`
-4. **Orchestrator**: LangGraph with `MAX_DEPTH` recursion control.
+4. **Orchestrator**: LangGraph with `MAX_DEPTH` recursion control and **Cloud SQL checkpointing** for resiliency.
 5. **Investigation Cache**: **NetworkX MultiDiGraph** (in-memory, per-job).
    * Stores full entity attributes from GTI API.
    * LLM queries minimal fields; specialists query full data.
@@ -65,8 +65,8 @@ Cloud-native AI threat hunting platform using **LangGraph** for orchestration an
 
 ## Roadmap & Reliability
 * **Investigation Cache**: NetworkX (MVP) → FalkorDB (Phase 7, cross-investigation graph queries).
-* **Persistence**: Cloud SQL PostgreSQL (Phase 6) for investigation storage + LangGraph checkpointing.
-* **Artifact Storage**: GCS bucket for completed reports and graph state (Phase 6).
+* **Persistence**: **Cloud SQL PostgreSQL (✅ Complete)** for investigation storage + LangGraph checkpointing.
+* **Artifact Storage**: GCS bucket for completed reports and graph state (Phase 6, planned).
 * **Authentication**: Polling (MVP) → SSE (Phase 6, partially implemented).
-* **Resiliency**: LangGraph Checkpointing (Phase 6) for crash recovery.
+* **Resiliency**: **LangGraph Checkpointing (✅ Complete)** for crash recovery and persistence.
 * **Long-Term**: Explore Cloud Spanner + SpannerGraph as a unified replacement for Cloud SQL + FalkorDB.

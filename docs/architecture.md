@@ -54,9 +54,10 @@ graph TD
 
 #### Data Layer: Store First, Summarize Second
 
-NetworkX Graph (Phase 5 - Current):
+NetworkX Graph & Persistence (Phase 6 - Current):
 * **Storage**: In-memory `MultiDiGraph` stored in LangGraph state.
-* **Lifecycle**: Created per investigation, persists for entire job.
+* **Persistence**: LangGraph state snapshots are persisted to **Cloud SQL (PostgreSQL)** using `AsyncPostgresSaver`.
+* **Lifecycle**: Created per investigation, persists for entire job; survives container restarts.
 * **Contents**: Full entity attributes from GTI API.
 
 To maintain token efficiency, Agents strictly follow this order of operations:
@@ -83,8 +84,14 @@ summary = f"Found entity {entity.id} with verdict {entity.verdict}"
 return {"messages": [summary]}
 ```
 
-Future: FalkorDB (Phase 6 - Planned):
-* **Purpose**: Persistent storage across investigations.
+**Data Layer: Cloud SQL (PostgreSQL)** (Phase 6 - Current):
+* **Purpose**: Persistent storage for investigation results and metadata.
+* **Implementation**: `asyncpg` for relational data, JSONB for rich metadata.
+* **Checkpointer**: `AsyncPostgresSaver` (via `psycopg`) for LangGraph state persistence.
+* **Benefits**: Recovers investigations after container scale-down or crash; avoids memory-only data loss.
+
+Future: FalkorDB (Phase 7 - Planned):
+* **Purpose**: Cross-investigation graph queries (IOC/campaign correlation).
 * **Benefits**: Multi-container support, rich Cypher queries, historical analysis.
 
 ### 2.3 Embedded MCP Server (`/backend/mcp`)
@@ -359,6 +366,13 @@ Verdict: {entity['verdict']}
 - **Target Limiting**: `max_analysis_targets = 5` (separate from `malware_iterations = 10`)
 - **Impact**: Better intelligence quality without overwhelming API/tokens
 
+### Cloud SQL Persistence & LangGraph Checkpointing (Mar 2026)
+- **Problem**: Cloud Run scales to zero, causing loss of all in-memory investigation results and mid-flight state.
+- **Solution**: Replaced in-memory `JOBS` dict with **Cloud SQL (PostgreSQL)** using `asyncpg`.
+- **Checkpointing**: Integrated LangGraph `AsyncPostgresSaver` to persist state snapshots, allowing jobs to resume across restarts.
+- **Data Integrity**: Optimized `save_job` to exclude binary objects (NetworkX graph) and improved error handling to prevent "split-brain" states.
+- **Impact**: Investigations are now durable and survive infrastructure interruptions.
+
 ---
 
 ## 7. Roadmap
@@ -368,8 +382,8 @@ Verdict: {entity['verdict']}
 - [x] Enhanced specialist agents
 - [ ] Historical investigation queries
 
-### Phase 6 (Planned)
-- [ ] Cloud SQL (PostgreSQL) — investigation persistence + LangGraph checkpointing (`PostgresSaver`)
+### Phase 6 (Current)
+- [x] Cloud SQL (PostgreSQL) — investigation persistence + LangGraph checkpointing (`AsyncPostgresSaver`)
 - [x] Real-time SSE updates
 - [ ] Authentication hardening (IAP/IAM)
 - [ ] A2A protocol support — expose Agent Card + inbound task endpoint; optional outbound handoff to detection_agent (enable/disable via `DETECTION_AGENT_ENABLED` env var)

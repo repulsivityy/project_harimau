@@ -372,12 +372,24 @@ Infra --> LeadReview
 
 
 
-## Phase 6: Near-Term Roadmap (Post-MVP)
+## Phase 6: Core Infrastructure & Logic Hardening
 
-### Phase 6.1: Cloud SQL + LangGraph Checkpointing
-**Goal**: Replace the ephemeral in-memory `JOBS` dict with Cloud SQL (PostgreSQL) and wire LangGraph `PostgresSaver` so investigations persist across Cloud Run restarts and can be retrieved at any time.
+### Phase 6.1: Cloud SQL + LangGraph Checkpointing [COMPLETED]
+**Goal**: Replace the ephemeral in-memory `JOBS` dict with Cloud SQL (PostgreSQL) and wire LangGraph `AsyncPostgresSaver` so investigations persist across Cloud Run restarts.
+**Completion Date**: Mar 2026
 
-**Why**: Cloud Run scales to zero — any in-memory state is lost on restart. All investigation results, graph data, and mid-investigation state currently disappear on container restart. Cloud SQL is external to the container and persists indefinitely.
+**Completed Tasks**:
+- [x] **Relational Persistence**: Replaced `JOBS` dict with Cloud SQL (PostgreSQL) using `asyncpg`.
+- [x] **State Checkpointing**: Integrated LangGraph `AsyncPostgresSaver` to persist workflow snapshots.
+- [x] **Data Shape Consistency**: Unified `save_job`/`get_job` to handle JSONB packing/unpacking and excluded binary NetworkX objects.
+- [x] **Logic Fixes**: 
+  - [x] Fixed `initial_state` missing core fields.
+  - [x] Improved `save_job` error logging for Cloud Logging visibility.
+  - [x] Fixed `get_job` stale-data fallback (removed split-brain risk).
+  - [x] Hardened background error handler to ensure failure persistence.
+- [x] **Verification**: 22 unit tests passing in `tests/test_flow_logic.py`.
+
+**Why**: Cloud Run scales to zero — any in-memory state is lost on restart. All investigation results, graph data, and mid-investigation state now survive container restarts.
 
 **Current state summary**:
 - `JOBS = {}` dict defined at `backend/main.py` line 44 — all reads/writes go through this

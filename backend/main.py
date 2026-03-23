@@ -198,6 +198,30 @@ async def get_job(job_id: str):
             return None  # Don't serve stale in-memory data when DB is the source of truth
     return JOBS.get(job_id)
 
+async def list_jobs(limit: int = 50):
+    if db_pool:
+        try:
+            async with db_pool.acquire() as conn:
+                rows = await conn.fetch("SELECT job_id, ioc, ioc_type, status, created_at FROM investigations ORDER BY created_at DESC LIMIT $1", limit)
+                jobs = []
+                for row in rows:
+                    job_data = dict(row)
+                    if job_data.get("created_at"):
+                        job_data["created_at"] = job_data["created_at"].isoformat()
+                    jobs.append(job_data)
+                return jobs
+        except Exception as e:
+            logger.error("list_jobs_db_failed", error=str(e))
+            return []
+    else:
+        sorted_jobs = sorted(JOBS.values(), key=lambda x: x.get("created_at", ""), reverse=True)
+        return [{"job_id": j["job_id"], "ioc": j.get("ioc"), "ioc_type": j.get("ioc_type"), "status": j.get("status"), "created_at": j.get("created_at")} for j in sorted_jobs[:limit]]
+
+@app.get("/api/investigations")
+async def get_all_investigations(limit: int = 50):
+    """Get a list of recent investigations."""
+    return await list_jobs(limit)
+
 @app.post("/api/investigate")
 async def run_investigation(request: InvestigationRequest, background_tasks: BackgroundTasks):
     """

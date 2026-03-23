@@ -39,6 +39,9 @@ if submit_btn and ioc_input:
 # Render Active Investigation
 if st.session_state.current_job_id:
     job_id = st.session_state.current_job_id
+    st.markdown("---")
+    st.subheader("Current Investigation")
+    st.caption(f"**Job ID:** `{job_id}`")
     
     try:
         # Check current status

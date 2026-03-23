@@ -40,6 +40,14 @@ class HarimauAPIClient:
         res.raise_for_status()
         return res.json()
 
+    def get_investigations(self, limit: int = 50) -> list:
+        """
+        Gets a list of recent investigations.
+        """
+        res = requests.get(f"{self.base_url}/api/investigations", params={"limit": limit})
+        res.raise_for_status()
+        return res.json()
+
     def get_graph_data(self, job_id: str) -> Dict[str, Any]:
         """
         Fetches the graph structure for visualization.

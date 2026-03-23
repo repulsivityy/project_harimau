@@ -32,6 +32,23 @@ def render_sidebar(api: HarimauAPIClient):
         node_size = st.slider("Node Size", 10, 50, 15, help="Adjust node diameter")
         link_distance = st.slider("Link Distance", 50, 1000, 200, help="Space between nodes")
         
+        st.markdown("---")
+        st.subheader("🕰️ Recent Investigations")
+        try:
+            recent_jobs = api.get_investigations(limit=10)
+            if not recent_jobs:
+                st.info("No recent investigations found.")
+            else:
+                for job in recent_jobs:
+                    # e.g. "1.1.1.1 (completed)"
+                    label = f"{job.get('ioc')} ({job.get('status')})"
+                    if st.button(label, key=f"btn_{job.get('job_id')}", use_container_width=True):
+                        st.session_state.current_job_id = job.get('job_id')
+                        st.session_state.graph_key += 1
+                        st.rerun()
+        except Exception as e:
+            st.error("Could not load history.")
+        
     return {
         "physics_enabled": physics_enabled,
         "show_labels": show_labels,

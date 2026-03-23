@@ -16,6 +16,7 @@ logger = get_logger("backend-api")
 
 db_pool = None
 app_graph = None
+checkpointer_instance = None  # LangGraph AsyncPostgresSaver (psycopg-based)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -55,8 +56,18 @@ async def lifespan(app: FastAPI):
             db_pool = await asyncio.wait_for(init_db(), timeout=4.0)
             logger.info("database_connected", status="pool_created", checkpointer="postgres_native_asyncpg")
             
-            # Application Graph (Fallback default Checkpointer)
-            app_graph = create_graph()
+            # --- LangGraph Checkpointer (psycopg-based, separate from asyncpg pool) ---
+            try:
+                from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+                checkpointer_ctx = AsyncPostgresSaver.from_conn_string(db_url)
+                checkpointer_instance = await checkpointer_ctx.__aenter__()
+                await checkpointer_instance.setup()  # Creates checkpoint tables if missing
+                logger.info("checkpointer_initialized", type="AsyncPostgresSaver")
+                app_graph = create_graph(checkpointer=checkpointer_instance)
+            except Exception as cp_err:
+                logger.error("checkpointer_init_failed", error=str(cp_err), exc_info=True)
+                checkpointer_instance = None
+                app_graph = create_graph()  # Fallback: no checkpointer
             
             logger.info("backend_startup", status="started_with_db")
             yield  # ** SERVER LISTENS HERE **
@@ -80,6 +91,12 @@ async def lifespan(app: FastAPI):
         yield  # ** SERVER LISTENS HERE IN FALLBACK **
 
     # --- Shutdown Phase ---
+    if checkpointer_instance:
+        try:
+            await checkpointer_ctx.__aexit__(None, None, None)
+            logger.info("checkpointer_closed")
+        except Exception as cp_close_err:
+            logger.error("checkpointer_close_failed", error=str(cp_close_err))
     if db_pool:
         await db_pool.close()
     logger.info("backend_shutdown", status="stopped")
@@ -142,7 +159,9 @@ async def save_job(job_id: str, data: dict):
                 json.dumps(metadata)
                 )
         except Exception as e:
-            logger.error("save_job_db_failed", job_id=job_id, error=str(e))
+            logger.error("save_job_db_failed", job_id=job_id, error=str(e),
+                         data_keys=list(data.keys()),
+                         metadata_keys=list(metadata.keys()) if 'metadata' in dir() else "N/A")
             JOBS[job_id] = data
     else:
         JOBS[job_id] = data
@@ -176,7 +195,7 @@ async def get_job(job_id: str):
                     return job_data
         except Exception as e:
             logger.error("get_job_db_failed", job_id=job_id, error=str(e))
-            return JOBS.get(job_id)
+            return None  # Don't serve stale in-memory data when DB is the source of truth
     return JOBS.get(job_id)
 
 @app.post("/api/investigate")
@@ -229,7 +248,10 @@ async def _run_investigation_background(job_id: str, ioc: str):
             "messages": [],
             "subtasks": [],
             "specialist_results": {},
-            "metadata": {}
+            "metadata": {},
+            "iteration": 0,
+            "loop_count": 0,
+            "investigation_graph": None
         }
         
         # Emit: Workflow execution started
@@ -337,7 +359,8 @@ async def _run_investigation_background(job_id: str, ioc: str):
             "rich_intel": final_state.get("metadata", {}).get("rich_intel", {}),
             "specialist_results": specialist_results,
             "metadata": final_state.get("metadata", {}),
-            "investigation_graph": final_state.get("investigation_graph"),  # Add graph to result
+            # NOTE: investigation_graph (NetworkX object) intentionally excluded — not JSON-serializable.
+            # Graph data is served via /api/investigations/{job_id}/graph using rich_intel.
             "transparency_log": transparency_log  # Agent transparency events
         }
         await save_job(job_id, result)
@@ -356,12 +379,13 @@ async def _run_investigation_background(job_id: str, ioc: str):
     except Exception as e:
         logger.error("investigation_failed", job_id=job_id, error=str(e))
         job = await get_job(job_id)
-        if job:
-            job["status"] = "failed"
-            if "metadata" not in job or not isinstance(job["metadata"], dict):
-                job["metadata"] = {}
-            job["metadata"]["error"] = f"Investigation Failed: {str(e)}"
-            await save_job(job_id, job)
+        if not job:
+            job = {"job_id": job_id, "status": "failed", "ioc": ioc, "metadata": {}}
+        job["status"] = "failed"
+        if "metadata" not in job or not isinstance(job["metadata"], dict):
+            job["metadata"] = {}
+        job["metadata"]["error"] = f"Investigation Failed: {str(e)}"
+        await save_job(job_id, job)
         
         # Emit: Investigation failed
         await sse_manager.emit_event(job_id, "investigation_failed", {

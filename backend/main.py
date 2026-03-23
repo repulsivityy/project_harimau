@@ -2,22 +2,103 @@ import os
 import json
 import uuid
 from datetime import datetime
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
+import asyncio
 from backend.utils.logger import configure_logger, get_logger
-from backend.graph.workflow import app_graph
+import asyncpg
+from backend.graph.workflow import create_graph
 
 # 1. Configure Logging
 configure_logger()
 logger = get_logger("backend-api")
 
+db_pool = None
+app_graph = None
+checkpointer_instance = None  # LangGraph AsyncPostgresSaver (psycopg-based)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    logger.info("backend_startup", status="started")
-    yield
-    # Shutdown
+    global db_pool, app_graph
+    
+    # --- Startup Phase ---
+    db_url = os.environ.get("DATABASE_URL")
+    
+    async def init_db():
+        """Isolated DB setup logic to be wrapped in a strict timeout."""
+        logger.info("database_initializing", status="connecting")
+        pool = await asyncpg.create_pool(db_url)
+        
+        async with pool.acquire() as conn:
+            # Create main investigations table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS investigations (
+                    job_id       TEXT PRIMARY KEY,
+                    status       VARCHAR(50)  NOT NULL DEFAULT 'running',
+                    ioc          VARCHAR(255) NOT NULL,
+                    ioc_type     VARCHAR(50),
+                    risk_level   VARCHAR(50),
+                    gti_score    VARCHAR(50),
+                    created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+                    completed_at TIMESTAMPTZ,
+                    final_report TEXT,
+                    metadata     JSONB
+                );
+                CREATE INDEX IF NOT EXISTS idx_investigations_created ON investigations(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_investigations_status ON investigations(status);
+            """)
+        return pool
+
+    if db_url:
+        try:
+            # FORCE Uvicorn to yield within 4 seconds, regardless of Cloud SQL socket hangups
+            db_pool = await asyncio.wait_for(init_db(), timeout=4.0)
+            logger.info("database_connected", status="pool_created", checkpointer="postgres_native_asyncpg")
+            
+            # --- LangGraph Checkpointer (psycopg-based, separate from asyncpg pool) ---
+            try:
+                from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+                checkpointer_ctx = AsyncPostgresSaver.from_conn_string(db_url)
+                checkpointer_instance = await checkpointer_ctx.__aenter__()
+                await checkpointer_instance.setup()  # Creates checkpoint tables if missing
+                logger.info("checkpointer_initialized", type="AsyncPostgresSaver")
+                app_graph = create_graph(checkpointer=checkpointer_instance)
+            except Exception as cp_err:
+                logger.error("checkpointer_init_failed", error=str(cp_err), exc_info=True)
+                checkpointer_instance = None
+                app_graph = create_graph()  # Fallback: no checkpointer
+            
+            logger.info("backend_startup", status="started_with_db")
+            yield  # ** SERVER LISTENS HERE **
+            
+        except asyncio.TimeoutError:
+            logger.error("database_startup_timeout", error="Timed out connecting to asyncpg pool after 4 seconds.", exc_info=True)
+            app_graph = create_graph()
+            logger.info("backend_startup", status="started_fallback_mode")
+            yield  # ** SERVER LISTENS HERE IN FALLBACK **
+            
+        except Exception as e:
+            logger.error("database_connection_failed", error=str(e), exc_info=True)
+            app_graph = create_graph()
+            logger.info("backend_startup", status="started_fallback_mode")
+            yield  # ** SERVER LISTENS HERE IN FALLBACK **
+            
+    else:
+        logger.warning("database_not_configured", fallback="in-memory JOBS dict")
+        app_graph = create_graph()
+        logger.info("backend_startup", status="started_without_db")
+        yield  # ** SERVER LISTENS HERE IN FALLBACK **
+
+    # --- Shutdown Phase ---
+    if checkpointer_instance:
+        try:
+            await checkpointer_ctx.__aexit__(None, None, None)
+            logger.info("checkpointer_closed")
+        except Exception as cp_close_err:
+            logger.error("checkpointer_close_failed", error=str(cp_close_err))
+    if db_pool:
+        await db_pool.close()
     logger.info("backend_shutdown", status="stopped")
 
 app = FastAPI(title="Harimau Backend", lifespan=lifespan)
@@ -40,11 +121,109 @@ async def health_check():
 async def root():
     return {"message": "Harimau Threat Hunter Backend Online"}
 
-# Simple In-Memory Persistence for MVP
-JOBS = {}
+# Persistence Helpers
+JOBS = {}  # In-memory fallback
+
+async def save_job(job_id: str, data: dict):
+    if db_pool:
+        try:
+            async with db_pool.acquire() as conn:
+                # Pack top-level fields INTO metadata so they survive DB round-trip.
+                # get_job() unpacks them back to top-level on retrieval.
+                metadata = dict(data.get("metadata", {}))
+                metadata["subtasks"] = data.get("subtasks", metadata.get("subtasks", []))
+                metadata["rich_intel"] = data.get("rich_intel", metadata.get("rich_intel", {}))
+                metadata["specialist_results"] = data.get("specialist_results", metadata.get("specialist_results", {}))
+                metadata["transparency_log"] = data.get("transparency_log", metadata.get("transparency_log", []))
+
+                await conn.execute("""
+                    INSERT INTO investigations (
+                        job_id, status, ioc, ioc_type, risk_level, gti_score, final_report, metadata
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+                    ON CONFLICT (job_id) DO UPDATE SET
+                        status = EXCLUDED.status,
+                        ioc_type = EXCLUDED.ioc_type,
+                        risk_level = EXCLUDED.risk_level,
+                        gti_score = EXCLUDED.gti_score,
+                        final_report = EXCLUDED.final_report,
+                        metadata = EXCLUDED.metadata,
+                        completed_at = CASE WHEN EXCLUDED.status IN ('completed', 'failed') THEN NOW() ELSE investigations.completed_at END
+                """, 
+                job_id, 
+                data.get("status"), 
+                data.get("ioc"),
+                data.get("ioc_type"),
+                data.get("risk_level"),
+                str(data.get("gti_score", "N/A")),
+                data.get("final_report"),
+                json.dumps(metadata)
+                )
+        except Exception as e:
+            logger.error("save_job_db_failed", job_id=job_id, error=str(e),
+                         data_keys=list(data.keys()),
+                         metadata_keys=list(metadata.keys()) if 'metadata' in dir() else "N/A")
+            JOBS[job_id] = data
+    else:
+        JOBS[job_id] = data
+
+async def get_job(job_id: str):
+    if db_pool:
+        try:
+            async with db_pool.acquire() as conn:
+                row = await conn.fetchrow("SELECT * FROM investigations WHERE job_id = $1", job_id)
+                if row:
+                    # Convert row to dict and merge metadata back if needed
+                    job_data = dict(row)
+                    # Convert datetime to string for JSON compatibility
+                    if job_data.get("created_at"):
+                        job_data["created_at"] = job_data["created_at"].isoformat()
+                    if job_data.get("completed_at"):
+                        job_data["completed_at"] = job_data["completed_at"].isoformat()
+                    # Parse JSONB metadata
+                    if isinstance(job_data.get("metadata"), str):
+                        job_data["metadata"] = json.loads(job_data["metadata"])
+                    
+                    # Unpack fields from metadata to top-level for consistent shape.
+                    # This ensures callers get the same dict shape whether from DB or JOBS dict.
+                    metadata = job_data.get("metadata") or {}
+                    if metadata:
+                        job_data.setdefault("subtasks", metadata.get("subtasks", []))
+                        job_data.setdefault("rich_intel", metadata.get("rich_intel", {}))
+                        job_data.setdefault("specialist_results", metadata.get("specialist_results", {}))
+                        job_data.setdefault("transparency_log", metadata.get("transparency_log", []))
+
+                    return job_data
+        except Exception as e:
+            logger.error("get_job_db_failed", job_id=job_id, error=str(e))
+            return None  # Don't serve stale in-memory data when DB is the source of truth
+    return JOBS.get(job_id)
+
+async def list_jobs(limit: int = 50):
+    if db_pool:
+        try:
+            async with db_pool.acquire() as conn:
+                rows = await conn.fetch("SELECT job_id, ioc, ioc_type, status, created_at FROM investigations ORDER BY created_at DESC LIMIT $1", limit)
+                jobs = []
+                for row in rows:
+                    job_data = dict(row)
+                    if job_data.get("created_at"):
+                        job_data["created_at"] = job_data["created_at"].isoformat()
+                    jobs.append(job_data)
+                return jobs
+        except Exception as e:
+            logger.error("list_jobs_db_failed", error=str(e))
+            return []
+    else:
+        sorted_jobs = sorted(JOBS.values(), key=lambda x: x.get("created_at", ""), reverse=True)
+        return [{"job_id": j["job_id"], "ioc": j.get("ioc"), "ioc_type": j.get("ioc_type"), "status": j.get("status"), "created_at": j.get("created_at")} for j in sorted_jobs[:limit]]
+
+@app.get("/api/investigations")
+async def get_all_investigations(limit: int = 50):
+    """Get a list of recent investigations."""
+    return await list_jobs(limit)
 
 @app.post("/api/investigate")
-async def run_investigation(request: InvestigationRequest):
+async def run_investigation(request: InvestigationRequest, background_tasks: BackgroundTasks):
     """
     Triggers the LangGraph investigation workflow in the background.
     Returns immediately with job_id for polling.
@@ -55,15 +234,15 @@ async def run_investigation(request: InvestigationRequest):
     logger.info("investigation_request", job_id=job_id, ioc=request.ioc)
     
     # Initialize Job Status
-    JOBS[job_id] = {
+    await save_job(job_id, {
         "job_id": job_id,
         "status": "running",
         "ioc": request.ioc,
-        "created_at": "now"
-    }
+        "created_at": datetime.now().isoformat()
+    })
     
-    # Run investigation in background
-    asyncio.create_task(_run_investigation_background(job_id, request.ioc))
+    # Run investigation in background safely
+    background_tasks.add_task(_run_investigation_background, job_id, request.ioc)
     
     # Return immediately
     return {
@@ -93,7 +272,10 @@ async def _run_investigation_background(job_id: str, ioc: str):
             "messages": [],
             "subtasks": [],
             "specialist_results": {},
-            "metadata": {}
+            "metadata": {},
+            "iteration": 0,
+            "loop_count": 0,
+            "investigation_graph": None
         }
         
         # Emit: Workflow execution started
@@ -102,7 +284,8 @@ async def _run_investigation_background(job_id: str, ioc: str):
             "progress": 5
         })
         
-        final_state = await app_graph.ainvoke(initial_state)
+        config = {"configurable": {"thread_id": job_id}}
+        final_state = await app_graph.ainvoke(initial_state, config=config)
         
         # Generate detailed timeline from SSE event history
         timeline_events = sse_manager.get_events(job_id)
@@ -200,10 +383,11 @@ async def _run_investigation_background(job_id: str, ioc: str):
             "rich_intel": final_state.get("metadata", {}).get("rich_intel", {}),
             "specialist_results": specialist_results,
             "metadata": final_state.get("metadata", {}),
-            "investigation_graph": final_state.get("investigation_graph"),  # Add graph to result
+            # NOTE: investigation_graph (NetworkX object) intentionally excluded — not JSON-serializable.
+            # Graph data is served via /api/investigations/{job_id}/graph using rich_intel.
             "transparency_log": transparency_log  # Agent transparency events
         }
-        JOBS[job_id] = result
+        await save_job(job_id, result)
         logger.info("investigation_complete", job_id=job_id, status="completed")
         
         # Emit: Investigation completed
@@ -218,8 +402,14 @@ async def _run_investigation_background(job_id: str, ioc: str):
         
     except Exception as e:
         logger.error("investigation_failed", job_id=job_id, error=str(e))
-        JOBS[job_id]["status"] = "failed"
-        JOBS[job_id]["error"] = str(e)
+        job = await get_job(job_id)
+        if not job:
+            job = {"job_id": job_id, "status": "failed", "ioc": ioc, "metadata": {}}
+        job["status"] = "failed"
+        if "metadata" not in job or not isinstance(job["metadata"], dict):
+            job["metadata"] = {}
+        job["metadata"]["error"] = f"Investigation Failed: {str(e)}"
+        await save_job(job_id, job)
         
         # Emit: Investigation failed
         await sse_manager.emit_event(job_id, "investigation_failed", {
@@ -234,7 +424,7 @@ async def get_investigation(job_id: str):
     """
     Get investigation status and results.
     """
-    job = JOBS.get(job_id)
+    job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
@@ -260,7 +450,8 @@ async def stream_investigation(job_id: str):
     from backend.utils.sse_manager import sse_manager
     
     # Check if job exists
-    if job_id not in JOBS:
+    job = await get_job(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     
     logger.info("sse_stream_requested", job_id=job_id)
@@ -278,7 +469,7 @@ async def stream_investigation(job_id: str):
 @app.get("/api/debug/investigation/{job_id}")
 async def debug_investigation(job_id: str):
     """Debug endpoint to inspect investigation state."""
-    job = JOBS.get(job_id)
+    job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     
@@ -312,7 +503,7 @@ async def get_investigation_graph(job_id: str):
     Returns graph data (nodes/edges) for visualization.
     Enhanced with debugging and better error handling.
     """
-    job = JOBS.get(job_id)
+    job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -455,7 +646,7 @@ async def get_investigation_graph(job_id: str):
     """
     Returns graph data with improved naming conventions for visualization.
     """
-    job = JOBS.get(job_id)
+    job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 

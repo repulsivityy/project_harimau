@@ -21,14 +21,28 @@ services:
       - FALKORDB_PORT=6379
       - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json
       - GTI_API_KEY=${GTI_API_KEY}
+      - DATABASE_URL=postgresql://harimau:harimau@postgres:5432/harimau
     volumes:
       - ./backend:/app/backend # Hot Reload
       - ./credentials.json:/app/credentials.json:ro
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8080 --reload
     depends_on:
       - falkordb
+      - postgres
 
-  # 3. The Frontend (Streamlit UI)
+  # 3. The PostgreSQL database (for Local Parity/Future Use)
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: harimau
+      POSTGRES_USER: harimau
+      POSTGRES_PASSWORD: harimau
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # 4. The Frontend (Streamlit UI)
   frontend:
     image: python:3.11-slim
     working_dir: /app
@@ -45,3 +59,4 @@ services:
 
 volumes:
   falkordb_data:
+  postgres_data:

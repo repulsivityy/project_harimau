@@ -576,7 +576,7 @@ Analyze the following infrastructure indicators based on the triage context abov
                     logger.info("infra_marked_investigated", entity=target_info["value"])
                 
                 # Persist expanded graph back to state
-                state["investigation_graph"] = cache.graph
+                state["investigation_graph"] = cache.get_state()
                 cache_stats_after = cache.get_stats()
                 logger.info("infra_graph_updated", 
                            before=cache_stats_before, 

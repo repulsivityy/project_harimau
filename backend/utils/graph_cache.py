@@ -16,14 +16,23 @@ import json
 class InvestigationCache:
     """NetworkX-based cache for investigation entities with full attributes."""
     
-    def __init__(self, graph: Optional[nx.MultiDiGraph] = None):
+    def __init__(self, graph: Optional[Any] = None):
         """
         Initialize investigation cache.
         
         Args:
-            graph: Existing NetworkX graph to reuse, or None to create new
+            graph: Existing NetworkX graph to reuse, a state dict, or None to create new
         """
-        self.graph = graph if graph is not None else nx.MultiDiGraph()
+        if isinstance(graph, dict):
+            self.graph = nx.node_link_graph(graph)
+        elif isinstance(graph, nx.MultiDiGraph):
+            self.graph = graph
+        else:
+            self.graph = nx.MultiDiGraph()
+
+    def get_state(self) -> Dict[str, Any]:
+        """Get the graph as a dictionary for state persistence."""
+        return nx.node_link_data(self.graph)
     
     def add_entity(self, entity_id: str, entity_type: str, attributes: Dict[str, Any]):
         """

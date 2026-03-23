@@ -18,12 +18,12 @@ malware_node = with_sse_events("malware_specialist")(_malware_node)
 infrastructure_node = with_sse_events("infrastructure_specialist")(_infra_node)
 lead_hunter_node = with_sse_events("lead_hunter")(_lead_hunter_node)
 
-def build_graph():
+def create_graph(checkpointer=None):
     """
     Constructs the Harimau Investigation Graph.
     Phase 5.2: Triage -> Gate -> Specialists -> Lead Hunter -> (Loop or END)
     """
-    logger.info("building_graph")
+    logger.info("building_graph", has_checkpointer=bool(checkpointer))
     
     # 1. Initialize Graph
     workflow = StateGraph(AgentState)
@@ -69,7 +69,7 @@ def build_graph():
     )
     
     # 5. Compile
-    return workflow.compile()
+    return workflow.compile(checkpointer=checkpointer)
 
 # --- Helper Nodes & Routing Logic ---
 
@@ -138,5 +138,4 @@ def route_from_lead_hunter(state: AgentState):
     logger.info("lead_hunter_continuing_loop", next_iteration=iteration)
     return "gate"
 
-# Singleton instance of the runnable graph
-app_graph = build_graph()
+

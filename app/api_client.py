@@ -19,15 +19,15 @@ class HarimauAPIClient:
         except Exception:
             return False
 
-    def submit_investigation(self, ioc: str, ioc_type: str = None) -> str:
+    def submit_investigation(self, ioc: str, ioc_type: str = None, max_iterations: int = 3) -> str:
         """
         Submits a new investigation job.
         Returns: job_id
         """
-        payload = {"ioc": ioc}
+        payload = {"ioc": ioc, "max_iterations": max_iterations}
         if ioc_type:
             payload["ioc_type"] = ioc_type
-            
+
         res = requests.post(f"{self.base_url}/api/investigate", json=payload)
         res.raise_for_status()
         return res.json().get("job_id")

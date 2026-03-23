@@ -33,6 +33,16 @@ def render_sidebar(api: HarimauAPIClient):
         link_distance = st.slider("Link Distance", 50, 1000, 200, help="Space between nodes")
         
         st.markdown("---")
+        st.subheader("🔬 Investigation Settings")
+        max_iterations = st.slider(
+            "Investigation Depth (iterations)",
+            min_value=1,
+            max_value=5,
+            value=3,
+            help="Higher = deeper pivots, higher cost. Lower = faster, cheaper."
+        )
+
+        st.markdown("---")
         st.subheader("🕰️ Recent Investigations")
         try:
             recent_jobs = api.get_investigations(limit=10)
@@ -53,5 +63,6 @@ def render_sidebar(api: HarimauAPIClient):
         "physics_enabled": physics_enabled,
         "show_labels": show_labels,
         "node_size": node_size,
-        "link_distance": link_distance
+        "link_distance": link_distance,
+        "max_iterations": max_iterations
     }

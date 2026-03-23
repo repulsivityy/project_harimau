@@ -84,6 +84,10 @@ class AgentState(TypedDict):
     # Iteration Control
     loop_count: Annotated[int, operator.add]
     iteration: Annotated[int, last_value]  # Explicit iteration phase (0, 1, 2)
+
+    # Investigation depth: controls cost vs. depth trade-off
+    # Set from POST /api/investigate, persists unchanged through entire loop
+    max_iterations: Annotated[int, last_value]
     
     # Lead Hunter's Strategic Plan (for transparency)
     lead_plan: Optional[str]

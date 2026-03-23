@@ -1,5 +1,6 @@
 import os
 from langchain_google_vertexai import ChatVertexAI
+from backend.config import DEFAULT_HUNT_ITERATIONS
 #from langchain_google_genai import ChatGoogleGenerativeAI # preperation for migration
 from backend.graph.state import AgentState
 from backend.utils.logger import get_logger
@@ -39,8 +40,7 @@ async def lead_hunter_node(state: AgentState):
     # --- DETERMINE MODE ---
     current_iteration = state.get("iteration", 0)
     
-    # Max iterations is controlled by workflow.py (hunt_iterations), 
-    MAX_ITERATIONS = 3 
+    MAX_ITERATIONS = state.get("max_iterations", DEFAULT_HUNT_ITERATIONS)
     
     if current_iteration < MAX_ITERATIONS:
         # --- PLANNING MODE ---

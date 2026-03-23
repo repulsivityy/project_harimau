@@ -32,7 +32,7 @@ with col2:
 # Submit New Job
 if submit_btn and ioc_input:
     with st.spinner("The 🐯 Tiger is hunting..."):
-        job_id = api.submit_investigation(ioc_input)
+        job_id = api.submit_investigation(ioc_input, max_iterations=graph_settings.get("max_iterations", 3))
         st.session_state.current_job_id = job_id
         st.toast(f"Job Initiated: {job_id}", icon="🚀")
 

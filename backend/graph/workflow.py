@@ -6,9 +6,7 @@ from backend.agents.infrastructure import infrastructure_node as _infra_node
 from backend.agents.lead_hunter import lead_hunter_node as _lead_hunter_node
 from backend.graph.sse_wrappers import with_sse_events
 from backend.utils.logger import get_logger
-
-## Global Variables
-hunt_iterations = 3 # Changed from 1 to 2 for additional investigation round
+from backend.config import DEFAULT_HUNT_ITERATIONS
 
 logger = get_logger("workflow_graph")
 
@@ -116,7 +114,7 @@ def route_from_lead_hunter(state: AgentState):
     State['subtasks'] will have been updated by Lead Hunter if continuation is needed.
     """
     iteration = state.get("iteration", 0)
-    max_iterations = hunt_iterations  # Changed from 1 to 2 for additional investigation round
+    max_iterations = state.get("max_iterations", DEFAULT_HUNT_ITERATIONS)
     subtasks = state.get("subtasks", [])
     
     logger.info("lead_hunter_routing_check", 

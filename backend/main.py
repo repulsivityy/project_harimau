@@ -9,6 +9,7 @@ import asyncio
 from backend.utils.logger import configure_logger, get_logger
 import asyncpg
 from backend.graph.workflow import create_graph
+from backend.config import DEFAULT_HUNT_ITERATIONS
 
 # 1. Configure Logging
 configure_logger()
@@ -106,6 +107,7 @@ app = FastAPI(title="Harimau Backend", lifespan=lifespan)
 # --- Data Models ---
 class InvestigationRequest(BaseModel):
     ioc: str
+    max_iterations: int = DEFAULT_HUNT_ITERATIONS
 
 # --- Endpoints ---
 
@@ -242,7 +244,7 @@ async def run_investigation(request: InvestigationRequest, background_tasks: Bac
     })
     
     # Run investigation in background safely
-    background_tasks.add_task(_run_investigation_background, job_id, request.ioc)
+    background_tasks.add_task(_run_investigation_background, job_id, request.ioc, request.max_iterations)
     
     # Return immediately
     return {
@@ -251,7 +253,7 @@ async def run_investigation(request: InvestigationRequest, background_tasks: Bac
         "message": "Investigation started. Poll /api/investigations/{job_id} for results."
     }
 
-async def _run_investigation_background(job_id: str, ioc: str):
+async def _run_investigation_background(job_id: str, ioc: str, max_iterations: int = DEFAULT_HUNT_ITERATIONS):
     """Background task that runs the actual investigation with SSE event streaming."""
     from backend.utils.sse_manager import sse_manager
     
@@ -275,7 +277,8 @@ async def _run_investigation_background(job_id: str, ioc: str):
             "metadata": {},
             "iteration": 0,
             "loop_count": 0,
-            "investigation_graph": None
+            "investigation_graph": None,
+            "max_iterations": max_iterations
         }
         
         # Emit: Workflow execution started

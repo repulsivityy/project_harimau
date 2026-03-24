@@ -13,15 +13,17 @@ graph TD
         
         subgraph "Backend Container"
             BackendAPI[API Layer] <-->|Invokes| LG[LangGraph Orchestrator]
-            LG <-->|stdio| MCP[Embedded GTI MCP Server]
+            LG <-->|stdio| GTIMC[Embedded GTI MCP Server]
+            LG <-->|stdio| ShodanMCP[Embedded Shodan MCP Server]
             LG <-->|aiohttp| DirectAPI[Direct GTI Fast-Path]
             LG <-->|State| Cache[NetworkX Graph Cache]
         end
     end
-    
+
     subgraph "External"
-        MCP <-->|HTTPS| GoogleTI[Google Threat Intel API]
+        GTIMC <-->|HTTPS| GoogleTI[Google Threat Intel API]
         DirectAPI <-->|Parallel HTTPS| GoogleTI
+        ShodanMCP <-->|HTTPS| ShodanAPI[Shodan API / CVEDB]
     end
 ```
 
@@ -94,12 +96,15 @@ Future: FalkorDB (Phase 7 - Planned):
 * **Purpose**: Cross-investigation graph queries (IOC/campaign correlation).
 * **Benefits**: Multi-container support, rich Cypher queries, historical analysis.
 
-### 2.3 Embedded MCP Server (`/backend/mcp`)
-* **Technology**: Python (`mcp` library).
+### 2.3 Embedded MCP Servers (`/backend/mcp`)
+* **Technology**: Python (`mcp` library, FastMCP).
 * **Role**: Threat intelligence connectivity.
-* **Deployment**: Subprocess of Backend.
+* **Deployment**: Subprocess of Backend (one process per server).
 * **Transport**: `stdio` (zero latency) + Direct API (parallel fetch).
 * **Registry**: Dynamic loading via `mcp_registry.json`.
+* **Servers**:
+  - **GTI MCP** (`backend/mcp/gti/`): Google Threat Intelligence — file, domain, IP, URL analysis, hunting rulesets, threat profiles.
+  - **Shodan MCP** (`backend/mcp/shodan/`): Internet exposure data — IP host lookup (ports, services, banners, SSL/SSH/FTP/DNS fingerprints), DNS resolution, reverse DNS, CVE/CPE lookup via CVEDB.
 
 ### 2.4 Investigation Cache (NetworkX)
 * **Technology**: NetworkX `MultiDiGraph`.
@@ -319,8 +324,8 @@ Verdict: {entity['verdict']}
 ---
 
 ## 5. Security
-* **Authentication**: Google Cloud IAM (Invoker Role).
-* **Secrets**: `GTI_API_KEY` stored in Secret Manager, injected as env var.
+* **Authentication**: Google Cloud IAM (Invoker Role). Full Cloud IAP planned for Phase 6.3.
+* **Secrets**: `GTI_API_KEY`, `WEBRISK_API_KEY`, `SHODAN_API_KEY` stored in Secret Manager, injected as env vars at Cloud Run startup.
 * **Network**: All traffic over HTTPS.
 
 ---
@@ -396,7 +401,8 @@ Verdict: {entity['verdict']}
 - [x] Cloud SQL (PostgreSQL) — investigation persistence + LangGraph checkpointing (`AsyncPostgresSaver`)
 - [x] Real-time SSE updates
 - [x] Configurable `max_iterations` — per-request investigation depth via `AgentState` + frontend slider
-- [ ] Authentication hardening (IAP/IAM)
+- [x] Shodan MCP integration — internet exposure enrichment for Infrastructure Agent (Phase 6.2)
+- [ ] Authentication hardening — Cloud IAP + Load Balancer + WAF (Phase 6.3)
 - [ ] A2A protocol support — expose Agent Card + inbound task endpoint; optional outbound handoff to detection_agent (enable/disable via `DETECTION_AGENT_ENABLED` env var)
 
 ### Phase 7 (Future)

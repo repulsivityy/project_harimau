@@ -1,5 +1,6 @@
 import os
 import json
+from contextlib import AsyncExitStack
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from langchain_google_vertexai import ChatVertexAI
 from langchain_core.tools import tool
@@ -42,8 +43,11 @@ Analyze the provided network indicator (Domain, IP, or URL) to assess its malici
 - `get_entities_related_to_a_domain`: Pivot from a domain (e.g., to resolutions, subdomains).
 - `get_entities_related_to_an_ip_address`: Pivot from an IP (e.g., to resolutions, communicating_files).
 - `get_entities_related_to_an_url`: Pivot from a URL (e.g., to network_location, downloaded_files).
-
 - `get_webrisk_report`: Check URL for Social Engineering, Malware, or Unwanted Software.
+
+- `shodan_ip_lookup`: Look up an IP in Shodan — open ports, running services, banners, known vulns, and geolocation. Use this to enrich IPs with exposure data that GTI does not provide.
+- `shodan_dns_lookup`: Resolve hostnames to IPs via Shodan DNS. Useful when pivoting from a domain to confirm its current resolution.
+- `shodan_reverse_dns_lookup`: Resolve IPs to hostnames via Shodan. Use this to discover what domains are co-hosted on a suspicious IP.
 
 **Example Output (JSON):**
 {
@@ -240,7 +244,9 @@ async def infrastructure_node(state: AgentState):
             return state
 
         # --- Define Tools ---
-        async with mcp_manager.get_session("gti") as session:
+        async with AsyncExitStack() as stack:
+            session = await stack.enter_async_context(mcp_manager.get_session("gti"))
+            shodan_session = await stack.enter_async_context(mcp_manager.get_session("shodan"))
             
             # Domain Tools
             @tool
@@ -303,12 +309,37 @@ async def infrastructure_node(state: AgentState):
                     return json.dumps(res)
                 except Exception as e: return str(e)
 
+            @tool
+            async def shodan_ip_lookup(ip: str):
+                """Look up an IP in Shodan. Returns open ports, services, banners, known vulnerabilities, and geolocation."""
+                try:
+                    res = await shodan_session.call_tool("ip_lookup", arguments={"ip": ip})
+                    return res.content[0].text if res.content else "{}"
+                except Exception as e: return str(e)
+
+            @tool
+            async def shodan_dns_lookup(hostnames: str):
+                """Resolve one or more hostnames to IPs via Shodan DNS. Accepts comma-separated hostnames."""
+                try:
+                    res = await shodan_session.call_tool("dns_lookup", arguments={"hostnames": hostnames})
+                    return res.content[0].text if res.content else "{}"
+                except Exception as e: return str(e)
+
+            @tool
+            async def shodan_reverse_dns_lookup(ips: str):
+                """Resolve one or more IPs to hostnames via Shodan. Accepts comma-separated IPs."""
+                try:
+                    res = await shodan_session.call_tool("reverse_dns_lookup", arguments={"ips": ips})
+                    return res.content[0].text if res.content else "{}"
+                except Exception as e: return str(e)
+
             # Build LLM
             tools = [
                 get_domain_report, get_entities_related_to_a_domain,
                 get_ip_address_report, get_entities_related_to_an_ip_address,
                 get_url_report, get_entities_related_to_an_url,
-                get_webrisk_report
+                get_webrisk_report,
+                shodan_ip_lookup, shodan_dns_lookup, shodan_reverse_dns_lookup,
             ]
             
             llm = ChatVertexAI(model="gemini-2.5-flash", temperature=0.0, project=project_id, location=location).bind_tools(tools)
@@ -382,6 +413,9 @@ Analyze the following infrastructure indicators based on the triage context abov
                         elif tool_name == "get_url_report": result_txt = await get_url_report.ainvoke(args)
                         elif tool_name == "get_entities_related_to_an_url": result_txt = await get_entities_related_to_an_url.ainvoke(args)
                         elif tool_name == "get_webrisk_report": result_txt = await get_webrisk_report.ainvoke(args)
+                        elif tool_name == "shodan_ip_lookup": result_txt = await shodan_ip_lookup.ainvoke(args)
+                        elif tool_name == "shodan_dns_lookup": result_txt = await shodan_dns_lookup.ainvoke(args)
+                        elif tool_name == "shodan_reverse_dns_lookup": result_txt = await shodan_reverse_dns_lookup.ainvoke(args)
                         else:
                             result_txt = f"Error: Tool {tool_name} not found"
                             logger.warning("infra_unknown_tool", tool=tool_name)

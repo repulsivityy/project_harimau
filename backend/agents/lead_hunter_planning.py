@@ -53,59 +53,46 @@ Return a JSON object containing a list of subtasks.
             "context": "Initial payload communicates with this IP"
         }
     ],
+    "investigation_complete": false,
     "comment": "Brief reasoning for these tasks (optional)"
 }
 
 **Constraint:**
 - Return ONLY valid JSON.
-- If there are NO high-value leads left, return `{"subtasks": []}`.
+- If there are NO high-value leads left, return `{"subtasks": [], "investigation_complete": true}`.
+- Set `"investigation_complete": true` if you believe the investigation has reached sufficient coverage and further pivots are unlikely to yield new intelligence (e.g. only generic CDN IPs remain, all dropped files already analyzed, infrastructure is well-understood).
 """
 
-async def run_planning_phase(state: AgentState, llm, cache: InvestigationCache):
+async def run_planning_phase(state: AgentState, llm, cache: InvestigationCache, actionable_nodes: list):
     """
     Executes the planning phase logic:
     1. Gathers context (Triage + Specialist Reports).
-    2. Identifies uninvestigated nodes from the graph.
+    2. Uses pre-filtered uninvestigated actionable nodes from the caller.
     3. Prompts the LLM to generate new subtasks.
     """
     triage_data = state.get("metadata", {}).get("rich_intel", {})
     specialist_data = state.get("specialist_results", {})
-    
+
     # 1. Gather Context
     context_str = f"""
     **Triage Context:**
     {str(triage_data.get('triage_analysis', {}).get('executive_summary', 'N/A'))}
-    
+
     **Specialist Findings (Latest):**
     """
     for agent, res in specialist_data.items():
         context_str += f"- {agent}: {res.get('summary', 'No summary')}\n"
 
-    # 2. Identify Uninvestigated Nodes from Graph
+    # 2. Format pre-filtered uninvestigated nodes (passed in from lead_hunter_node)
     try:
-        # Get all nodes
-        graph_data = cache.export_for_visualization()
-        all_nodes = graph_data.get("nodes", [])
-        
-        uninvestigated_leads = []
-        
-        # Simple heuristic to identify candidates
-        # We rely on the Lead Hunter LLM to filter out duplicates or items already in context
-        # if we don't track 'investigated' flags perfectly yet.
-        
-        for node in all_nodes:
-            nid = node["id"]
-            ntype = node.get("type", "unknown")
-            
-            # Skip the root IOC itself (usually starting point)
-            if nid == state.get("ioc"): continue
-            
-            # Filter for interesting types suitable for specialists
-            if ntype in ["file", "ip_address", "domain", "url"]:
-                 uninvestigated_leads.append(f"Type: {ntype} | ID: {nid} | Label: {node.get('label')}")
+        root_ioc = state.get("ioc")
+        uninvestigated_leads = [
+            f"Type: {n.get('type')} | ID: {n['id']} | Label: {n.get('label', n['id'])}"
+            for n in actionable_nodes
+            if n["id"] != root_ioc
+        ]
 
         # Limit leads to prevent exploding context window
-        # Prioritize recent adds? For now, just slice.
         uninvestigated_str = "\n".join(uninvestigated_leads[:50])
 
         messages = [

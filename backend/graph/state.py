@@ -92,3 +92,6 @@ class AgentState(TypedDict):
     # Lead Hunter's Strategic Plan (for transparency)
     lead_plan: Optional[str]
     lead_hunter_report: Annotated[Optional[str], last_value]  # Full synthesis report
+
+    # Entities that have been assigned as subtasks across all iterations (for convergence detection)
+    tasked_entities: Annotated[List[str], operator.add]

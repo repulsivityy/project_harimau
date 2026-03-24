@@ -764,7 +764,7 @@ gcloud run services update harimau-backend --set-env-vars HUNT_ITERATIONS=5
     - [X] Timeline reconstruction
     - [X] Tools - Webrisk
     - [ ] Tools - URLScan
-    - [ ] Tools - Shodan
+    - [X] Tools - Shodan
     - [ ] Tools - OpenCTI
     - [ ] Tools - Google SecOps
 

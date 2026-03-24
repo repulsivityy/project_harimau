@@ -1,3 +1,4 @@
+import asyncio
 import os
 import json
 from contextlib import AsyncExitStack
@@ -341,7 +342,8 @@ async def infrastructure_node(state: AgentState):
                 get_webrisk_report,
                 shodan_ip_lookup, shodan_dns_lookup, shodan_reverse_dns_lookup,
             ]
-            
+            tool_dispatch = {t.name: t for t in tools}
+
             llm = ChatVertexAI(model="gemini-2.5-flash", temperature=0.0, project=project_id, location=location).bind_tools(tools)
             
             # Format Triage Context for LLM
@@ -393,35 +395,28 @@ Analyze the following infrastructure indicators based on the triage context abov
                 messages.append(response)
                 
                 if response.tool_calls:
+                    job_id = state.get("job_id")
                     logger.info("infra_agent_tool_calls", iteration=iteration, num_tools=len(response.tool_calls), tools=[tc["name"] for tc in response.tool_calls])
+
+                    # Emit transparency events before dispatching
                     for tc in response.tool_calls:
-                        tool_name = tc["name"]
-                        args = tc["args"]
-                        logger.info("infra_invoking_tool", iteration=iteration, tool=tool_name, args=args)
-                        
-                        # Emit tool call transparency
-                        job_id = state.get("job_id")
+                        logger.info("infra_invoking_tool", iteration=iteration, tool=tc["name"], args=tc["args"])
                         if job_id:
-                            await emit_tool_call(job_id, "infrastructure", tool_name, args)
-                        
-                        # Invoke the right tool
-                        result_txt = ""
-                        if tool_name == "get_domain_report": result_txt = await get_domain_report.ainvoke(args)
-                        elif tool_name == "get_entities_related_to_a_domain": result_txt = await get_entities_related_to_a_domain.ainvoke(args)
-                        elif tool_name == "get_ip_address_report": result_txt = await get_ip_address_report.ainvoke(args)
-                        elif tool_name == "get_entities_related_to_an_ip_address": result_txt = await get_entities_related_to_an_ip_address.ainvoke(args)
-                        elif tool_name == "get_url_report": result_txt = await get_url_report.ainvoke(args)
-                        elif tool_name == "get_entities_related_to_an_url": result_txt = await get_entities_related_to_an_url.ainvoke(args)
-                        elif tool_name == "get_webrisk_report": result_txt = await get_webrisk_report.ainvoke(args)
-                        elif tool_name == "shodan_ip_lookup": result_txt = await shodan_ip_lookup.ainvoke(args)
-                        elif tool_name == "shodan_dns_lookup": result_txt = await shodan_dns_lookup.ainvoke(args)
-                        elif tool_name == "shodan_reverse_dns_lookup": result_txt = await shodan_reverse_dns_lookup.ainvoke(args)
-                        else:
-                            result_txt = f"Error: Tool {tool_name} not found"
-                            logger.warning("infra_unknown_tool", tool=tool_name)
-                        
+                            await emit_tool_call(job_id, "infrastructure", tc["name"], tc["args"])
+
+                    # Execute all tool calls in parallel
+                    async def _run_infra_tool(tc):
+                        fn = tool_dispatch.get(tc["name"])
+                        if fn is None:
+                            logger.warning("infra_unknown_tool", tool=tc["name"])
+                            return f"Error: Tool {tc['name']} not found"
+                        return await fn.ainvoke(tc["args"])
+
+                    results = await asyncio.gather(*[_run_infra_tool(tc) for tc in response.tool_calls])
+
+                    for tc, result_txt in zip(response.tool_calls, results):
                         messages.append(ToolMessage(content=result_txt, tool_call_id=tc["id"]))
-                        logger.info("infra_tool_response", iteration=iteration, tool=tool_name, response_length=len(result_txt))
+                        logger.info("infra_tool_response", iteration=iteration, tool=tc["name"], response_length=len(result_txt))
                 else:
                     logger.info("infra_agent_no_tools", iteration=iteration, has_content=bool(response.content))
                     final_content = response.content

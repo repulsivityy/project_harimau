@@ -16,3 +16,4 @@ shodan
 asyncpg
 psycopg[binary]
 langgraph-checkpoint-postgres
+langchain_google_genai

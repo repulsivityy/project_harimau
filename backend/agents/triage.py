@@ -4,7 +4,9 @@ import re
 import asyncio
 
 from langchain_core.messages import SystemMessage, HumanMessage
-from langchain_google_vertexai import ChatVertexAI
+#from langchain_google_vertexai import ChatVertexAI
+from langchain_google_genai import ChatGoogleGenerativeAI
+
 from backend.graph.state import AgentState
 from backend.utils.logger import get_logger
 import backend.tools.gti as gti
@@ -378,13 +380,22 @@ async def comprehensive_triage_analysis(
     if not project_id:
         raise ValueError("GOOGLE_CLOUD_PROJECT environment variable is missing.")
     
-    location = os.getenv("GOOGLE_CLOUD_REGION", "asia-southeast1")
-    llm = ChatVertexAI(
-        model="gemini-2.5-flash",
-        #model="gemini-3-flash-preview",
-        temperature=0.0, # recommend to remove for gemini 3
+#    location = os.getenv("GOOGLE_CLOUD_REGION", "asia-southeast1")
+#    llm = ChatVertexAI(
+#        model="gemini-2.5-flash",
+#        #model="gemini-3-flash-preview",
+#        temperature=0.0, # recommend to remove for gemini 3
+#        project=project_id,
+#        location=location
+#    )
+    
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-3-flash-preview",
+        temperature=0,
+        #max_tokens=1024,
         project=project_id,
-        location=location
+        location="global",
+        #vertexai=True,  # Explicitly use Vertex AI
     )
     
     # Prepare detailed context (not just counts)

@@ -48,7 +48,18 @@ if st.session_state.current_job_id:
         current_status = api.get_investigation(job_id).get("status")
         
         # 1. Render Progress Tracker (SSE / Polling) if running
-        if current_status == "running":
+        if current_status in ["running", "pending"]:
+            if st.button("🛑 Stop Investigation", type="secondary"):
+                try:
+                    api.cancel_investigation(job_id)
+                    st.toast("Cancellation signal sent", icon="🛑")
+                    if hasattr(st, "rerun"):
+                        st.rerun()
+                    else:
+                        st.experimental_rerun()
+                except Exception as e:
+                    st.error(f"Failed to cancel: {e}")
+            
             render_investigation_tracker(api, job_id)
             
         # 2. Display Results Tabs (Always rendered if there are results)

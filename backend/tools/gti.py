@@ -104,7 +104,8 @@ async def _make_request(endpoint: str, relationships: list[str] = None) -> dict:
     ssl_context = ssl.create_default_context(cafile=certifi.where())
 
     try:
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=15.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             # Fetch Base Report
             async with session.get(url, headers=headers, ssl=ssl_context) as response:
                 if response.status == 200:

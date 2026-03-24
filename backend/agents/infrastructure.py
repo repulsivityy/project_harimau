@@ -410,7 +410,15 @@ Analyze the following infrastructure indicators based on the triage context abov
                         if fn is None:
                             logger.warning("infra_unknown_tool", tool=tc["name"])
                             return f"Error: Tool {tc['name']} not found"
-                        return await fn.ainvoke(tc["args"])
+                        try:
+                            # 20s timeout prevents MCP/Network deadlock
+                            return await asyncio.wait_for(fn.ainvoke(tc["args"]), timeout=20.0)
+                        except asyncio.TimeoutError:
+                            logger.error("infra_tool_timeout", tool=tc["name"])
+                            return f"Error: Tool {tc['name']} timed out after 20 seconds."
+                        except Exception as e:
+                            logger.error("infra_tool_error", tool=tc["name"], error=str(e))
+                            return f"Error: Tool {tc['name']} failed - {str(e)}"
 
                     results = await asyncio.gather(*[_run_infra_tool(tc) for tc in response.tool_calls])
 

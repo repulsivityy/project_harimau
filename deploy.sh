@@ -4,11 +4,12 @@
 # =============================================================================
 #
 # USAGE:
-#   ./deploy.sh [backend|frontend|all]
+#   ./deploy.sh [backend|frontend|all|cleanup]
 #
 #   backend   — Deploy backend Cloud Run service only
 #   frontend  — Deploy frontend Cloud Run service only
 #   all       — Deploy both (default)
+#   cleanup   — Run the database cleanup menu directly without deploying
 #
 # REQUIRED ENV VARS (export before running):
 #   GTI_API_KEY        Google Threat Intelligence API key
@@ -46,6 +47,59 @@ TARGET=${1:-all}
 REGION="asia-southeast1" # Change if needed
 BACKEND_SERVICE="harimau-backend"
 FRONTEND_SERVICE="harimau-frontend"
+
+function run_cleanup_menu() {
+    local force_menu=$1
+
+    # Ensure BACKEND_URL is fetched for final logging and db management
+    if [ -z "$BACKEND_URL" ]; then
+        BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE --region $REGION --format 'value(status.url)' --quiet)
+    fi
+
+    echo "--------------------------------------------------------"
+    if [ "$force_menu" == "true" ]; then
+        cleanup_resp="y"
+    else
+        read -p "🧹 Do you want to clean up existing/stuck jobs in the database? [y/N] " cleanup_resp
+    fi
+
+    if [[ "$cleanup_resp" =~ ^[yY]$ ]]; then
+        echo "1) Bulk cancel ALL 'running' jobs"
+        echo "2) Delete ALL jobs entirely"
+        echo "3) Delete the last X most recent jobs"
+        read -p "Select option (1-3) or press Enter to skip: " clean_opt
+        
+        if [ "$clean_opt" == "1" ]; then
+            echo "🔄 Cancelling all running jobs..."
+            curl -s -X POST "${BACKEND_URL}/api/admin/bulk-cancel"
+            echo -e "\n✅ Done!"
+        elif [ "$clean_opt" == "2" ]; then
+            read -p "⚠️  Are you sure you want to DELETE ALL INVESTIGATIONS? [yes/NO]: " confirm_del
+            if [ "$confirm_del" == "yes" ]; then
+                echo "🗑️  Deleting all jobs..."
+                curl -s -X DELETE "${BACKEND_URL}/api/admin/jobs?delete_all=true"
+                echo -e "\n✅ Done!"
+            else
+                echo "Skipped."
+            fi
+        elif [ "$clean_opt" == "3" ]; then
+             read -p "🔢 Enter number of most recent jobs to delete (e.g., 10): " del_count
+             if [[ "$del_count" =~ ^[0-9]+$ ]]; then
+                 echo "🗑️  Deleting $del_count most recent jobs..."
+                 curl -s -X DELETE "${BACKEND_URL}/api/admin/jobs?limit=${del_count}"
+                 echo -e "\n✅ Done!"
+             else
+                 echo "❌ Invalid number."
+             fi
+        fi
+        echo "--------------------------------------------------------"
+    fi
+}
+
+if [[ "$TARGET" == "cleanup" ]]; then
+    run_cleanup_menu "true"
+    exit 0
+fi
 
 echo "🐯 Deploying Project Harimau to GCP ($PROJECT_ID)..."
 
@@ -290,6 +344,7 @@ if [[ "$TARGET" == "backend" || "$TARGET" == "all" ]]; then
         --region $REGION \
         --clear-base-image \
         --allow-unauthenticated \
+        --memory="2048Mi" \
         --set-env-vars "LOG_LEVEL=DEBUG,MAX_DEPTH=2,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_REGION=${REGION}${DETECTION_AGENT_VARS}" \
         --set-secrets "VT_APIKEY=${SECRET_NAME}:latest,GTI_API_KEY=${SECRET_NAME}:latest,WEBRISK_API_KEY=${WEBRISK_SECRET_NAME}:latest,SHODAN_API_KEY=${SHODAN_SECRET_NAME}:latest,DATABASE_URL=${DB_URL_SECRET}:latest" \
         --add-cloudsql-instances ${PROJECT_ID}:${REGION}:${DB_INSTANCE} \
@@ -320,8 +375,16 @@ if [[ "$TARGET" == "frontend" || "$TARGET" == "all" ]]; then
     echo "➡️  Frontend: $FRONTEND_URL"
 fi
 
+# Ensure BACKEND_URL is fetched for final logging and db management
+if [ -z "$BACKEND_URL" ]; then
+    BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE --region $REGION --format 'value(status.url)' --quiet)
+fi
+
 if [[ "$TARGET" == "backend" || "$TARGET" == "all" ]]; then
      echo "➡️  Backend:  $BACKEND_URL"
 fi
 
 echo "🎉 Deployment Complete!"
+
+# Job Management Prompt
+run_cleanup_menu "true"

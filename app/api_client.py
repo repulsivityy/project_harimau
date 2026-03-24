@@ -40,6 +40,14 @@ class HarimauAPIClient:
         res.raise_for_status()
         return res.json()
 
+    def cancel_investigation(self, job_id: str) -> Dict[str, Any]:
+        """
+        Cancels a currently running investigation.
+        """
+        res = requests.post(f"{self.base_url}/api/investigations/{job_id}/cancel")
+        res.raise_for_status()
+        return res.json()
+
     def get_investigations(self, limit: int = 50) -> list:
         """
         Gets a list of recent investigations.

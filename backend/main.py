@@ -29,7 +29,11 @@ async def lifespan(app: FastAPI):
     async def init_db():
         """Isolated DB setup logic to be wrapped in a strict timeout."""
         logger.info("database_initializing", status="connecting")
-        pool = await asyncpg.create_pool(db_url)
+        pool = await asyncpg.create_pool(
+            db_url,
+            command_timeout=15.0,
+            max_inactive_connection_lifetime=300.0
+        )
         
         async with pool.acquire() as conn:
             # Create main investigations table
@@ -125,11 +129,12 @@ async def root():
 
 # Persistence Helpers
 JOBS = {}  # In-memory fallback
+ACTIVE_TASKS = {}  # Track background asyncio Tasks for cancellation
 
 async def save_job(job_id: str, data: dict):
     if db_pool:
         try:
-            async with db_pool.acquire() as conn:
+            async with db_pool.acquire(timeout=5.0) as conn:
                 # Pack top-level fields INTO metadata so they survive DB round-trip.
                 # get_job() unpacks them back to top-level on retrieval.
                 metadata = dict(data.get("metadata", {}))
@@ -171,7 +176,7 @@ async def save_job(job_id: str, data: dict):
 async def get_job(job_id: str):
     if db_pool:
         try:
-            async with db_pool.acquire() as conn:
+            async with db_pool.acquire(timeout=5.0) as conn:
                 row = await conn.fetchrow("SELECT * FROM investigations WHERE job_id = $1", job_id)
                 if row:
                     # Convert row to dict and merge metadata back if needed
@@ -203,7 +208,7 @@ async def get_job(job_id: str):
 async def list_jobs(limit: int = 50):
     if db_pool:
         try:
-            async with db_pool.acquire() as conn:
+            async with db_pool.acquire(timeout=5.0) as conn:
                 rows = await conn.fetch("SELECT job_id, ioc, ioc_type, status, created_at FROM investigations ORDER BY created_at DESC LIMIT $1", limit)
                 jobs = []
                 for row in rows:
@@ -243,8 +248,9 @@ async def run_investigation(request: InvestigationRequest, background_tasks: Bac
         "created_at": datetime.now().isoformat()
     })
     
-    # Run investigation in background safely
-    background_tasks.add_task(_run_investigation_background, job_id, request.ioc, request.max_iterations)
+    # Run investigation in background safely, track for cancellation
+    task = asyncio.create_task(_run_investigation_background(job_id, request.ioc, request.max_iterations))
+    ACTIVE_TASKS[job_id] = task
     
     # Return immediately
     return {
@@ -421,6 +427,85 @@ async def _run_investigation_background(job_id: str, ioc: str, max_iterations: i
             "error": str(e),
             "message": f"Investigation failed: {str(e)}"
         })
+        
+    except asyncio.CancelledError:
+        logger.info("investigation_cancelled", job_id=job_id)
+        job = await get_job(job_id)
+        if not job:
+            job = {"job_id": job_id, "status": "cancelled", "ioc": ioc, "metadata": {}}
+        job["status"] = "cancelled"
+        if "metadata" not in job or not isinstance(job["metadata"], dict):
+            job["metadata"] = {}
+        job["metadata"]["error"] = "Investigation was cancelled by user."
+        await save_job(job_id, job)
+        
+        # Emit: Investigation cancelled
+        await sse_manager.emit_event(job_id, "investigation_failed", {
+            "job_id": job_id,
+            "status": "cancelled",
+            "error": "Investigation was cancelled by user.",
+            "message": "Investigation cancelled"
+        })
+        raise
+    finally:
+        ACTIVE_TASKS.pop(job_id, None)
+
+@app.post("/api/investigations/{job_id}/cancel")
+async def cancel_investigation(job_id: str):
+    """Cancels a running investigation."""
+    task = ACTIVE_TASKS.get(job_id)
+    if not task:
+        # Check DB to update status if it's a zombie process from another worker
+        job = await get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        if job.get("status") not in ["running", "pending"]:
+            return {"message": f"Job is already {job.get('status')}"}
+        
+        job["status"] = "cancelled"
+        if "metadata" not in job or not isinstance(job["metadata"], dict):
+            job["metadata"] = {}
+        job["metadata"]["error"] = "Investigation was cancelled by user."
+        await save_job(job_id, job)
+        return {"message": "Job marked as cancelled in database."}
+    
+    # Send cancel signal to the active task (this will trigger CancelledError inside _run_investigation_background
+    # and safely close any active asyncpg queries)
+    task.cancel()
+    return {"message": "Cancel signal sent to the active investigation logic."}
+
+@app.post("/api/admin/bulk-cancel")
+async def bulk_cancel_jobs():
+    """Admin endpoint: bulk update all 'running' or 'pending' jobs to 'cancelled'."""
+    if db_pool:
+        try:
+            async with db_pool.acquire(timeout=5.0) as conn:
+                res = await conn.execute("UPDATE investigations SET status = 'cancelled' WHERE status IN ('running', 'pending')")
+                return {"message": "Success", "details": res}
+        except Exception as e:
+            logger.error("bulk_cancel_failed", error=str(e))
+            raise HTTPException(status_code=500, detail=str(e))
+    return {"message": "In-memory jobs not supported for bulk cancel."}
+
+@app.delete("/api/admin/jobs")
+async def delete_jobs(limit: int = None, delete_all: bool = False):
+    """Admin endpoint: delete jobs from the database."""
+    if not limit and not delete_all:
+        raise HTTPException(status_code=400, detail="Must specify either 'limit' or 'delete_all=true'")
+    
+    if db_pool:
+        try:
+            async with db_pool.acquire(timeout=5.0) as conn:
+                if delete_all:
+                    res = await conn.execute("DELETE FROM investigations")
+                else:
+                    # Delete the X most recent jobs based on created_at
+                    res = await conn.execute("DELETE FROM investigations WHERE job_id IN (SELECT job_id FROM investigations ORDER BY created_at DESC LIMIT $1)", limit)
+                return {"message": "Success", "details": res}
+        except Exception as e:
+            logger.error("bulk_delete_failed", error=str(e))
+            raise HTTPException(status_code=500, detail=str(e))
+    return {"message": "In-memory jobs not supported for deletion."}
 
 @app.get("/api/investigations/{job_id}")
 async def get_investigation(job_id: str):

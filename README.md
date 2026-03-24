@@ -19,7 +19,7 @@ The application takes an IOC (like a file hash, URL, or IP address) and kicks of
 ## Architecture
 * **Frontend**: Streamlit (Cloud Run Service) - Interactive investigation dashboard
 * **Backend**: FastAPI + LangGraph (Cloud Run Service) - Multi-agent orchestration
-* **MCP**: Embedded GTI + WebRisk Servers (stdio/Direct API) - Direct connection to threat intelligence
+* **MCP**: Embedded GTI + Shodan MCP Servers (stdio) - Threat intelligence & internet exposure data
 * **Brain**: Gemini 2.5 Flash / Pro - Powered by advanced AI reasoning
 * **Database**: Cloud SQL (PostgreSQL) - Persistent investigation results & LangGraph checkpoints
 * **Investigation Cache**: NetworkX (in-memory graph per investigation)
@@ -41,6 +41,9 @@ The application takes an IOC (like a file hash, URL, or IP address) and kicks of
 
    # Required: Google Web Risk API Key
    export WEBRISK_API_KEY="your_webrisk_key_here"
+
+   # Required: Shodan API Key
+   export SHODAN_API_KEY="your_shodan_key_here"
    ```
 3. **Deploy**:
    ```bash
@@ -63,7 +66,7 @@ The application takes an IOC (like a file hash, URL, or IP address) and kicks of
 -   **Phase 3 (Interface + Hybrid Triage + Token Optimization)**: ✅ Complete
 -   **Phase 4 (Specialist Agents)**: ✅ Complete
 -   **Phase 5 (Iterative Investigation Workflow)**: ✅ Complete
--   **Phase 6 (Core Infrastructure & A2A Integration)**: 🚧 In Progress (6.1 Cloud SQL Persistence ✅)
+-   **Phase 6 (Core Infrastructure & A2A Integration)**: 🚧 In Progress (6.1 Cloud SQL Persistence ✅, 6.2 Shodan MCP ✅)
 
 ### 🛠️ Code Quality Overhaul
 -   **Robustness**: Consolidated state, deep-merge cache deduplication, and specific exception handling.

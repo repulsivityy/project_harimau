@@ -13,16 +13,16 @@
 *   **Frontend (`/app`)**: Streamlit (Cloud Run Service) - Interactive investigation dashboard
 *   **Backend (`/backend`)**: FastAPI + LangGraph (Cloud Run Service) - Multi-agent orchestration
 *   **Cache**: NetworkX (in-memory graph per investigation)
-*   **MCP Server**: Google Threat Intelligence (Embedded Python subprocess)
+*   **MCP Servers**: Google Threat Intelligence + Shodan (Embedded Python subprocesses, registry-driven)
 *   **Models**: Gemini 2.5 Flash (Triage) / Pro (Deep Analysis)
 
 ## 3. Core Features
 
 ### 3.1 Architecture & Modularity
 *   **Split Services**: Frontend (UI) and Backend (Logic) run as separate Cloud Run services
-*   **Embedded MCP**: GTI MCP server runs inside Backend container via `stdio`
+*   **Embedded MCP**: GTI and Shodan MCP servers run inside Backend container via `stdio`
 *   **Config-Driven Agents**: Agent tuning parameters (model, iterations, max targets, feature flags) defined in `agents.yaml` (Phase 6). Currently hardcoded per agent.
-*   **MCP Registry**: GTI tools loaded dynamically from `mcp_registry.json`
+*   **MCP Registry**: MCP servers loaded dynamically from `mcp_registry.json`. Current servers: `gti`, `shodan`.
 
 ### 3.2 Threat Intelligence Workflow
 1.  **Input**: User provides IOC (hash, domain, IP, URL) in Streamlit interface
@@ -76,7 +76,7 @@ The Lead Hunter must produce a **comprehensive threat intelligence analysis**, n
 
 ## 4. Operational Requirements
 *   **Deployment**: Support `deploy.sh` (selective backend/frontend updates) and `terraform/`.
-*   **Security**: Auth (Phased), Secrets (Secret Manager).
+*   **Security**: Auth (Phased — Cloud IAP planned for Phase 6.3), Secrets (`GTI_API_KEY`, `WEBRISK_API_KEY`, `SHODAN_API_KEY` in Secret Manager).
 *   **Observability (Logging)**:
     *   **Format**: Structured JSON (compatible with Cloud Logging).
     *   **Tier 1 (INFO)**: High-level milestones ("Job Started", "Verdict Reached").

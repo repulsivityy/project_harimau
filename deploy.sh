@@ -17,6 +17,9 @@
 #   WEBRISK_API_KEY    Google Web Risk API key
 #                      Saved to Secret Manager as 'harimau-webrisk-api-key'
 #
+#   SHODAN_API_KEY     Shodan API key
+#                      Saved to Secret Manager as 'harimau-shodan-api-key'
+#
 # OPTIONAL ENV VARS:
 #   DETECTION_AGENT_URL   A2A endpoint of the detection agent Cloud Run service.
 #                         When set, backend is deployed with DETECTION_AGENT_ENABLED=true
@@ -53,6 +56,7 @@ gcloud services enable run.googleapis.com artifactregistry.googleapis.com cloudb
 # 2. Setup Secrets (GTI_API_KEY & WEBRISK_API_KEY)
 SECRET_NAME="harimau-gti-api-key"
 WEBRISK_SECRET_NAME="harimau-webrisk-api-key"
+SHODAN_SECRET_NAME="harimau-shodan-api-key"
 DB_URL_SECRET="harimau-db-url"
 DB_INSTANCE="harimau-db"
 DB_NAME="harimau"
@@ -92,6 +96,23 @@ if [ -n "$WEBRISK_API_KEY" ]; then
     fi
 else
     echo "⚠️  WEBRISK_API_KEY not set locally. Assuming secret exists..."
+fi
+
+if [ -n "$SHODAN_API_KEY" ]; then
+    read -p "❓ Local SHODAN_API_KEY found. Update Secret Manager? [y/N] " response
+    if [[ "$response" =~ ^[yY]$ ]]; then
+        echo "🔄 Updating secret ($SHODAN_SECRET_NAME)..."
+        if ! gcloud secrets describe $SHODAN_SECRET_NAME --quiet > /dev/null 2>&1; then
+            printf "$SHODAN_API_KEY" | gcloud secrets create $SHODAN_SECRET_NAME --data-file=-
+        else
+            printf "$SHODAN_API_KEY" | gcloud secrets versions add $SHODAN_SECRET_NAME --data-file=-
+        fi
+        echo "✅ Secret updated."
+    else
+        echo "⏭️  Skipping secret update (using existing version)."
+    fi
+else
+    echo "⚠️  SHODAN_API_KEY not set locally. Assuming secret exists..."
 fi
 
 # 3. Setup Cloud SQL (PostgreSQL)
@@ -176,6 +197,10 @@ if ! gcloud secrets describe $WEBRISK_SECRET_NAME --quiet > /dev/null 2>&1; then
     echo "❌ Error: Secret '$WEBRISK_SECRET_NAME' does not exist in Cloud and no local key provided."
     exit 1
 fi
+if ! gcloud secrets describe $SHODAN_SECRET_NAME --quiet > /dev/null 2>&1; then
+    echo "❌ Error: Secret '$SHODAN_SECRET_NAME' does not exist in Cloud and no local key provided."
+    exit 1
+fi
 if ! gcloud secrets describe $DB_URL_SECRET --quiet > /dev/null 2>&1; then
     echo "❌ Error: Secret '$DB_URL_SECRET' does not exist."
     exit 1
@@ -202,6 +227,16 @@ if ! gcloud secrets get-iam-policy $WEBRISK_SECRET_NAME --format=json | grep -q 
         --role="roles/secretmanager.secretAccessor" --quiet > /dev/null
 else
     echo "✅ Secret Access ($WEBRISK_SECRET_NAME) already granted."
+fi
+
+# Secret Manager Access (Shodan)
+if ! gcloud secrets get-iam-policy $SHODAN_SECRET_NAME --format=json | grep -q "$SERVICE_ACCOUNT_EMAIL"; then
+    echo "🔐 Granting Secret Access ($SHODAN_SECRET_NAME)..."
+    gcloud secrets add-iam-policy-binding $SHODAN_SECRET_NAME \
+        --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
+        --role="roles/secretmanager.secretAccessor" --quiet > /dev/null
+else
+    echo "✅ Secret Access ($SHODAN_SECRET_NAME) already granted."
 fi
 
 # Vertex AI Access
@@ -256,7 +291,7 @@ if [[ "$TARGET" == "backend" || "$TARGET" == "all" ]]; then
         --clear-base-image \
         --allow-unauthenticated \
         --set-env-vars "LOG_LEVEL=DEBUG,MAX_DEPTH=2,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_REGION=${REGION}${DETECTION_AGENT_VARS}" \
-        --set-secrets "VT_APIKEY=${SECRET_NAME}:latest,GTI_API_KEY=${SECRET_NAME}:latest,WEBRISK_API_KEY=${WEBRISK_SECRET_NAME}:latest,DATABASE_URL=${DB_URL_SECRET}:latest" \
+        --set-secrets "VT_APIKEY=${SECRET_NAME}:latest,GTI_API_KEY=${SECRET_NAME}:latest,WEBRISK_API_KEY=${WEBRISK_SECRET_NAME}:latest,SHODAN_API_KEY=${SHODAN_SECRET_NAME}:latest,DATABASE_URL=${DB_URL_SECRET}:latest" \
         --add-cloudsql-instances ${PROJECT_ID}:${REGION}:${DB_INSTANCE} \
         --command "uvicorn" \
         --args "backend.main:app,--host,0.0.0.0,--port,8080" \

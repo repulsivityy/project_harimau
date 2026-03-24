@@ -73,6 +73,7 @@ This document outlines the classes, functions, and dependencies for each Python 
 - `backend.utils.graph_cache`
 - `backend.utils.logger`
 - `backend.utils.transparency`
+- `contextlib`
 - `json`
 - `langchain_core.messages`
 - `langchain_core.tools`
@@ -262,6 +263,60 @@ This document outlines the classes, functions, and dependencies for each Python 
   - `__init__()`
   - `_load_registry()`
   - `get_session()`
+
+## `backend/mcp/shodan/__init__.py`
+
+## `backend/mcp/shodan/server.py`
+**Imports:**
+- `mcp.server.fastmcp`
+- `os`
+- `shodan`
+- `tools`
+
+**Top-level Functions:**
+- `get_shodan_client()`
+- `main()`
+
+## `backend/mcp/shodan/tools/__init__.py`
+**Imports:**
+- `cve`
+- `dns`
+- `host`
+
+## `backend/mcp/shodan/tools/host.py`
+**Imports:**
+- `json`
+- `mcp.server.fastmcp`
+- `server`
+- `shodan`
+
+**Top-level Functions:**
+- `_extract_service()`
+- `ip_lookup()`
+- `shodan_search()`
+
+## `backend/mcp/shodan/tools/dns.py`
+**Imports:**
+- `json`
+- `mcp.server.fastmcp`
+- `server`
+- `shodan`
+
+**Top-level Functions:**
+- `dns_lookup()`
+- `reverse_dns_lookup()`
+
+## `backend/mcp/shodan/tools/cve.py`
+**Imports:**
+- `json`
+- `mcp.server.fastmcp`
+- `requests`
+- `server`
+
+**Top-level Functions:**
+- `cpe_lookup()`
+- `cve_lookup()`
+- `cves_by_product()`
 
 ## `backend/mcp/gti/__init__.py`
 ## `backend/mcp/gti/server.py`

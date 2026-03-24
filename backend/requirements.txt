@@ -12,6 +12,7 @@ graphviz
 networkx
 python-dotenv
 requests
+shodan
 asyncpg
 psycopg[binary]
 langgraph-checkpoint-postgres

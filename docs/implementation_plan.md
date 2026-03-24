@@ -374,6 +374,45 @@ Infra --> LeadReview
 
 ## Phase 6: Core Infrastructure & Logic Hardening
 
+### Phase 6.2: Shodan MCP Integration [COMPLETED]
+**Goal**: Add Shodan as a second MCP server to enrich Infrastructure Agent with internet exposure data.
+**Completion Date**: Mar 2026
+
+**Completed Tasks**:
+- [x] **Shodan MCP Server**: Implemented `backend/mcp/shodan/` as a FastMCP Python server (no Node.js dependency).
+- [x] **7 Tools Ported**: `ip_lookup`, `shodan_search`, `dns_lookup`, `reverse_dns_lookup`, `cve_lookup`, `cves_by_product`, `cpe_lookup`.
+- [x] **Selective Field Extraction**: `ip_lookup` extracts targeted fields per service (SSL JARM/JA3S, HTTP title/components, SSH HASSH, FTP anonymous login, DNS resolver, CVEs) — discards noisy fields already covered by GTI (ASN, cert expiry).
+- [x] **Registry**: Added `shodan` entry to `mcp_registry.json`.
+- [x] **Infrastructure Agent**: Wired `shodan_ip_lookup`, `shodan_dns_lookup`, `shodan_reverse_dns_lookup` into the Infrastructure Specialist using `AsyncExitStack` to hold both GTI and Shodan sessions simultaneously.
+- [x] **Secrets**: `SHODAN_API_KEY` added to `deploy.sh` (Secret Manager: `harimau-shodan-api-key`) and `backend/requirements.txt`.
+
+**Why**: GTI provides reputation and relationship data; Shodan provides real-time network exposure — open ports, running services, TLS fingerprints (JARM/JA3S for C2 detection), SSH HASSH, and HTTP metadata. Complementary, not overlapping.
+
+**Tools exposed to Infrastructure Agent** (Phase 6.2 scope):
+- `shodan_ip_lookup` — full host exposure profile
+- `shodan_dns_lookup` — hostname → IP resolution
+- `shodan_reverse_dns_lookup` — IP → hostname discovery
+
+**Tools reserved for future agents** (not yet wired):
+- `shodan_search`, `cve_lookup`, `cves_by_product`, `cpe_lookup`
+
+---
+
+### Phase 6.3: Authentication — Cloud IAP [PLANNED]
+**Goal**: Add proper authentication via Google Cloud IAP in front of Cloud Run, replacing the current unauthenticated access.
+
+**Planned Tasks**:
+- [ ] Provision HTTPS Load Balancer + Serverless NEG pointing to Cloud Run services
+- [ ] Enable Cloud IAP on the Load Balancer backend
+- [ ] Configure authorized users/groups in IAP
+- [ ] Block direct Cloud Run URLs (unauthenticated access)
+- [ ] Optional: WAF rules via Cloud Armor on the Load Balancer
+- [ ] Terraform all of the above
+
+**Why**: Cloud IAP provides Google SSO, group-based access control, and audit logs at the infrastructure layer — the Streamlit app requires zero auth code. Enables WAF protection as a future layer.
+
+---
+
 ### Phase 6.1: Cloud SQL + LangGraph Checkpointing [COMPLETED]
 **Goal**: Replace the ephemeral in-memory `JOBS` dict with Cloud SQL (PostgreSQL) and wire LangGraph `AsyncPostgresSaver` so investigations persist across Cloud Run restarts.
 **Completion Date**: Mar 2026

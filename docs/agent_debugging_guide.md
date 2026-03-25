@@ -165,6 +165,71 @@ for task in state.get("subtasks", []):
 
 ---
 
+### 5. Graph Iteration Bypassed (`type` vs `entity_type`)
+
+#### Symptom
+Lead Hunter logs `lead_hunter_early_exit` with reason `no_uninvestigated_nodes` immediately at `iteration=0`, despite Triage fetching hundreds of relationships.
+
+#### Root Cause
+When Triage added entities to the `InvestigationCache`, it used `cache.add_entity(entity_id=id, entity_type=type)`. NetworkX stores `**kwargs`, meaning the node's type was saved under the key `"entity_type"`. In `lead_hunter.py`, the code checked `n.get("type") in ACTIONABLE_TYPES`, returning `None` for every node and causing the actionable list to evaluate as empty.
+
+#### Solution
+Ensure dictionary key lookups map exactly to the NetworkX kwargs used during ingestion:
+```python
+# lead_hunter.py Layer 1
+uninvestigated = cache.get_uninvestigated_nodes()
+actionable = [n for n in uninvestigated if n.get("entity_type") in ACTIONABLE_TYPES]
+```
+
+**Status**: ✅ Fixed
+
+---
+
+### 6. Gemini List Return Type Failures
+
+#### Symptom
+Graph prematurely routes to `END`, or silently fails to save to the database. Silent `TypeError: argument of type 'list' is not iterable` in background logs.
+
+#### Root Cause
+Langchain `ChatGoogleGenerativeAI` and `ChatVertexAI` can arbitrarily return `response.content` as a `string` OR a `list` of dict blocks (especially when using structured outputs or Gemini 3 previews). Using `.split()` or `json.loads()` directly on `response.content` will crash if it's a list.
+
+#### Solution
+Always cast `response.content` to a string before parsing:
+```python
+if isinstance(response.content, list):
+    content = "".join([
+        block.get("text", "") if isinstance(block, dict) else str(block)
+        for block in response.content
+    ])
+else:
+    content = str(response.content)
+```
+
+**Status**: ✅ Fixed (lead_hunter_planning & lead_hunter_synthesis)
+
+---
+
+### 7. Cloud Run Background Task Suspension (SSE)
+
+#### Symptom
+Investigation jobs stay stuck in `running` status forever. The `final_report` is never written to PostgreSQL. However, logs do not show any Python exceptions.
+
+#### Root Cause
+The `main.py` FastAPI server spawns the investigation as an `asyncio.create_task()` background process. If Cloud Run CPU Allocation is set to "Allocate CPU only during request processing", the moment the frontend closes the Server-Sent Event (SSE) connection, Cloud Run instantly freezes the container's CPU. The background task is suspended mid-execution and never reaches the DB save logic.
+
+#### Solution
+In `deploy.sh`, you MUST configure `--no-cpu-throttling` so the container keeps its CPU alive after the HTTP request terminates.
+```bash
+gcloud run deploy harimau-backend \
+  --no-cpu-throttling \
+  --cpu="2" \
+  ...
+```
+
+**Status**: ✅ Fixed
+
+---
+
 ## Best Practices
 
 ### Tool Definition Pattern

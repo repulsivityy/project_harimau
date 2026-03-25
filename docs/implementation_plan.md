@@ -345,7 +345,25 @@ Iteration 3: Gate → [Malware, Infra] → Lead Hunter → END (max reached)
 - Investigations stay within API/token limits
 - Controlled analysis depth without overwhelming system
 
-**Total Deployments**: 20+ iterations to production in Feb 2026
+#### Graph Iteration & LLM Parsing Fixes
+**Problem**: The graph was short-circuiting after Iteration 0 despite having hundreds of relationships, and background tasks were crashing silently when LLMs returned lists instead of strings.
+
+**Solutions**:
+- [x] **NetworkX Key Mismatch**: Fixed Layer 1 planning logic to explicitly check for `entity_type` instead of `type` inside the graph cache, allowing Lead Hunter to correctly identify uninvestigated actionable nodes.
+- [x] **LLM Structured Output Lists**: Implemented a string-coercion fallback (`"".join([block.get("text") for block in response.content])`) in `lead_hunter_planning` and `lead_hunter_synthesis` to prevent `TypeError` when Gemini previews format their output as lists of blocks.
+
+**Impact**:
+- Investigations successfully complete all 3 looping iterations.
+- Complete resiliency against arbitrary LLM response format changes.
+
+#### Cloud Run Infrastructure Hotfixes
+**Problem**: Background `asyncio` tasks driving the investigations were freezing infinitely once the frontend disconnected from Server-Sent Events (SSE), preventing Database saves.
+
+**Solutions**:
+- [x] **CPU Allocation**: Updated `deploy.sh` to include `--no-cpu-throttling` to ensure CPU remains allocated even outside active request processing, protecting long-running background loops.
+- [x] **Resource Bump**: Increased `--cpu="2"` for the Cloud Run container to smoothly handle parallel multi-agent graph invocations.
+
+**Total Deployments**: 25+ iterations to production in Feb/Mar 2026
 
 **Phase 5 is complete - Product is production-ready as of Feb 2026**
 

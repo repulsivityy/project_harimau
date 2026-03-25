@@ -108,8 +108,16 @@ Please plan the next steps.
         ]
         
         response = await llm.ainvoke(messages)
-        content = response.content
         
+        # [CRITICAL FIX] ChatVertexAI/ChatGoogleGenerativeAI sometimes returns a list of blocks
+        if isinstance(response.content, list):
+            content = "".join([
+                block.get("text", "") if isinstance(block, dict) else str(block)
+                for block in response.content
+            ])
+        else:
+            content = str(response.content)
+            
         # Initial cleanup
         if "```json" in content:
             content = content.split("```json")[-1].split("```")[0].strip()

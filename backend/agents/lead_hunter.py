@@ -1,5 +1,7 @@
 import os
 from langchain_google_vertexai import ChatVertexAI
+from langchain_google_genai import ChatGoogleGenerativeAI
+
 from backend.config import DEFAULT_HUNT_ITERATIONS
 from backend.graph.state import AgentState
 from backend.utils.logger import get_logger
@@ -30,17 +32,33 @@ async def lead_hunter_node(state: AgentState):
     location = os.getenv("GOOGLE_CLOUD_REGION", "asia-southeast1")
 
     # Flash for planning (fast, cost-efficient), Pro only for final synthesis
-    llm_flash = ChatVertexAI(
-        model="gemini-2.5-flash",
+    # llm_flash = ChatVertexAI(
+    #     model="gemini-2.5-flash",
+    #     temperature=0.1,
+    #     project=project_id,
+    #     location=location,
+    # )
+    # llm_pro = ChatVertexAI(
+    #     model="gemini-2.5-pro",
+    #     temperature=0.1,
+    #     project=project_id,
+    #     location="global",
+    # )
+    llm_flash = ChatGoogleGenerativeAI(
+        model="gemini-3-flash-preview",
         temperature=0.1,
-        project=project_id,
-        location=location,
-    )
-    llm_pro = ChatVertexAI(
-        model="gemini-2.5-pro",
-        temperature=0.1,
+        #max_tokens=1024,
         project=project_id,
         location="global",
+        #vertexai=True,  # Explicitly use Vertex AI
+    )
+    llm_pro = ChatGoogleGenerativeAI(
+        model="gemini-3.1-pro-preview",
+        temperature=0.1,
+        #max_tokens=1024,
+        project=project_id,
+        location="global",
+        #vertexai=True,  # Explicitly use Vertex AI
     )
 
     # Initialize Cache to read graph state
@@ -53,7 +71,7 @@ async def lead_hunter_node(state: AgentState):
     if current_iteration < MAX_ITERATIONS:
         # --- LAYER 1: Pre-check uninvestigated nodes (no LLM call needed) ---
         uninvestigated = cache.get_uninvestigated_nodes()
-        actionable = [n for n in uninvestigated if n.get("type") in ACTIONABLE_TYPES]
+        actionable = [n for n in uninvestigated if n.get("entity_type") in ACTIONABLE_TYPES]
 
         if not actionable:
             logger.info("lead_hunter_early_exit", reason="no_uninvestigated_nodes", iteration=current_iteration)

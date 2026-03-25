@@ -154,7 +154,17 @@ async def generate_final_report_llm(state: AgentState, llm) -> str:
     
     try:
         response = await llm.ainvoke(messages)
-        return response.content
+        
+        # [CRITICAL FIX] ChatVertexAI sometimes returns a list of blocks instead of a string.
+        # This breaks postgres `asyncpg` which expects a string for the final_report column.
+        if isinstance(response.content, list):
+            final_text = "".join([
+                block.get("text", "") if isinstance(block, dict) else str(block)
+                for block in response.content
+            ])
+            return final_text
+            
+        return str(response.content)
     except Exception as e:
         logger.error("lead_hunter_synthesis_error", error=str(e))
         return f"# Analysis Error\n\nFailed to generate final report. Error: {str(e)}"

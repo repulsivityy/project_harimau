@@ -21,7 +21,7 @@ async def specialist_node(state: AgentState):
     target = subtask.get("entity_id") or extract_from_task_text(subtask["task"])
 ```
 
-### Phase 2: Tool Definition
+### Phase 2: Tool Definition (Deterministic Graph Update)
 ```python
 async with mcp_manager.get_session("gti") as session:
     @tool
@@ -29,7 +29,21 @@ async with mcp_manager.get_session("gti") as session:
         """Tool description for LLM."""
         try:
             res = await session.call_tool("mcp_name", arguments={"param": identifier})
-            return res.content[0].text if res.content else "{}"
+            if not res.content: return "[]"
+            parsed = json.loads(res.content[0].text)
+            
+            # Deterministically update the knowledge graph
+            found = []
+            for item in parsed.get("data", []):
+                eid = item.get("id")
+                etype = item.get("type", "unknown")
+                if eid:
+                    # Write directly to network schema before LLM gets the data
+                    cache.add_entity(eid, etype, {"context": "tool_results"})
+                    cache.add_relationship(identifier, eid, "relationship_name")
+                    found.append(eid)
+            
+            return json.dumps(found) # Return lightweight ID array to LLM
         except Exception as e:
             return str(e)
 ```
@@ -39,7 +53,13 @@ async with mcp_manager.get_session("gti") as session:
     llm = ChatVertexAI(model="gemini-2.5-flash", temperature=0)
     llm_with_tools = llm.bind_tools([tool1, tool2, ...])
 
-    messages = [SystemMessage(content=PROMPT), HumanMessage(content=task)]
+    # Injecting the previous report ensures report accumulation across loops
+    previous_report = state.get("specialist_results", {}).get("agent", {}).get("markdown_report", "New report")
+
+    messages = [
+        SystemMessage(content=PROMPT), 
+        HumanMessage(content=f"Previous Report: {previous_report}\n\nTask: {task}")
+    ]
     final_content = None
     max_iterations = malware_iterations  # or infra_iterations = 10
 
@@ -166,19 +186,19 @@ def parse_json_flexible(content: str) -> dict:
 async def get_ip_address_report(ip_address: str):
     """
     Get threat intelligence report for an IP address.
-    
-    Args:
-        ip_address: The IP address to analyze (e.g., "8.8.8.8")
-    
-    Returns:
-        JSON string with threat data or error message
     """
     try:
         res = await session.call_tool(
             "get_ip_address_report",
             arguments={"ip_address": ip_address}  # ✅ Must match MCP expectation
         )
-        return res.content[0].text if res.content else "{}"
+        if not res.content: return "{}"
+        
+        # Example: if this tool fetches relationships, update the NetworkX cache here natively
+        # cache.add_entity(...)
+        # cache.add_relationship(...)
+        
+        return res.content[0].text 
     except Exception as e:
         logger.warning("tool_error", tool="get_ip_address_report", error=str(e))
         return str(e)

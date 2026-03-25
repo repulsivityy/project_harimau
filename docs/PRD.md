@@ -63,9 +63,9 @@ The Lead Hunter must produce a **comprehensive threat intelligence analysis**, n
     
 ### 3.3.1 Data Flow Strategy (Memory Architecture)
 *   **Dual-Layer Memory**:
-    *   **Data Layer (NetworkX)**: Acts as the "Hard Drive". Stores **100% of fetched data** (full JSON attributes). Agents MUST write to this *first*.
-    *   **Control Layer (LangGraph)**: Acts as the "RAM". Stores **token-optimized summaries** (<5% of data). Agents write to this *second*.
-*   **Rule**: "Store First, Summarize Second". Agents never pass raw API JSON into the LangGraph state `messages` or `context` to prevent context window exhaustion.
+    *   **Data Layer (NetworkX)**: Acts as the "Hard Drive". Stores **100% of fetched data** (full JSON attributes). **Specialist agents' MCP tools MUST deterministically write newly discovered entities to this layer natively, bypassing LLM JSON hallucination risks.**
+    *   **Control Layer (LangGraph)**: Acts as the "RAM". Stores **token-optimized summaries** (<5% of data). Agents write minified arrays of IDs to this layer to fuel further LLM reasoning. Wait lists and `previous_report` accumulation loops operate here.
+*   **Rule**: "Store First, Summarize Second". Agents never pass raw API JSON into the LangGraph state `messages` or `context` to prevent context window exhaustion, and LLMs are no longer allowed to structurally define or assume relationship nodes.
 
 ### 3.4 Artifact Persistence (Report & Graph) *(Phase 6 - Planned)*
 *   **Storage**: Google Cloud Storage (GCS) Bucket.

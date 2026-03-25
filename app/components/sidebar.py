@@ -45,7 +45,7 @@ def render_sidebar(api: HarimauAPIClient):
         st.markdown("---")
         st.subheader("🕰️ Recent Investigations")
         try:
-            recent_jobs = api.get_investigations(limit=10)
+            recent_jobs = api.get_investigations(limit=5)
             if not recent_jobs:
                 st.info("No recent investigations found.")
             else:

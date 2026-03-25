@@ -63,12 +63,23 @@ Analyze the provided network indicator (Domain, IP, or URL) to assess its malici
         "Hosted file hash 9f8a... (Ransomware)"
     ],
     "related_indicators": ["IP: 1.2.3.4", "Domain: malicious.com", "File: 9f8a..."],
+    "analyzed_targets": [
+        {
+            "indicator": "malicious.com",
+            "type": "domain",
+            "verdict": "Malicious",
+            "behavior": "Resolves to bad IPs",
+            "notes": "Primary C2 domain"
+        }
+    ],
     "summary": "Detailed technical summary of the infrastructure and its role in the attack..."
 }
 
 **CRITICAL OUTPUT INSTRUCTIONS:**
 - You MUST ALWAYS return valid JSON in the exact format shown above.
 - Do NOT include markdown formatting, code blocks, or explanatory text.
+- **GROUND YOUR ANALYSIS.** You MUST base your entire analysis, verdicts, and indicators strictly on the provided triage context and the explicit outputs from your tools. Do NOT invent, assume, output outside prior knowledge, or hallucinate IOCs. Only include actual observed tool results.
+- **DO NOT HALLUCINATE IOCs.** Only include indicators (hashes, IPs, domains, URLs) that were explicitly found in the triage summary or returned by your tools. Do NOT copy dummy values like `malicious.com`, `1.2.3.4`, or `9f8a...` from the example output. If no indicators are found, use empty lists `[]`.
 - **IF TOOLS FAIL OR ERROR:** Still return JSON! Use "Unknown", empty arrays [], or "N/A" for fields you couldn't populate.
 - **NEVER provide narrative explanations instead of JSON.** If you encountered errors, mention them in the "summary" field.
 - When you're done analyzing, respond with ONLY the JSON object - nothing else.
@@ -82,6 +93,7 @@ Analyze the provided network indicator (Domain, IP, or URL) to assess its malici
     "associated_campaigns": [],
     "pivot_findings": ["Unable to fetch subdomains due to tool error"],
     "related_indicators": [],
+    "analyzed_targets": [],
     "summary": "Analysis incomplete due to tool errors. Based on available data: [describe what you know]"
 }
 """
@@ -119,6 +131,18 @@ def generate_infrastructure_markdown_report(result: dict, ioc: str) -> str:
             md += "### 🌐 Related Infrastructure\n"
             for ind in indicators:
                  md += f"*   `{ind}`\n"
+            md += "\n"
+            
+        # 4. Appendix: Investigated Targets
+        targets = result.get("analyzed_targets", [])
+        if targets:
+            md += "### 📎 Appendix: Indicators Investigated\n"
+            md += "| Indicator Analyzed | Type | Behavior | Verdict | Notes |\n"
+            md += "|---|---|---|---|---|\n"
+            for t in targets:
+                if isinstance(t, dict):
+                    md += f"| `{t.get('indicator', 'N/A')}` | {t.get('type', 'N/A')} | {t.get('behavior', 'N/A')} | **{t.get('verdict', 'N/A')}** | {t.get('notes', 'N/A')} |\n"
+            md += "\n"
         
         return md
     except Exception as e:
@@ -263,7 +287,20 @@ async def infrastructure_node(state: AgentState):
                 """Get entities related to a domain. Relationships: resolutions, subdomains, communicating_files."""
                 try:
                     res = await session.call_tool("get_entities_related_to_a_domain", arguments={"domain": domain, "relationship_name": relationship, "descriptors_only": True})
-                    return res.content[0].text if res.content else "[]"
+                    if not res.content: return "[]"
+                    parsed = json.loads(res.content[0].text)
+                    if "error" in parsed: return res.content[0].text
+                    
+                    found = []
+                    for item in parsed.get("data", []):
+                        eid = item.get("id")
+                        etype = item.get("type", "unknown")
+                        if not eid: continue
+                        h_type = "ip_address" if etype == "ip_address" else "file" if etype == "file" else "domain"
+                        cache.add_entity(eid, h_type, {"infra_context": f"domain_{relationship}"})
+                        cache.add_relationship(domain, eid, relationship, {"source": "infrastructure_analysis_tool"})
+                        found.append(eid)
+                    return json.dumps(found)
                 except Exception as e: return str(e)
                 
             # IP Tools
@@ -280,7 +317,20 @@ async def infrastructure_node(state: AgentState):
                 """Get entities related to an IP. Relationships: resolutions, communicating_files, referrer_files."""
                 try:
                     res = await session.call_tool("get_entities_related_to_an_ip_address", arguments={"ip_address": ip_address, "relationship_name": relationship, "descriptors_only": True})
-                    return res.content[0].text if res.content else "[]"
+                    if not res.content: return "[]"
+                    parsed = json.loads(res.content[0].text)
+                    if "error" in parsed: return res.content[0].text
+                    
+                    found = []
+                    for item in parsed.get("data", []):
+                        eid = item.get("id")
+                        etype = item.get("type", "unknown")
+                        if not eid: continue
+                        h_type = "domain" if etype == "domain" else "file" if etype == "file" else "ip_address"
+                        cache.add_entity(eid, h_type, {"infra_context": f"ip_{relationship}"})
+                        cache.add_relationship(ip_address, eid, relationship, {"source": "infrastructure_analysis_tool"})
+                        found.append(eid)
+                    return json.dumps(found)
                 except Exception as e: return str(e)
 
             # URL Tools
@@ -297,7 +347,20 @@ async def infrastructure_node(state: AgentState):
                 """Get entities related to a URL. Relationships: downloaded_files, network_location."""
                 try:
                     res = await session.call_tool("get_entities_related_to_an_url", arguments={"url": url, "relationship_name": relationship, "descriptors_only": True})
-                    return res.content[0].text if res.content else "[]"
+                    if not res.content: return "[]"
+                    parsed = json.loads(res.content[0].text)
+                    if "error" in parsed: return res.content[0].text
+                    
+                    found = []
+                    for item in parsed.get("data", []):
+                        eid = item.get("id")
+                        etype = item.get("type", "unknown")
+                        if not eid: continue
+                        h_type = "ip_address" if etype == "ip_address" else "file" if etype == "file" else "domain" if etype == "domain" else "url"
+                        cache.add_entity(eid, h_type, {"infra_context": f"url_{relationship}"})
+                        cache.add_relationship(url, eid, relationship, {"source": "infrastructure_analysis_tool"})
+                        found.append(eid)
+                    return json.dumps(found)
                 except Exception as e: return str(e)
 
 
@@ -343,8 +406,8 @@ async def infrastructure_node(state: AgentState):
                 shodan_ip_lookup, shodan_dns_lookup, shodan_reverse_dns_lookup,
             ]
             tool_dispatch = {t.name: t for t in tools}
-
-            llm = ChatVertexAI(model="gemini-2.5-flash", temperature=0.0, project=project_id, location=location).bind_tools(tools)
+            base_llm = ChatVertexAI(model="gemini-2.5-flash", temperature=0.0, project=project_id, location=location)
+            llm = base_llm.bind_tools(tools)
             
             # Format Triage Context for LLM
             triage_context_str = f"""**TRIAGE SUMMARY:**
@@ -370,12 +433,18 @@ async def infrastructure_node(state: AgentState):
                 HumanMessage(content=f"""
 {triage_context_str}
 
+**YOUR PREVIOUS REPORT:**
+{state.get("specialist_results", {}).get("infrastructure", {}).get("markdown_report", "No previous report exists. This is your first iteration.")}
+
 **YOUR ASSIGNMENT:**
-Analyze the following infrastructure indicators based on the triage context above:
+You have been tasked to investigate these new uninvestigated nodes based on the triage context above:
 {json.dumps(unique_targets, indent=2)}
 
 **SPECIFIC INSTRUCTIONS:**
-{context if context else "Perform comprehensive infrastructure analysis."}
+{context if context else "Perform comprehensive infrastructure analysis on the new targets."}
+
+**CRITICAL REPORTING INSTRUCTION:**
+Seamlessly rewrite and update your PREVIOUS REPORT's findings to incorporate the new intelligence gathered from these new targets. Build a cohesive, singular intelligence picture.
                 """)
             ]
             
@@ -389,9 +458,11 @@ Analyze the following infrastructure indicators based on the triage context abov
                 
                 if iteration == max_iterations - 1:
                     logger.info("infra_agent_final_iteration", iteration=iteration)
-                    messages.append(HumanMessage(content="This is the FINAL iteration. You MUST stop using tools now.\n\nBased on all the information you've gathered, provide your comprehensive analysis in valid JSON format.\n\nDo NOT make any more tool calls. Return ONLY the JSON structure as specified in the system prompt.\n\nIf you don't have enough information, provide your best analysis based on what you've gathered so far."))
-
-                response = await llm.ainvoke(messages)
+                    messages.append(HumanMessage(content="This is the FINAL iteration. You MUST stop using tools now.\n\nBased on all the information you've gathered, provide your comprehensive analysis in valid JSON format.\n\nReturn ONLY the JSON structure as specified in the system prompt.\n\nIf you don't have enough information, provide your best analysis based on what you've gathered so far."))
+                    response = await base_llm.ainvoke(messages)
+                else:
+                    response = await llm.ainvoke(messages)
+                
                 messages.append(response)
                 
                 if response.tool_calls:
@@ -520,29 +591,7 @@ Analyze the following infrastructure indicators based on the triage context abov
                 if job_id and 'final_text' in locals():
                     await emit_reasoning(job_id, "infrastructure", final_text)
                 
-                # --- Graph Population (Related Indicators) ---
-                related = result.get("related_indicators", [])
-                for ind in related:
-                    try:
-                        # "IP: 1.2.3.4" -> type=ip_address, value=1.2.3.4
-                        parts = ind.split(":", 1)
-                        if len(parts) == 2:
-                            ind_type_raw = parts[0].strip().lower()
-                            ind_value = parts[1].strip()
-                            
-                            ent_type = "unknown"
-                            if "ip" in ind_type_raw: ent_type = "ip_address"
-                            elif "domain" in ind_type_raw: ent_type = "domain"
-                            elif "file" in ind_type_raw: ent_type = "file"
-                            
-                            if ent_type != "unknown":
-                                # Add to NetworkX Cache
-                                cache.add_entity(ind_value, ent_type, {"infra_context": "related_indicator"})
-                                # Link to the SOURCE target that was analyzed
-                                source_node = unique_targets[0]["value"]
-                                cache.add_relationship(source_node, ind_value, "related_infrastructure", {"source": "infrastructure_analysis"})
-                    except Exception as e:
-                        logger.warning("infra_indicator_parse_error", error=str(e))
+                # Removed LLM JSON-to-Graph parsing. Graph population is now deterministically handled by the tools directly.
                 
                 # Relationship Expansion
                 # For each analyzed entity, fetch its relationships and expand the graph

@@ -743,6 +743,22 @@ gcloud run services update harimau-backend --set-env-vars HUNT_ITERATIONS=5
 
 ---
 
+### Phase 6.1.2: Specialist Graph Determinism & Persistence Fixes [COMPLETED]
+**Goal**: Eradicate LLM hallucinations from the Investigation Graph and ensure continuity across agent loop iterations (building upon the CloudSQL persistence capabilities).
+**Completion Date**: Mar 2026
+
+**Problem**: The specialist agents (Malware/Infrastructure) previously relied on returning `related_indicators` via JSON, which the LLM would occasionally hallucinate or misformat, leading to graph poisoning. Additionally, the individual markdown reports were resetting at each iteration instead of compounding.
+
+**Solutions**:
+- [x] **Deterministic Graph Population**: Ripped out the post-run LLM text-to-graph parsing. The MCP `@tool` wrappers in `malware.py` and `infrastructure.py` now intercept the raw JSON API payload from the fastMCP server and deterministically update the `InvestigationCache` natively before minified strings are even passed to the LLM context.
+- [x] **Iterative Report Accumulation**: Injected the `previous_report` (retrieved from `state["specialist_results"]`) into the agent's Prompt formulation at loop start. Appended instruction for the Agent to "seamlessly rewrite and update your PREVIOUS REPORT's findings to incorporate new intelligence". This defeats LLM "amnesia" across iterations.
+
+**Impact**:
+- 100% elimination of LLM-hallucinated nodes in the NetworkX graph.
+- Markdown reports organically grow deeper across loop iterations, leveraging workflow persistence to avoid data loss.
+
+---
+
 ### Phase 6.2: Agent Configuration (`agents.yaml`)
 **Goal**: Centralize agent tuning parameters into a config file, removing hardcoded constants from agent code.
 

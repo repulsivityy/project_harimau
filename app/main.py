@@ -17,7 +17,7 @@ graph_settings = render_sidebar(api)
 # Main Interface Header
 st.write("Harimau (Tiger in Malay) is an AI-powered threat hunting platform that uses multiple specialised threat hunt agents to analyze and investigate IOCs (IPs, Domains, Hashes, URLs).")
 st.write("Harimau leverages LangGraph with multiple specialised threat hunt agents to mimic the flow of a threat hunting program.")
-st.write("Harimau is currently in Beta Phase. Expect some bugs and unexpected behaviour. Current investigation takes ~6-8 minutes to complete.")
+st.write("Harimau is currently in Beta Phase. Expect some bugs and unexpected behaviour. Current investigation takes ~7-8 minutes to complete.")
 st.write("### Investigation Console\n")
 
 # Input Section

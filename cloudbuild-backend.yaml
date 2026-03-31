@@ -1,0 +1,30 @@
+steps:
+  # 1. Simple Syntax and Indentation Check
+  - name: 'python:3.11-slim'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Checking syntax and indentation of python files..."
+        python -m compileall -q .
+        echo "✅ Syntax check passed!"
+
+  # 2. Build Backend Image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/harimau/backend:latest', '-f', 'Dockerfile', '.']
+
+  # 3. Deploy Backend to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'harimau-backend'
+      - '--image'
+      - 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/harimau/backend:latest'
+      - '--region'
+      - 'asia-southeast1'
+      - '--quiet'
+
+images:
+  - 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/harimau/backend:latest'

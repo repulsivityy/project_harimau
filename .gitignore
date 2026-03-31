@@ -43,3 +43,9 @@ debugs/
 *.pyc
 *.backup
 test_*
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars

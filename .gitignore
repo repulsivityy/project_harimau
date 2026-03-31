@@ -49,3 +49,4 @@ test_*
 *.tfstate
 *.tfstate.backup
 *.tfvars
+.DS_Store

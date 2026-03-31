@@ -19,9 +19,9 @@ steps:
     args:
       - '-c'
       - |
-        BACKEND_URL=$(gcloud run services describe harimau-backend --region asia-southeast1 --format 'value(status.url)' --quiet)
-        echo "BACKEND_URL=$BACKEND_URL" > /workspace/backend_url.txt
-        echo "Fetched Backend URL: $BACKEND_URL"
+        BACKEND_URL=$$(gcloud run services describe harimau-backend --region asia-southeast1 --format 'value(status.url)' --quiet)
+        echo "$$BACKEND_URL" > /workspace/backend_url.txt
+        echo "Fetched Backend URL: $$BACKEND_URL"
 
   # 4. Deploy Frontend to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -29,11 +29,11 @@ steps:
     args:
       - '-c'
       - |
-        BACKEND_URL=$(cat /workspace/backend_url.txt)
+        BACKEND_URL=$$(cat /workspace/backend_url.txt)
         gcloud run deploy harimau-frontend \
           --image asia-southeast1-docker.pkg.dev/$PROJECT_ID/harimau/frontend:latest \
           --region asia-southeast1 \
-          --set-env-vars BACKEND_URL=$BACKEND_URL \
+          --set-env-vars BACKEND_URL=$$BACKEND_URL \
           --quiet
 
 images:

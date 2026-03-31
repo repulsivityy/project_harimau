@@ -21,7 +21,7 @@ checkpointer_instance = None  # LangGraph AsyncPostgresSaver (psycopg-based)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool, app_graph
+    global db_pool, app_graph, checkpointer_instance
     
     # --- Startup Phase ---
     db_url = os.environ.get("DATABASE_URL")
@@ -742,6 +742,65 @@ async def get_investigation_graph(job_id: str):
     from backend.utils.graph_formatter import format_investigation_graph
     return format_investigation_graph(job_id, job)
 
+@app.get("/api/investigations/{job_id}/history")
+async def get_investigation_history(job_id: str):
+    """
+    Returns the chronologically ordered history of specialist reports for a given investigation.
+    """
+    if not app_graph:
+        raise HTTPException(status_code=500, detail="Graph not initialized.")
+    if not checkpointer_instance:
+        raise HTTPException(status_code=500, detail="History requires a database checkpointer.")
+
+    try:
+        history_list = []
+        config = {"configurable": {"thread_id": job_id}}
+        
+        # Async iteration to pull the checkpoints
+        async for snapshot in app_graph.aget_state_history(config):
+            history_list.append(snapshot)
+            
+        if not history_list:
+            raise HTTPException(status_code=404, detail="No history found for job ID.")
+            
+        # Chronological order
+        history_list.reverse()
+        
+        reports = []
+        iteration = 1
+        
+        for snapshot in history_list:
+            state_values = snapshot.values
+            if "specialist_results" in state_values:
+                res = state_values["specialist_results"]
+                iter_data = {
+                    "iteration": iteration, 
+                    "malware_report": None, 
+                    "infrastructure_report": None
+                }
+                
+                # Extract markdown reports
+                if "malware" in res and isinstance(res["malware"], dict):
+                    iter_data["malware_report"] = res["malware"].get("markdown_report")
+                if "infrastructure" in res and isinstance(res["infrastructure"], dict):
+                    iter_data["infrastructure_report"] = res["infrastructure"].get("markdown_report")
+                    
+                # Only append if we found reports for this snapshot checkpoint
+                if iter_data["malware_report"] or iter_data["infrastructure_report"]:
+                    # Avoid adding identical consecutive snapshots 
+                    # (Langgraph saves a checkpoint for EVERY node in the loop)
+                    if not reports or (
+                        reports[-1]["malware_report"] != iter_data["malware_report"] or
+                        reports[-1]["infrastructure_report"] != iter_data["infrastructure_report"]
+                    ):
+                        reports.append(iter_data)
+                        iteration += 1
+                    
+        return {"job_id": job_id, "iterations": reports}
+        
+    except Exception as e:
+        logger.error("get_history_error", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 ##########
 # added for debugging purposes. to consider removing once prod ready. 

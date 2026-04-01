@@ -2,23 +2,17 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
-# gcc/python3-dev might be needed for some packages, keeping it slim for now
+# Install system dependencies and graphing libraries
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    graphviz \
     && rm -rf /var/lib/apt/lists/*
-
-# Install graphing libraries for artifact generation
-RUN apt-get update && apt-get install -y graphviz
 
 # Copy dependencies first for caching
 COPY backend/requirements.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy MCP Server code (Embedded)
-COPY backend/mcp /app/mcp
-
-# Copy Backend Code
+# Copy Backend Code (includes MCP servers in backend/mcp)
 COPY backend /app/backend
 
 # Set PYTHONPATH to include the current directory so imports work

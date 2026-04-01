@@ -82,7 +82,7 @@ export default function Home() {
                 className="object-cover"
                 fill
                 sizes="40px"
-                src="https://lh3.googleusercontent.com/aida-public/AB6AXuDVO5RrZ_clVGo5R6WzaccYn2MJ3LQTRkkWvGK5vizCrU_thqz1SiFYLudUQ6sYCsqcDhTrkec5EvX-bRmtSGux9MaBkOB_gayBp2eKFQdfu6csogWVfUkNuHq86X7uCEC-tDEsxXPO5gZc_BVjrR9ZCp012Owd8NMOBtinGnJPRj-Ya94qHL1or_JA4BUqeP2lC4u9Oy5_WiiFhga8cPaCU9cqLykjM10gFgTDIFC2FV_rQ3HBhUagliiRW93-i_-bjoPw--xucsI-"
+                src="/avatar.jpeg"
               />
             </div>
           </div>

@@ -34,21 +34,33 @@ export default function InvestigatePage() {
   const [nodes, setNodes] = useState<any[]>([]);
   const [edges, setEdges] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [job, setJob] = useState<any>(null);
 
   useEffect(() => {
     if (!id) return;
 
-    const fetchGraphData = async () => {
+    const fetchData = async () => {
       setLoading(true);
       try {
-        const response = await fetch(`/api/investigations/${id}/graph`);
-        if (!response.ok) {
+        const [graphRes, jobRes] = await Promise.all([
+          fetch(`/api/investigations/${id}/graph`),
+          fetch(`/api/investigations/${id}`),
+        ]);
+
+        if (!graphRes.ok) {
           throw new Error("Failed to fetch graph data");
         }
-        const data: GraphData = await response.json();
+        if (!jobRes.ok) {
+          throw new Error("Failed to fetch job details");
+        }
+
+        const graphData: GraphData = await graphRes.json();
+        const jobData = await jobRes.json();
+
+        setJob(jobData);
 
         // Apply Circular Layout
-        const calculatedNodes = data.nodes.map((node, index) => {
+        const calculatedNodes = graphData.nodes.map((node, index) => {
           // Central node 'root' or first node at (0,0)
           if (node.id === "root" || index === 0) {
             return {
@@ -73,7 +85,7 @@ export default function InvestigatePage() {
 
           // Other nodes in a circle
           const radius = 250;
-          const angle = (index / (data.nodes.length - 1)) * 2 * Math.PI;
+          const angle = (index / (graphData.nodes.length - 1)) * 2 * Math.PI;
           const x = radius * Math.cos(angle);
           const y = radius * Math.sin(angle);
 
@@ -96,7 +108,7 @@ export default function InvestigatePage() {
           };
         });
 
-        const calculatedEdges = data.edges.map((edge, index) => ({
+        const calculatedEdges = graphData.edges.map((edge, index) => ({
           id: `e-${index}`,
           source: edge.source,
           target: edge.target,
@@ -109,7 +121,7 @@ export default function InvestigatePage() {
         setNodes(calculatedNodes);
         setEdges(calculatedEdges);
       } catch (error) {
-        console.error("Error fetching graph data:", error);
+        console.error("Error fetching data:", error);
         // Fallback mock data if API fails
         setNodes([
           {
@@ -140,7 +152,7 @@ export default function InvestigatePage() {
       }
     };
 
-    fetchGraphData();
+    fetchData();
   }, [id]);
 
   const tiles = [
@@ -149,7 +161,9 @@ export default function InvestigatePage() {
       title: "Triage & Plan",
       icon: "radar",
       size: "col-span-12 lg:col-span-5",
-      content: "Summary of investigation plan and initial findings.",
+      content: job
+        ? `Status: ${job.status}\nVerdict: ${job.risk_level || "Unknown"}\nScore: ${job.gti_score || "N/A"}`
+        : "Loading triage data...",
     },
     {
       id: 2,
@@ -164,28 +178,39 @@ export default function InvestigatePage() {
       title: "Specialist Reports",
       icon: "reorder",
       size: "col-span-12 lg:col-span-5",
-      content: "Detailed results from specialist agents.",
+      content:
+        job && job.specialist_results
+          ? `Reports found: ${Object.keys(job.specialist_results).length}`
+          : "Loading specialist reports...",
     },
     {
       id: 4,
       title: "Final Report",
       icon: "description",
       size: "col-span-12 lg:col-span-6",
-      content: "Compiled intelligence report.",
+      content: job
+        ? job.final_report?.substring(0, 100) + "..."
+        : "Loading final report...",
     },
     {
       id: 5,
       title: "Timeline",
       icon: "history",
       size: "col-span-12 lg:col-span-3",
-      content: "Sequence of task execution.",
+      content:
+        job && job.subtasks
+          ? `Tasks executed: ${job.subtasks.length}`
+          : "Loading timeline...",
     },
     {
       id: 6,
       title: "Agent Transparency",
       icon: "terminal",
       size: "col-span-12 lg:col-span-3",
-      content: "Reasoning and tool call logs.",
+      content:
+        job && job.transparency_log
+          ? `Events logged: ${job.transparency_log.length}`
+          : "Loading transparency log...",
     },
   ];
 
@@ -332,19 +357,157 @@ export default function InvestigatePage() {
                   </ReactFlow>
                 </div>
               ) : (
-                <>
-                  <p>
-                    This is the expanded view for the{" "}
-                    {tiles.find((t) => t.id === expandedTile)?.title} tile.
-                  </p>
-                  <p>
-                    Here we will render the full content of the equivalent tab
-                    from the Streamlit app.
-                  </p>
-                  <div className="p-4 bg-[#262529] border-l-2 border-cyan-400 font-label text-xs text-cyan-400">
-                    SYSTEM_STATUS: Fetching content mock...
-                  </div>
-                </>
+                  <>
+                    {expandedTile === 1 && (
+                      <div className="space-y-4">
+                        <section>
+                          <h3 className="text-xl font-headline font-black text-pink-500 uppercase mb-2">
+                            Triage Summary
+                          </h3>
+                          <p className="text-sm text-[#adaaad] font-body">
+                            {job?.rich_intel?.triage_summary ||
+                              "No summary available."}
+                          </p>
+                        </section>
+                        <section>
+                          <h3 className="text-xl font-headline font-black text-pink-500 uppercase mb-2">
+                            Generated Tasks
+                          </h3>
+                          <ul className="space-y-2">
+                            {job?.subtasks?.map((task: any, idx: number) => (
+                              <li
+                                className="bg-[#19191c] p-4 border-l-2 border-cyan-400"
+                                key={idx}
+                              >
+                                <div className="flex justify-between items-center mb-1">
+                                  <strong className="font-headline text-[#fffbfe] uppercase tracking-tighter">
+                                    {task.agent}
+                                  </strong>
+                                  <span
+                                    className={`text-xs font-label uppercase ${task.status === "completed" ? "text-green-400" : "text-yellow-400"}`}
+                                  >
+                                    {task.status}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-[#adaaad]">
+                                  {task.task}
+                                </p>
+                              </li>
+                            ))}
+                          </ul>
+                        </section>
+                      </div>
+                    )}
+                    {expandedTile === 3 && (
+                      <div className="space-y-6">
+                        <h3 className="text-xl font-headline font-black text-pink-500 uppercase mb-4">
+                          Specialist Reports
+                        </h3>
+                        {job?.specialist_results ? (
+                          Object.entries(job.specialist_results).map(
+                            ([agent, result]: [string, any]) => (
+                              <div
+                                key={agent}
+                                className="bg-[#19191c] p-6 border-l-2 border-cyan-400"
+                              >
+                                <div className="flex justify-between items-center mb-4">
+                                  <h4 className="font-headline text-lg font-black text-[#fffbfe] uppercase tracking-tighter">
+                                    {agent.replace("_", " ").toUpperCase()}
+                                  </h4>
+                                  <span
+                                    className={`text-xs font-label uppercase ${result.verdict?.toUpperCase() === "MALICIOUS" ? "text-pink-500" : result.verdict?.toUpperCase() === "SUSPICIOUS" ? "text-yellow-400" : "text-green-400"}`}
+                                  >
+                                    {result.verdict || "N/A"}
+                                  </span>
+                                </div>
+                                <pre className="whitespace-pre-wrap text-xs text-[#adaaad] font-mono bg-[#0e0e10] p-4 border border-cyan-400/20">
+                                  {result.markdown_report ||
+                                    "No report content."}
+                                </pre>
+                              </div>
+                            ),
+                          )
+                        ) : (
+                          <p className="text-sm text-[#adaaad]">
+                            No specialist reports available.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    {expandedTile === 4 && (
+                      <div className="space-y-4">
+                        <h3 className="text-xl font-headline font-black text-pink-500 uppercase mb-4">
+                          Final Intelligence Report
+                        </h3>
+                        <div className="bg-[#19191c] p-6 border-l-2 border-cyan-400">
+                          <pre className="whitespace-pre-wrap text-xs text-[#adaaad] font-mono bg-[#0e0e10] p-4 border border-cyan-400/20">
+                            {job?.final_report || "No report available."}
+                          </pre>
+                        </div>
+                      </div>
+                    )}
+                    {expandedTile === 5 && (
+                      <div className="space-y-4">
+                        <h3 className="text-xl font-headline font-black text-pink-500 uppercase mb-4">
+                          Investigation Timeline
+                        </h3>
+                        <div className="space-y-4">
+                          {job?.subtasks?.map((task: any, idx: number) => (
+                            <div
+                              className="flex gap-4 items-center bg-[#19191c] p-4 border-l-2 border-cyan-400"
+                              key={idx}
+                            >
+                              <span className="text-pink-500 font-label text-xs">
+                                {task.timestamp || "N/A"}
+                              </span>
+                              <span className="bg-[#0e0e10] px-2 py-1 text-xs font-label text-cyan-400 uppercase">
+                                {task.agent}
+                              </span>
+                              <span className="text-xs text-[#fffbfe] flex-grow">
+                                {task.task}
+                              </span>
+                              <span
+                                className={`text-xs font-label uppercase ${task.status === "completed" ? "text-green-400" : "text-yellow-400"}`}
+                              >
+                                {task.status}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {expandedTile === 6 && (
+                      <div className="space-y-4">
+                        <h3 className="text-xl font-headline font-black text-pink-500 uppercase mb-4">
+                          Agent Transparency Log
+                        </h3>
+                        <div className="space-y-2">
+                          {job?.transparency_log?.map(
+                            (event: any, idx: number) => (
+                              <div
+                                className="bg-[#19191c] p-4 border-l-2 border-pink-500 text-xs"
+                                key={idx}
+                              >
+                                <div className="flex gap-2 items-center mb-1">
+                                  <span className="text-cyan-400 font-label text-[10px]">
+                                    {event.timestamp}
+                                  </span>
+                                  <span className="bg-[#0e0e10] px-1.5 py-0.5 text-[10px] font-label text-pink-500 uppercase">
+                                    {event.agent}
+                                  </span>
+                                </div>
+                                <p className="text-[#adaaad]">
+                                  {event.type === "tool"
+                                    ? `Used tool: ${event.tool}`
+                                    : `Thought: ${event.thought}`}
+                                </p>
+                              </div>
+                            ),
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </>
               )}
             </div>
           </div>

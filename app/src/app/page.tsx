@@ -9,11 +9,30 @@ export default function Home() {
   const [ioc, setIoc] = useState("");
   const [depth, setDepth] = useState(2); // Default depth 2
 
-  const handleSearch = (e: React.FormEvent) => {
+  const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (ioc.trim()) {
-      // Simulate navigation to a job ID
-      router.push("/investigate/1234");
+      try {
+        const response = await fetch("/api/investigate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ ioc: ioc.trim(), max_iterations: depth }),
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to submit investigation");
+        }
+
+        const data = await response.json();
+        const jobId = data.job_id;
+
+        router.push(`/investigate/${jobId}`);
+      } catch (error) {
+        console.error("Error submitting investigation:", error);
+        alert("Failed to start investigation. Please try again.");
+      }
     }
   };
 

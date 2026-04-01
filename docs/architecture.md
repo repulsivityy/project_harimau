@@ -6,7 +6,7 @@ Harimau V2 is a **Cloud-Native, Modular Monolith** for automated threat hunting.
 
 ```mermaid
 graph TD
-    User([User]) <-->|HTTPS| Frontend[Streamlit Frontend]
+    User([User]) <-->|HTTPS| Frontend[Next.js Frontend]
     
     subgraph "Google Cloud Run"
         Frontend <-->|REST API| Backend[FastAPI Backend]
@@ -30,18 +30,17 @@ graph TD
 ## 2. Component Breakdown
 
 ### 2.1 Frontend (`/app`)
-* **Technology**: Streamlit (Python).
+* **Technology**: Next.js (React, TypeScript, Tailwind CSS v4).
 * **Role**: Pure presentation layer.
-* **Architecture**: Component-based modularity.
-  - `main.py`: Application entry point and orchestrator.
-  - `components/sidebar.py`: Settings, health-checks, graph controls.
-  - `components/investigation_tracker.py`: Job polling and SSE progress streaming.
-  - `components/results_tabs.py`: Renders Triage, Graph, Specialists, and Timeline tabs.
+* **Architecture**: App Router with server/client components.
+  - `src/app/page.tsx`: Main landing page with centered search box and investigation controls.
+  - `src/app/investigate/[id]/page.tsx`: Dynamic route for rendering investigation results (graph, timeline, reports).
+  - `src/app/globals.css`: Global styles including Tailwind directives.
 * **Authentication**: Google IAP / IAM (via Cloud Run).
 * **Logic**:
   - Submits jobs to Backend (`POST /api/investigate`).
-  - Polls for status updates via tracker component.
-  - Visualizes graph with rich tooltips (threat scores, filenames, categories).
+  - Fetches data from Backend via proxied routes (configured in `next.config.ts` rewrites).
+  - Visualizes graph with rich tooltips!
 
 ### 2.2 Backend (`/backend`)
 * **Technology**: FastAPI + LangGraph.
@@ -197,8 +196,8 @@ To support selective and automated deployments, the application uses **Google Cl
   - `terraform/infra/`: State-ful resources (Cloud SQL, Artifact Registry).
   - `terraform/app/`: Stateless computes (Cloud Run services).
 * **Automated Triggers**:
-  - **Backend Trigger**: Listens for changes in `backend/**`. Runs `cloudbuild-backend.yaml` to build and deploy the FastAPI container.
-  - **Frontend Trigger**: Listens for changes in `app/**`. Runs `cloudbuild-frontend.yaml` to build and deploy the Streamlit container (injecting `BACKEND_URL` dynamically).
+    - **Backend Trigger**: Listens for changes in `backend/**`. Runs `cloudbuild-backend.yaml` to build and deploy the FastAPI container.
+    - **Frontend Trigger**: Listens for changes in `app/**`. Runs `cloudbuild-frontend.yaml` to build and deploy the NextJS container (injecting `BACKEND_URL` dynamically).
 
 This ensures that updating an agent (backend) does not trigger a needless rebuild of the frontend, keeping deployments fast and isolated.
 
@@ -313,7 +312,7 @@ This ensures that updating an agent (backend) does not trigger a needless rebuil
 
 ### 4.3 Specialist Handoff & Visualization
 1. **Dynamic Routing**: Triage identifies specialists (e.g., `malware_specialist`) based on IOC properties.
-2. **Specialist Results Tab**: A dedicated Streamlit tab renders individual markdown reports for each specialist.
+2. **Specialist Results Tab**: A dedicated tab in the UI renders individual markdown reports for each specialist.
 3. **Graph Integration**: Specialist findings (Dropped Files, C2 IPs) appear as new nodes in the graph with unique 🚩 specialist tooltips.
 4. **Centering Logic**: The graph is explicitly forced to re-center when specialized findings are added.
 

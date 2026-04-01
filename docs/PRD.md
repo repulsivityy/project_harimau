@@ -10,7 +10,7 @@
 *   **Observable**: Deep visibility into agent reasoning and threat data exploration
 
 ## 2. Technical Stack
-*   **Frontend (`/app`)**: Streamlit (Cloud Run Service) - Interactive investigation dashboard
+*   **Frontend (`/app`)**: ~~Streamlit (Cloud Run Service) - Interactive investigation dashboard ~~ Next.js (updated April 2026)
 *   **Backend (`/backend`)**: FastAPI + LangGraph (Cloud Run Service) - Multi-agent orchestration
 *   **Cache**: NetworkX (in-memory graph per investigation)
 *   **MCP Servers**: Google Threat Intelligence + Shodan (Embedded Python subprocesses, registry-driven)
@@ -25,7 +25,7 @@
 *   **MCP Registry**: MCP servers loaded dynamically from `mcp_registry.json`. Current servers: `gti`, `shodan`.
 
 ### 3.2 Threat Intelligence Workflow
-1.  **Input**: User provides IOC (hash, domain, IP, URL) in Streamlit interface
+1.  **Input**: User provides IOC (hash, domain, IP, URL) in the interface
 2.  **Async Investigation**: Frontend submits job → Backend orchestrates multi-agent analysis
 3.  **Triage Agent**: Initial classification and relationship discovery (breadth-first)
 4.  **Specialist Agents** (parallel execution):

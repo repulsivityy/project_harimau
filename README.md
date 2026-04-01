@@ -17,7 +17,7 @@ Project Harimau is an automated threat intelligence investigation system that an
 The application takes an IOC (like a file hash, URL, or IP address) and kicks off an investigation. Specialist AI Agents work together to analyze the IOC, gather threat intelligence, and produce a report with their findings.
 
 ## Architecture
-* **Frontend**: Streamlit (Cloud Run Service) - Interactive investigation dashboard
+* **Frontend**: Next.js (React, Tailwind CSS v4) - Interactive investigation dashboard
 * **Backend**: FastAPI + LangGraph (Cloud Run Service) - Multi-agent orchestration
 * **MCP**: Embedded GTI + Shodan MCP Servers (stdio) - Threat intelligence & internet exposure data
 * **Brain**: Gemini 2.5 Flash / Pro - Powered by advanced AI reasoning
@@ -125,7 +125,7 @@ You can still use the legacy `deploy.sh` script for manual deployments if needed
 ## Technology Stack
 - **Orchestration**: LangGraph
 - **API**: FastAPI
-- **UI**: Streamlit
+- **UI**: Next.js
 - **LLM**: Vertex AI (Gemini 2.5)
 - **Cache**: NetworkX (in-memory, per investigation)
 - **Deployment**: Google Cloud Run

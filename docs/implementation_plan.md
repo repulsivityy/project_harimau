@@ -416,21 +416,6 @@ Infra --> LeadReview
 
 ---
 
-### Phase 6.3: Authentication — Cloud IAP [PLANNED]
-**Goal**: Add proper authentication via Google Cloud IAP in front of Cloud Run, replacing the current unauthenticated access.
-
-**Planned Tasks**:
-- [ ] Provision HTTPS Load Balancer + Serverless NEG pointing to Cloud Run services
-- [ ] Enable Cloud IAP on the Load Balancer backend
-- [ ] Configure authorized users/groups in IAP
-- [ ] Block direct Cloud Run URLs (unauthenticated access)
-- [ ] Optional: WAF rules via Cloud Armor on the Load Balancer
-- [ ] Terraform all of the above
-
-**Why**: Cloud IAP provides Google SSO, group-based access control, and audit logs at the infrastructure layer — the Streamlit app requires zero auth code. Enables WAF protection as a future layer.
-
----
-
 ### Phase 6.1: Cloud SQL + LangGraph Checkpointing [COMPLETED]
 **Goal**: Replace the ephemeral in-memory `JOBS` dict with Cloud SQL (PostgreSQL) and wire LangGraph `AsyncPostgresSaver` so investigations persist across Cloud Run restarts.
 **Completion Date**: Mar 2026
@@ -801,6 +786,23 @@ gcloud run services update harimau-backend --set-env-vars HUNT_ITERATIONS=5
     - [X] Tools - Shodan
     - [ ] Tools - OpenCTI
 
+---
+
+### Phase 6.3: Authentication — Cloud IAP [PLANNED]
+**Goal**: Add proper authentication via Google Cloud IAP in front of Cloud Run, replacing the current unauthenticated access.
+
+**Planned Tasks**:
+- [ ] Provision HTTPS Load Balancer + Serverless NEG pointing to Cloud Run services
+- [ ] Enable Cloud IAP on the Load Balancer backend
+- [ ] Configure authorized users/groups in IAP
+- [ ] Block direct Cloud Run URLs (unauthenticated access)
+- [ ] Optional: WAF rules via Cloud Armor on the Load Balancer
+- [ ] Terraform all of the above
+
+**Why**: Cloud IAP provides Google SSO, group-based access control, and audit logs at the infrastructure layer — the Streamlit app requires zero auth code. Enables WAF protection as a future layer.
+
+---
+
 ### Phase 6.4: CI/CD Automation with Cloud Build [COMPLETED]
 **Goal**: Automate deployments and separate frontend/backend builds using path-based triggers.
 **Completion Date**: Apr 2026
@@ -934,6 +936,10 @@ gcloud run services update harimau-backend --set-env-vars HUNT_ITERATIONS=5
 │  └─────────────────────────┘│
 └─────────────────────────────┘
 ```
+
+## Phase 6.4: Update UX to React/Next.js
+
+- [X] Update UX to React/Next.js
 
 ## Phase 7: Detached Detection Agent Architecture [MOVED]
 

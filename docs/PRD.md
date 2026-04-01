@@ -75,7 +75,10 @@ The Lead Hunter must produce a **comprehensive threat intelligence analysis**, n
 *   **Status**: Not yet implemented — investigations currently held in-memory (`JOBS` dict). Planned alongside Cloud SQL persistence in Phase 6.
 
 ## 4. Operational Requirements
-*   **Deployment**: Support `deploy.sh` (selective backend/frontend updates) and `terraform/`.
+*   **Deployment**: 
+    *   **Infrastructure**: Managed declaratively via **Terraform** (split into `infra/` for persistent resources like Cloud SQL and `app/` for compute services).
+    *   **CI/CD**: Automated via **Google Cloud Build** with path-based triggers (2nd Gen). Pushes to `backend/**` trigger backend service deployment, and pushes to `app/**` trigger frontend service deployment.
+    *   **Fallback**: Manual deployments via `deploy.sh` are still supported.
 *   **Security**: Auth (Phased — Cloud IAP planned for Phase 6.3), Secrets (`GTI_API_KEY`, `WEBRISK_API_KEY`, `SHODAN_API_KEY` in Secret Manager).
 *   **Observability (Logging)**:
     *   **Format**: Structured JSON (compatible with Cloud Logging).

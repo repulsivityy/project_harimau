@@ -800,7 +800,18 @@ gcloud run services update harimau-backend --set-env-vars HUNT_ITERATIONS=5
     - [ ] Tools - URLScan
     - [X] Tools - Shodan
     - [ ] Tools - OpenCTI
-    - [ ] Tools - Google SecOps
+
+### Phase 6.4: CI/CD Automation with Cloud Build [COMPLETED]
+**Goal**: Automate deployments and separate frontend/backend builds using path-based triggers.
+**Completion Date**: Apr 2026
+
+**Completed Tasks**:
+- [x] **Split CI/CD Configs**: Created `cloudbuild-backend.yaml` and `cloudbuild-frontend.yaml`.
+- [x] **Path Filters**: Configured triggers to watch `backend/**` and `app/**` respectively.
+- [x] **Dynamic URL Injection**: Frontend build fetches backend URL via `gcloud` and injects it.
+- [x] **Terraform Layering**: Split terraform into `infra/` (stateful) and `app/` (stateless).
+
+**Why**: Allows updating agents without rebuilding the frontend, reducing deployment time and blast radius.
 
 ### Phase 6.3: Multi-User Support & Persistence
 

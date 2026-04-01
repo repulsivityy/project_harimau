@@ -33,6 +33,25 @@ The application takes an IOC (like a file hash, URL, or IP address) and kicks of
 * **Campaign Tracking**: Links IOCs to known threat actors and campaigns
 
 ## 🚀 Deployment (GCP)
+
+This project supports both automated CI/CD and manual deployments.
+
+### Option 1: Automated CI/CD with Cloud Build (Recommended)
+Your infrastructure is managed by **Terraform**, and deployments are automated via **Google Cloud Build**.
+
+1. **Infrastructure Setup**:
+   - Persistent resources are in `terraform/infra/`. Run `terraform init` and `terraform apply` there.
+   - Application services are in `terraform/app/`. Run `terraform init` and `terraform apply` there.
+2. **Automated Triggers**:
+   - Any push to the `main` branch on GitHub will trigger the build automatically if it affects the relevant folder:
+     - Changes in `backend/**` trigger `cloudbuild-backend.yaml` (Deploys Backend).
+     - Changes in `app/**` trigger `cloudbuild-frontend.yaml` (Deploys Frontend).
+
+---
+
+### Option 2: Manual Script (Fallback)
+You can still use the legacy `deploy.sh` script for manual deployments if needed.
+
 1. **Prerequisites**: `gcloud` CLI installed and authenticated.
 2. **Configuration**:
    ```bash
@@ -59,6 +78,7 @@ The application takes an IOC (like a file hash, URL, or IP address) and kicks of
         -H "Content-Type: application/json" \
         -d '{"ioc": "<sha256>>"}'
    ```
+
 
 ## 📊 Status
 -   **Phase 1 (Infrastructure)**: ✅ Complete

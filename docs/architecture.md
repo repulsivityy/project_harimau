@@ -188,7 +188,22 @@ Verdict: {entity['verdict']}
   - LLM reasoning capture (raw responses).
 * **Performance**: Sub-3s latency via parallel "Super-Bundle" enrichment.
 
+### 2.8 CI/CD Deployment Flow
+
+To support selective and automated deployments, the application uses **Google Cloud Build** with path-based triggers.
+
+* **Repository Structure**: Monorepo containing both frontend (`/app`) and backend (`/backend`) source code.
+* **Infrastructure as Code**: Managed via **Terraform**, separated into:
+  - `terraform/infra/`: State-ful resources (Cloud SQL, Artifact Registry).
+  - `terraform/app/`: Stateless computes (Cloud Run services).
+* **Automated Triggers**:
+  - **Backend Trigger**: Listens for changes in `backend/**`. Runs `cloudbuild-backend.yaml` to build and deploy the FastAPI container.
+  - **Frontend Trigger**: Listens for changes in `app/**`. Runs `cloudbuild-frontend.yaml` to build and deploy the Streamlit container (injecting `BACKEND_URL` dynamically).
+
+This ensures that updating an agent (backend) does not trigger a needless rebuild of the frontend, keeping deployments fast and isolated.
+
 ---
+
 
 ## 3. API Specification
 

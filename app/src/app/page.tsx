@@ -77,11 +77,8 @@ export default function Home() {
         <div className="flex items-center gap-6">
           {/* Jobs History Dropdown */}
           <div className="relative group hidden lg:block">
-            <select className="relative bg-[#19191c] border-b-2 border-pink-500 text-pink-500 text-xs px-4 py-2 focus:ring-0 w-48 font-label cursor-pointer appearance-none">
-              <option>JOBS_HISTORY...</option>
-              <option>Job #1234 - Malicious</option>
-              <option>Job #1233 - Suspicious</option>
-              <option>Job #1232 - Benign</option>
+            <select className="relative bg-[#19191c] border-b-2 border-pink-500 text-pink-500 text-xs px-4 py-2 focus:ring-0 w-48 font-label cursor-pointer appearance-none" disabled>
+              <option>No Recent Jobs</option>
             </select>
             <span className="absolute right-2 top-2.5 text-pink-500 material-symbols-outlined text-sm pointer-events-none">
               arrow_drop_down

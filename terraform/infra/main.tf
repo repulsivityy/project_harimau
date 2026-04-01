@@ -1,3 +1,11 @@
+################################################################################
+#
+# Terraform configuration for Harimau 
+#
+# This configuration deploys the Harimau Infra - CloudSQL, Artifact Registry and Secrets
+#
+################################################################################
+
 provider "google" {
   project = var.project_id
   region  = var.region

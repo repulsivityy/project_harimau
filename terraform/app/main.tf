@@ -1,3 +1,11 @@
+################################################################################
+#
+# Terraform configuration for Harimau 
+#
+# This configuration deploys the Harimau backend and frontend to Google Cloud Run
+#
+################################################################################
+
 provider "google" {
   project = var.project_id
   region  = var.region
@@ -114,7 +122,7 @@ resource "google_cloud_run_service" "frontend" {
           value = google_cloud_run_service.backend.status[0].url
         }
         ports {
-            container_port = 8501
+            container_port = 3000
         }
       }
     }

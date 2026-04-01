@@ -11,7 +11,7 @@ steps:
 
   # 2. Build Backend Image
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/harimau/backend:latest', '-f', 'Dockerfile', '.']
+    args: ['build', '-t', 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/harimau/backend:latest', '-f', 'backend/Dockerfile', 'backend/']
 
   # 3. Deploy Backend to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'

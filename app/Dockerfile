@@ -1,29 +1,36 @@
-FROM python:3.11-slim
+# Base node image
+FROM node:18-alpine AS base
 
+# Install dependencies only when needed
+FROM base AS deps
+RUN apk add --no-cache libc6-compat
 WORKDIR /app
+# We assume context is the repository root
+COPY app/package.json ./
+RUN npm install
 
-# Install dependencies (curl for healthcheck if needed, graphviz for charts)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    graphviz \
-    && rm -rf /var/lib/apt/lists/*
+# Rebuild the source code only when needed
+FROM base AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY app/ ./
+# Next.js collects completely anonymous telemetry data about general usage.
+ENV NEXT_TELEMETRY_DISABLED 1
+RUN npm run build
 
-# Copy and install frontend dependencies
-COPY app/requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+# Production image, copy all the files and run next
+FROM base AS runner
+WORKDIR /app
+ENV NODE_ENV production
+ENV NEXT_TELEMETRY_DISABLED 1
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
 
-# Copy Frontend Code
-COPY app /app/frontend
+# Copy standalone build and static assets
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
 
-# Copy utils/models if we decide to share code in future
-# COPY backend/models /app/backend/models 
-
-# Expose Streamlit port
-EXPOSE 8501
-
-# Streamlit-specific environment variables
-ENV STREAMLIT_SERVER_PORT=8501
-ENV STREAMLIT_SERVER_ADDRESS=0.0.0.0
-
-# Run Command
-CMD ["streamlit", "run", "frontend/main.py"]
+USER nextjs
+EXPOSE 3000
+CMD ["node", "server.js"]

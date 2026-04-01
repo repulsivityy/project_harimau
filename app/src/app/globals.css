@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0e0e10;
+  --foreground: #fffbfe;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  overflow-x: hidden;
+}
+
+.glitch-effect:hover {
+  text-shadow: 2px 0 #ff7cf5, -2px 0 #00fbfb;
+}
+
+.asymmetric-clip {
+  clip-path: polygon(0 0, 100% 0, 95% 100%, 0% 100%);
+}
+
+.radar-sweep {
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(0, 251, 251, 0.2) 90deg, transparent 91deg);
+}
+
+.glass-panel {
+  background: rgba(255, 124, 245, 0.05);
+  backdrop-filter: blur(20px);
+}
+
+@keyframes pulse-cyan-pink {
+  0% { border-color: #00fbfb; }
+  50% { border-color: #ff007f; }
+  100% { border-color: #00fbfb; }
+}
+
+.pulse-border {
+  animation: pulse-cyan-pink 3s infinite ease-in-out;
+}

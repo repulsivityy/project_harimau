@@ -2,12 +2,21 @@
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export default function Home() {
   const router = useRouter();
   const [ioc, setIoc] = useState("");
-  const [depth, setDepth] = useState(2); // Default depth 2
+  const [depth, setDepth] = useState(2);
+  const [recentJobs, setRecentJobs] = useState<any[]>([]);
+
+  // Fetch past jobs from Cloud SQL for the history dropdown
+  useEffect(() => {
+    fetch("/api/investigations")
+      .then((r) => r.json())
+      .then((jobs) => setRecentJobs(Array.isArray(jobs) ? jobs : []))
+      .catch(() => setRecentJobs([]));
+  }, []);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,8 +86,21 @@ export default function Home() {
         <div className="flex items-center gap-6">
           {/* Jobs History Dropdown */}
           <div className="relative group hidden lg:block">
-            <select className="relative bg-[#19191c] border-b-2 border-pink-500 text-pink-500 text-xs px-4 py-2 focus:ring-0 w-48 font-label cursor-pointer appearance-none" disabled>
-              <option>No Recent Jobs</option>
+            <select
+              className="relative bg-[#19191c] border-b-2 border-pink-500 text-pink-500 text-xs px-4 py-2 focus:ring-0 w-48 font-label cursor-pointer appearance-none"
+              value=""
+              onChange={(e) => {
+                if (e.target.value) router.push(`/investigate/${e.target.value}`);
+              }}
+            >
+              <option value="">
+                {recentJobs.length > 0 ? "Recent Jobs..." : "No Recent Jobs"}
+              </option>
+              {recentJobs.map((job: any) => (
+                <option key={job.job_id} value={job.job_id}>
+                  {job.ioc} — {job.status}
+                </option>
+              ))}
             </select>
             <span className="absolute right-2 top-2.5 text-pink-500 material-symbols-outlined text-sm pointer-events-none">
               arrow_drop_down

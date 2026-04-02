@@ -50,3 +50,4 @@ test_*
 *.tfstate.backup
 *.tfvars
 .DS_Store
+.claude/*

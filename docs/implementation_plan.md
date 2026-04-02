@@ -420,12 +420,16 @@ Infra --> LeadReview
 **Goal**: Fix two production bugs introduced during the CI/CD + Next.js frontend refactor that prevented frontend→backend communication and Cloud SQL connectivity.
 **Completion Date**: Apr 2026
 
-**Root Cause 1 — BACKEND_URL baked at build time**:
-`next.config.ts` `rewrites()` is evaluated during `next build` (inside `docker build`), not at Cloud Run container startup. The old `cloudbuild-frontend.yaml` fetched the backend URL in a step *after* building the image, so `process.env.BACKEND_URL` was always unset during the build and the fallback `http://localhost:8080` was compiled into the Next.js routing table.
+**Root Cause 1 — Frontend proxying to `localhost:8080`**:
+`next.config.ts` `rewrites()` is evaluated during `next build` (inside `docker build`), not at Cloud Run container startup. This meant `process.env.BACKEND_URL` was always empty during the build and the fallback `http://localhost:8080` was permanently compiled into the routing table — setting `BACKEND_URL` as a Cloud Run env var had no effect.
+
+Note: A first attempt using `--build-arg BACKEND_URL` + `ARG`/`ENV` in the Dockerfile was tried but proved fragile. The final solution eliminated the problem entirely.
 
 **Completed Tasks**:
-- [x] **`cloudbuild-frontend.yaml`**: Reordered steps — fetch backend Cloud Run URL (step 2) before `docker build` (step 3). Build now passes `--build-arg BACKEND_URL=$$BACKEND_URL`.
-- [x] **`app/Dockerfile`**: Added `ARG BACKEND_URL=http://localhost:8080` and `ENV BACKEND_URL=$BACKEND_URL` in the `builder` stage so `next build` picks up the correct destination.
+- [x] **`app/src/app/api/[...path]/route.ts`** *(new file)*: Catch-all App Router API route that proxies all `/api/*` requests to the backend. Reads `process.env.BACKEND_URL` on every request (runtime), so the correct backend URL is always used regardless of build-time env state.
+- [x] **`app/next.config.ts`**: Removed `rewrites()` block entirely — replaced by the API route proxy above.
+- [x] **`app/Dockerfile`**: Reverted to clean state (no `ARG BACKEND_URL` / `ENV BACKEND_URL`).
+- [x] **`cloudbuild-frontend.yaml`**: Simplified back to original build order. `BACKEND_URL` is set as a Cloud Run runtime env var via `--set-env-vars` at deploy time.
 
 **Root Cause 2 — Cloud SQL Auth Proxy socket missing from Cloud Run**:
 Cloud Run requires the `run.googleapis.com/cloudsql-instances` annotation on the service template for the Cloud SQL Auth Proxy unix socket to be injected at `/cloudsql/PROJECT:REGION:INSTANCE`. The backend Cloud Run service in `terraform/app/main.tf` had no `metadata.annotations` block, so the socket was never created and `DATABASE_URL` (which uses `host=/cloudsql/...`) always failed to connect.
@@ -832,7 +836,7 @@ gcloud run services update harimau-backend --set-env-vars HUNT_ITERATIONS=5
 **Completed Tasks**:
 - [x] **Split CI/CD Configs**: Created `cloudbuild-backend.yaml` and `cloudbuild-frontend.yaml`.
 - [x] **Path Filters**: Configured triggers to watch `backend/**` and `app/**` respectively.
-- [x] **Dynamic URL Injection**: Frontend build fetches backend URL via `gcloud` and injects it.
+- [x] **Runtime URL Routing**: Frontend uses a catch-all API route proxy (`app/src/app/api/[...path]/route.ts`) that reads `BACKEND_URL` at request time from the Cloud Run env var — set by the pipeline via `--set-env-vars` at deploy.
 - [x] **Terraform Layering**: Split terraform into `infra/` (stateful) and `app/` (stateless).
 
 **Why**: Allows updating agents without rebuilding the frontend, reducing deployment time and blast radius.

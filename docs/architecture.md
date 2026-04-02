@@ -193,11 +193,13 @@ To support selective and automated deployments, the application uses **Google Cl
 
 * **Repository Structure**: Monorepo containing both frontend (`/app`) and backend (`/backend`) source code.
 * **Infrastructure as Code**: Managed via **Terraform**, separated into:
-  - `terraform/infra/`: State-ful resources (Cloud SQL, Artifact Registry).
-  - `terraform/app/`: Stateless computes (Cloud Run services).
+  - `terraform/infra/`: Stateful resources (Cloud SQL, Artifact Registry, Secret Manager).
+  - `terraform/app/`: Application services (Cloud Run). Must be applied before first CI/CD run to set the Cloud SQL annotation.
 * **Automated Triggers**:
-    - **Backend Trigger**: Listens for changes in `backend/**`. Runs `cloudbuild-backend.yaml` to build and deploy the FastAPI container.
-    - **Frontend Trigger**: Listens for changes in `app/**`. Runs `cloudbuild-frontend.yaml` to build and deploy the NextJS container (injecting `BACKEND_URL` dynamically).
+    - **Backend Trigger**: Listens for changes in `backend/**`. Runs `cloudbuild-backend.yaml` — builds the FastAPI container and deploys with `--add-cloudsql-instances` to preserve Cloud SQL Auth Proxy access.
+    - **Frontend Trigger**: Listens for changes in `app/**`. Runs `cloudbuild-frontend.yaml` — **fetches the backend Cloud Run URL first**, then builds with `--build-arg BACKEND_URL=...` so `next build` (inside Docker) bakes the correct rewrite destination into the build artifact. The env var is also set on the Cloud Run service for reference.
+
+**Why BACKEND_URL must be a build arg**: Next.js `rewrites()` in `next.config.ts` are evaluated during `next build`, not at container startup. If `BACKEND_URL` is only injected as a Cloud Run env var at deploy time, the rewrite destination defaults to `http://localhost:8080`. Passing it as a Docker build arg (`ARG BACKEND_URL`) and promoting it to `ENV` in the builder stage ensures the correct backend URL is compiled into the routing table.
 
 This ensures that updating an agent (backend) does not trigger a needless rebuild of the frontend, keeping deployments fast and isolated.
 
@@ -387,6 +389,13 @@ This ensures that updating an agent (backend) does not trigger a needless rebuil
   - `get_attribution` now includes vulnerabilities (CVEs, exploits)
 - **Target Limiting**: `max_analysis_targets = 5` (separate from `malware_iterations = 10`)
 - **Impact**: Better intelligence quality without overwhelming API/tokens
+
+### CI/CD & Cloud SQL Connectivity Fixes (Apr 2026)
+- **Problem 1 — BACKEND_URL baked with wrong value**: `next.config.ts` rewrites use `process.env.BACKEND_URL`, which is evaluated at `next build` time inside Docker. The old pipeline fetched the backend URL *after* building the image, so the fallback `http://localhost:8080` was always baked in, causing all frontend API calls to fail in production.
+  - **Fix**: Reordered `cloudbuild-frontend.yaml` — fetch backend URL first, then build with `--build-arg BACKEND_URL=...`. Updated `app/Dockerfile` to accept `ARG BACKEND_URL` and promote it to `ENV` in the builder stage.
+- **Problem 2 — Cloud SQL socket not available in Cloud Run**: The backend Cloud Run service template was missing the `run.googleapis.com/cloudsql-instances` annotation. Without it, the Cloud SQL Auth Proxy unix socket is never injected into the container, so the `host=/cloudsql/...` connection string in `DATABASE_URL` fails.
+  - **Fix**: Added the annotation to the backend service `metadata.annotations` in `terraform/app/main.tf`. Added `--add-cloudsql-instances` to `cloudbuild-backend.yaml` so every CI deploy preserves it.
+- **Deploy order**: Always run `terraform/app/` apply before the first CI/CD deployment so the Cloud SQL annotation is set.
 
 ### Cloud SQL Persistence & LangGraph Checkpointing (Mar 2026)
 - **Problem**: Cloud Run scales to zero, causing loss of all in-memory investigation results and mid-flight state.

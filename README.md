@@ -39,13 +39,15 @@ This project supports both automated CI/CD and manual deployments.
 ### Option 1: Automated CI/CD with Cloud Build (Recommended)
 Your infrastructure is managed by **Terraform**, and deployments are automated via **Google Cloud Build**.
 
-1. **Infrastructure Setup**:
-   - Persistent resources are in `terraform/infra/`. Run `terraform init` and `terraform apply` there.
-   - Application services are in `terraform/app/`. Run `terraform init` and `terraform apply` there.
+1. **Infrastructure Setup** (run in order):
+   - Persistent resources (Cloud SQL, Artifact Registry, Secret Manager): `terraform/infra/` → `terraform init && terraform apply`
+   - Application services (Cloud Run): `terraform/app/` → `terraform init && terraform apply`
+   > **Important**: Always run `terraform/app/` apply before the first CI/CD deployment. It sets the `run.googleapis.com/cloudsql-instances` annotation on the backend Cloud Run service, which is required for the Cloud SQL Auth Proxy socket to be available inside the container.
 2. **Automated Triggers**:
    - Any push to the `main` branch on GitHub will trigger the build automatically if it affects the relevant folder:
      - Changes in `backend/**` trigger `cloudbuild-backend.yaml` (Deploys Backend).
      - Changes in `app/**` trigger `cloudbuild-frontend.yaml` (Deploys Frontend).
+   > **Note**: The frontend Cloud Build pipeline fetches the backend URL **before** building the Docker image, so `BACKEND_URL` is correctly baked into the Next.js build artifact.
 
 ---
 
@@ -86,7 +88,7 @@ You can still use the legacy `deploy.sh` script for manual deployments if needed
 -   **Phase 3 (Interface + Hybrid Triage + Token Optimization)**: ✅ Complete
 -   **Phase 4 (Specialist Agents)**: ✅ Complete
 -   **Phase 5 (Iterative Investigation Workflow)**: ✅ Complete
--   **Phase 6 (Core Infrastructure & A2A Integration)**: 🚧 In Progress (6.1 Cloud SQL Persistence ✅, 6.2 Shodan MCP ✅)
+-   **Phase 6 (Core Infrastructure & A2A Integration)**: 🚧 In Progress (6.1 Cloud SQL Persistence ✅, 6.2 Shodan MCP ✅, 6.1.1 CI/CD + Cloud SQL connectivity fixes ✅)
 
 ### 🛠️ Code Quality Overhaul
 -   **Robustness**: Consolidated state, deep-merge cache deduplication, and specific exception handling.

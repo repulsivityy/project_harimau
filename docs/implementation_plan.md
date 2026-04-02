@@ -416,6 +416,28 @@ Infra --> LeadReview
 
 ---
 
+### Phase 6.1.1: CI/CD & Cloud SQL Connectivity Fixes [COMPLETED]
+**Goal**: Fix two production bugs introduced during the CI/CD + Next.js frontend refactor that prevented frontend→backend communication and Cloud SQL connectivity.
+**Completion Date**: Apr 2026
+
+**Root Cause 1 — BACKEND_URL baked at build time**:
+`next.config.ts` `rewrites()` is evaluated during `next build` (inside `docker build`), not at Cloud Run container startup. The old `cloudbuild-frontend.yaml` fetched the backend URL in a step *after* building the image, so `process.env.BACKEND_URL` was always unset during the build and the fallback `http://localhost:8080` was compiled into the Next.js routing table.
+
+**Completed Tasks**:
+- [x] **`cloudbuild-frontend.yaml`**: Reordered steps — fetch backend Cloud Run URL (step 2) before `docker build` (step 3). Build now passes `--build-arg BACKEND_URL=$$BACKEND_URL`.
+- [x] **`app/Dockerfile`**: Added `ARG BACKEND_URL=http://localhost:8080` and `ENV BACKEND_URL=$BACKEND_URL` in the `builder` stage so `next build` picks up the correct destination.
+
+**Root Cause 2 — Cloud SQL Auth Proxy socket missing from Cloud Run**:
+Cloud Run requires the `run.googleapis.com/cloudsql-instances` annotation on the service template for the Cloud SQL Auth Proxy unix socket to be injected at `/cloudsql/PROJECT:REGION:INSTANCE`. The backend Cloud Run service in `terraform/app/main.tf` had no `metadata.annotations` block, so the socket was never created and `DATABASE_URL` (which uses `host=/cloudsql/...`) always failed to connect.
+
+**Completed Tasks**:
+- [x] **`terraform/app/main.tf`**: Added `metadata { annotations { "run.googleapis.com/cloudsql-instances" = "${var.project_id}:${var.region}:harimau-db" } }` to the backend Cloud Run service template.
+- [x] **`cloudbuild-backend.yaml`**: Added `--add-cloudsql-instances $PROJECT_ID:asia-southeast1:harimau-db` to `gcloud run deploy` so every CI deployment preserves the annotation even if Terraform is not re-applied.
+
+**Deploy order**: `terraform/app/` must be applied before the first CI/CD deployment to establish the Cloud SQL annotation.
+
+---
+
 ### Phase 6.1: Cloud SQL + LangGraph Checkpointing [COMPLETED]
 **Goal**: Replace the ephemeral in-memory `JOBS` dict with Cloud SQL (PostgreSQL) and wire LangGraph `AsyncPostgresSaver` so investigations persist across Cloud Run restarts.
 **Completion Date**: Mar 2026

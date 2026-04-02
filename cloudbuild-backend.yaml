@@ -24,6 +24,8 @@ steps:
       - 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/harimau/backend:latest'
       - '--region'
       - 'asia-southeast1'
+      - '--add-cloudsql-instances'
+      - '$PROJECT_ID:asia-southeast1:harimau-db'
       - '--quiet'
 
 images:

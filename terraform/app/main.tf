@@ -28,6 +28,12 @@ resource "google_cloud_run_service" "backend" {
   location = var.region
 
   template {
+    metadata {
+      annotations = {
+        "run.googleapis.com/cloudsql-instances" = "${var.project_id}:${var.region}:harimau-db"
+      }
+    }
+
     spec {
       containers {
         image = "${var.region}-docker.pkg.dev/${var.project_id}/harimau/backend:latest"

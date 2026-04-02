@@ -9,11 +9,7 @@ steps:
         python -m compileall -q .
         echo "✅ Syntax check passed!"
 
-  # 2. Build Frontend Image
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/harimau/frontend:latest', '-f', 'app/Dockerfile', '.']
-
-  # 3. Fetch Backend URL for Frontend
+  # 2. Fetch Backend URL before building (rewrites() is evaluated at next build time)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:
@@ -22,6 +18,19 @@ steps:
         BACKEND_URL=$$(gcloud run services describe harimau-backend --region asia-southeast1 --format 'value(status.url)' --quiet)
         echo "$$BACKEND_URL" > /workspace/backend_url.txt
         echo "Fetched Backend URL: $$BACKEND_URL"
+
+  # 3. Build Frontend Image with BACKEND_URL baked in at build time
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        BACKEND_URL=$$(cat /workspace/backend_url.txt)
+        docker build \
+          --build-arg BACKEND_URL=$$BACKEND_URL \
+          -t asia-southeast1-docker.pkg.dev/$PROJECT_ID/harimau/frontend:latest \
+          -f app/Dockerfile \
+          .
 
   # 4. Deploy Frontend to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'

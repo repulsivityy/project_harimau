@@ -16,9 +16,6 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY app/ ./
 # Next.js collects completely anonymous telemetry data about general usage.
 ENV NEXT_TELEMETRY_DISABLED 1
-# Accept backend URL at build time so rewrites() picks it up during next build
-ARG BACKEND_URL=http://localhost:8080
-ENV BACKEND_URL=$BACKEND_URL
 RUN npm run build
 
 # Production image, copy all the files and run next

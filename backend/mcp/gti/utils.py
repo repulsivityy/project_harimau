@@ -90,6 +90,7 @@ async def fetch_object_relationships(
     resource_id: str,
     relationships: typing.List[str],
     params: dict[str, typing.Any] | None = None,
+    descriptors_only: bool = False,
     limit: int = 10):
   """Fetches full relationship objects (not descriptors) from the given object."""
   rel_futures = {}

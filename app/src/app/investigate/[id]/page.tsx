@@ -5,7 +5,6 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState, ChangeEvent } from "react";
 import { Background, Controls, MiniMap, ReactFlow } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import ReactMarkdown from "react-markdown";
 
 // Define TypeScript interfaces for the API response
 interface BackendNode {
@@ -502,11 +501,9 @@ export default function InvestigatePage() {
                         <h3 className="text-xl font-headline font-black text-pink-500 uppercase mb-2">
                           Triage Summary
                         </h3>
-                        <div className="prose prose-invert prose-sm max-w-none text-[#adaaad] [&_h1]:text-pink-500 [&_h2]:text-pink-400 [&_h3]:text-cyan-400 [&_strong]:text-[#fffbfe] [&_a]:text-cyan-400 [&_code]:bg-[#0e0e10] [&_code]:px-1 [&_ul]:list-disc [&_ul]:pl-4">
-                          <ReactMarkdown>
-                            {job?.rich_intel?.triage_summary || "No summary available."}
-                          </ReactMarkdown>
-                        </div>
+                        <p className="text-sm text-[#adaaad] font-body whitespace-pre-wrap">
+                          {job?.rich_intel?.triage_summary || "No summary available."}
+                        </p>
                       </section>
                       <section>
                         <h3 className="text-xl font-headline font-black text-pink-500 uppercase mb-2">
@@ -559,11 +556,9 @@ export default function InvestigatePage() {
                                   {result.verdict || "N/A"}
                                 </span>
                               </div>
-                              <div className="prose prose-invert prose-xs max-w-none text-[#adaaad] [&_h1]:text-pink-500 [&_h2]:text-pink-400 [&_h3]:text-cyan-400 [&_strong]:text-[#fffbfe] [&_a]:text-cyan-400 [&_code]:bg-[#0e0e10] [&_code]:px-1 [&_ul]:list-disc [&_ul]:pl-4 bg-[#0e0e10] p-4 border border-cyan-400/20">
-                                <ReactMarkdown>
-                                  {result.markdown_report || "No report content."}
-                                </ReactMarkdown>
-                              </div>
+                              <pre className="whitespace-pre-wrap text-[11px] leading-relaxed text-[#adaaad] font-mono bg-[#0e0e10] p-4 border border-cyan-400/20">
+                                {result.markdown_report || "No report content."}
+                              </pre>
                             </div>
                           ),
                         )
@@ -580,11 +575,9 @@ export default function InvestigatePage() {
                         Final Intelligence Report
                       </h3>
                       <div className="bg-[#19191c] p-6 border-l-2 border-cyan-400">
-                        <div className="prose prose-invert prose-sm max-w-none text-[#adaaad] [&_h1]:text-pink-500 [&_h2]:text-pink-400 [&_h3]:text-cyan-400 [&_strong]:text-[#fffbfe] [&_a]:text-cyan-400 [&_code]:bg-[#0e0e10] [&_code]:px-1 [&_ul]:list-disc [&_ul]:pl-4 bg-[#0e0e10] p-4 border border-cyan-400/20">
-                          <ReactMarkdown>
-                            {job?.final_report || "No report available."}
-                          </ReactMarkdown>
-                        </div>
+                        <pre className="whitespace-pre-wrap text-xs leading-relaxed text-[#adaaad] font-mono bg-[#0e0e10] p-4 border border-cyan-400/20">
+                          {job?.final_report || "No report available."}
+                        </pre>
                       </div>
                     </div>
                   )}

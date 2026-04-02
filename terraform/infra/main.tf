@@ -6,6 +6,13 @@
 #
 ################################################################################
 
+terraform {
+  backend "gcs" {
+    bucket = "dom-terraform-state-backup"
+    prefix = "terraform/state/infra"
+  }
+}
+
 provider "google" {
   project = var.project_id
   region  = var.region

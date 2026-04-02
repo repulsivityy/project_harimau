@@ -5,7 +5,12 @@
 # This configuration deploys the Harimau backend and frontend to Google Cloud Run
 #
 ################################################################################
-
+terraform {
+  backend "gcs" {
+    bucket = "dom-terraform-state-backup"
+    prefix = "terraform/state/app"
+  }
+}
 provider "google" {
   project = var.project_id
   region  = var.region
@@ -161,3 +166,4 @@ resource "google_cloud_run_service_iam_policy" "noauth_frontend" {
   service  = google_cloud_run_service.frontend.name
   policy_data = data.google_iam_policy.noauth.policy_data
 }
+

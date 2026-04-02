@@ -339,8 +339,10 @@ fi
 # 6. Deploy Logic
 if [[ "$TARGET" == "backend" || "$TARGET" == "all" ]]; then
     echo "🚀 Deploying Backend..."
+    gcloud builds submit --tag asia-southeast1-docker.pkg.dev/${PROJECT_ID}/harimau/backend:latest backend
+    
     gcloud run deploy $BACKEND_SERVICE \
-        --source . \
+        --image asia-southeast1-docker.pkg.dev/${PROJECT_ID}/harimau/backend:latest \
         --region $REGION \
         --clear-base-image \
         --allow-unauthenticated \
@@ -363,15 +365,15 @@ fi
 
 if [[ "$TARGET" == "frontend" || "$TARGET" == "all" ]]; then
     echo "🚀 Deploying Frontend..."
-    gcloud builds submit --config deploy/cloudbuild_frontend.yaml . --quiet
+    gcloud builds submit --config cloudbuild-frontend.yaml . --quiet
     
-    gcloud run deploy $FRONTEND_SERVICE \
-        --image gcr.io/$PROJECT_ID/$FRONTEND_SERVICE \
-        --region $REGION \
-        --allow-unauthenticated \
-        --set-env-vars BACKEND_URL=$BACKEND_URL \
-        --port 8501 \
-        --quiet
+    # gcloud run deploy $FRONTEND_SERVICE \
+    #     --image gcr.io/$PROJECT_ID/$FRONTEND_SERVICE \
+    #     --region $REGION \
+    #     --allow-unauthenticated \
+    #     --set-env-vars BACKEND_URL=$BACKEND_URL \
+    #     --port 8501 \
+    #     --quiet
     
     FRONTEND_URL=$(gcloud run services describe $FRONTEND_SERVICE --region $REGION --format 'value(status.url)')
     echo "➡️  Frontend: $FRONTEND_URL"

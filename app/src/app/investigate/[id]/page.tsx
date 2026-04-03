@@ -84,8 +84,9 @@ export default function InvestigatePage() {
                 return {
                   ...n,
                   id: n.id,
-                  x: pos ? pos.x : 0,
-                  y: pos ? pos.y : 0,
+                  // If it's a new node, give it a random starting position so it doesn't clump at exactly 0,0
+                  x: pos ? pos.x : Math.random() * 200 - 100,
+                  y: pos ? pos.y : Math.random() * 200 - 100,
                   fx: pos ? pos.x : undefined,
                   fy: pos ? pos.y : undefined,
                   radius: n.size * 2
@@ -100,7 +101,8 @@ export default function InvestigatePage() {
               const simulation = forceSimulation(simNodes as any)
                 .force("link", forceLink(simEdges).id((d: any) => d.id).distance(150))
                 .force("charge", forceManyBody().strength(-400))
-                .force("collide", forceCollide().radius((d: any) => d.radius + 10))
+                .force("collide", forceCollide().radius((d: any) => d.radius + 20))
+                .force("center", forceCenter(0, 0)) // Keep graph centered
                 .stop();
                 
               for (let i = 0; i < 300; ++i) simulation.tick();

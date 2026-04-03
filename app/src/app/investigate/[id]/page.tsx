@@ -3,7 +3,8 @@
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState, ChangeEvent } from "react";
-import { Background, Controls, MiniMap, ReactFlow } from "@xyflow/react";
+import { Background, Controls, MiniMap, ReactFlow, useNodesState, useEdgesState } from "@xyflow/react";
+import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide } from "d3-force";
 import "@xyflow/react/dist/style.css";
 
 // Define TypeScript interfaces for the API response
@@ -32,8 +33,8 @@ export default function InvestigatePage() {
   const router = useRouter();
 
   const [expandedTile, setExpandedTile] = useState<number | null>(null);
-  const [nodes, setNodes] = useState<any[]>([]);
-  const [edges, setEdges] = useState<any[]>([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<any[]>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [job, setJob] = useState<any>(null);
   // SSE / polling state
@@ -75,47 +76,71 @@ export default function InvestigatePage() {
         if (graphRes.ok) {
           const graphData: GraphData = await graphRes.json();
           if (graphData.nodes?.length > 0) {
-            const calculatedNodes = graphData.nodes.map((node, index) => {
-              if (node.id === "root" || index === 0) {
+            setNodes((nds) => {
+              const existingPositions = new Map(nds.map((n) => [n.id, n.position]));
+              
+              const simNodes = graphData.nodes.map((n) => {
+                const pos = existingPositions.get(n.id);
                 return {
-                  id: node.id,
-                  position: { x: 0, y: 0 },
-                  data: { label: node.label },
-                  style: {
-                    background: node.color,
-                    color: "#fff",
-                    border: "2px solid #fff",
-                    borderRadius: "50%",
-                    width: node.size * 2,
-                    height: node.size * 2,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: "12px",
-                    fontWeight: "bold",
-                  },
+                  ...n,
+                  id: n.id,
+                  x: pos ? pos.x : 0,
+                  y: pos ? pos.y : 0,
+                  fx: pos ? pos.x : undefined,
+                  fy: pos ? pos.y : undefined,
+                  radius: n.size * 2
                 };
-              }
-              const radius = 250;
-              const angle = (index / (graphData.nodes.length - 1)) * 2 * Math.PI;
-              return {
-                id: node.id,
-                position: { x: radius * Math.cos(angle), y: radius * Math.sin(angle) },
-                data: { label: node.label },
-                style: {
-                  background: node.color,
+              });
+              
+              const simEdges = graphData.edges.map((e) => ({
+                source: e.source,
+                target: e.target
+              }));
+              
+              const simulation = forceSimulation(simNodes as any)
+                .force("link", forceLink(simEdges).id((d: any) => d.id).distance(150))
+                .force("charge", forceManyBody().strength(-400))
+                .force("collide", forceCollide().radius((d: any) => d.radius + 10))
+                .stop();
+                
+              for (let i = 0; i < 300; ++i) simulation.tick();
+              
+              return simNodes.map((simNode: any) => {
+                const existingNode = nds.find((n) => n.id === simNode.id);
+                const isRoot = simNode.id === "root";
+                
+                const style = {
+                  background: simNode.color,
                   color: "#fff",
-                  border: "1px solid rgba(255,255,255,0.2)",
+                  border: isRoot ? "2px solid #fff" : "1px solid rgba(255,255,255,0.2)",
                   borderRadius: "50%",
-                  width: node.size * 2,
-                  height: node.size * 2,
+                  width: simNode.size * 2,
+                  height: simNode.size * 2,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  fontSize: "10px",
-                },
-              };
+                  fontSize: isRoot ? "12px" : "10px",
+                  fontWeight: isRoot ? "bold" as const : "normal" as const,
+                };
+                
+                if (existingNode) {
+                  return {
+                    ...existingNode,
+                    position: { x: simNode.x, y: simNode.y },
+                    data: { label: simNode.label },
+                    style: { ...existingNode.style, ...style }
+                  };
+                }
+                
+                return {
+                  id: simNode.id,
+                  position: { x: simNode.x, y: simNode.y },
+                  data: { label: simNode.label },
+                  style
+                };
+              });
             });
+
             const calculatedEdges = graphData.edges.map((edge, index) => ({
               id: `e-${index}`,
               source: edge.source,
@@ -125,7 +150,6 @@ export default function InvestigatePage() {
               labelStyle: { fill: "#adaaad", fontSize: "10px" },
               labelBgStyle: { fill: "#19191c", fillOpacity: 0.8 },
             }));
-            setNodes(calculatedNodes);
             setEdges(calculatedEdges);
           }
         }
@@ -238,7 +262,7 @@ export default function InvestigatePage() {
     },
     {
       id: 2,
-      title: "Network Graph",
+      title: "Graph",
       icon: "hub",
       size: "col-span-12 lg:col-span-7 row-span-2",
       content: "Interactive visualization using React Flow.",
@@ -438,7 +462,12 @@ export default function InvestigatePage() {
                         LOADING_GRAPH_DATA...
                       </div>
                     ) : (
-                      <ReactFlow edges={edges} nodes={nodes}>
+                      <ReactFlow
+                        edges={edges}
+                        nodes={nodes}
+                        onEdgesChange={onEdgesChange}
+                        onNodesChange={onNodesChange}
+                      >
                         <Background color="#00fbfb" gap={16} size={1} />
                         <Controls />
                         <MiniMap
@@ -485,7 +514,12 @@ export default function InvestigatePage() {
               {/* If expanding graph, show it larger */}
               {tiles.find((t) => t.id === expandedTile)?.isGraph ? (
                 <div className="w-full h-[70vh] bg-[#0e0e10]/50 border border-cyan-400/20">
-                  <ReactFlow edges={edges} nodes={nodes}>
+                  <ReactFlow
+                    edges={edges}
+                    nodes={nodes}
+                    onEdgesChange={onEdgesChange}
+                    onNodesChange={onNodesChange}
+                  >
                     <Background color="#00fbfb" gap={16} size={1} />
                     <Controls />
                     <MiniMap

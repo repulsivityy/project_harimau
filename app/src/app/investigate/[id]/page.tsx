@@ -33,8 +33,8 @@ export default function InvestigatePage() {
   const router = useRouter();
 
   const [expandedTile, setExpandedTile] = useState<number | null>(null);
-  const [nodes, setNodes, onNodesChange] = useNodesState<any[]>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<any[]>([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<any>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<any>([]);
   const [loading, setLoading] = useState(true);
   const [job, setJob] = useState<any>(null);
   // SSE / polling state

@@ -2,9 +2,9 @@
 
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState, ChangeEvent } from "react";
+import { useEffect, useState, useRef, ChangeEvent } from "react";
 import { Background, Controls, MiniMap, ReactFlow, useNodesState, useEdgesState } from "@xyflow/react";
-import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide } from "d3-force";
+import { forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY } from "d3-force";
 import "@xyflow/react/dist/style.css";
 
 // Define TypeScript interfaces for the API response
@@ -44,6 +44,8 @@ export default function InvestigatePage() {
   const [activityLog, setActivityLog] = useState<string[]>([]);
   // Jobs history dropdown
   const [recentJobs, setRecentJobs] = useState<any[]>([]);
+  // Physics simulation ref — persists across renders, cleaned up on unmount
+  const simulationRef = useRef<any>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -76,69 +78,77 @@ export default function InvestigatePage() {
         if (graphRes.ok) {
           const graphData: GraphData = await graphRes.json();
           if (graphData.nodes?.length > 0) {
-            setNodes((nds) => {
-              const existingPositions = new Map(nds.map((n) => [n.id, n.position]));
-              
-              const simNodes = graphData.nodes.map((n) => {
+            // Stop any previous simulation before starting a new one
+            if (simulationRef.current) {
+              simulationRef.current.stop();
+              simulationRef.current = null;
+            }
+
+            setNodes((currentNodes) => {
+              const existingPositions = new Map(currentNodes.map((n) => [n.id, n.position]));
+
+              // Build d3 sim nodes — no fx/fy so every node floats freely
+              const simNodes: any[] = graphData.nodes.map((n) => {
                 const pos = existingPositions.get(n.id);
                 return {
-                  ...n,
                   id: n.id,
-                  // If it's a new node, give it a random starting position so it doesn't clump at exactly 0,0
-                  x: pos ? pos.x : Math.random() * 200 - 100,
-                  y: pos ? pos.y : Math.random() * 200 - 100,
-                  fx: pos ? pos.x : undefined,
-                  fy: pos ? pos.y : undefined,
-                  radius: n.size * 2
+                  // Existing nodes keep their position; new ones scatter from center
+                  x: pos?.x ?? (Math.random() - 0.5) * 500,
+                  y: pos?.y ?? (Math.random() - 0.5) * 500,
+                  radius: n.size,
                 };
               });
-              
-              const simEdges = graphData.edges.map((e) => ({
-                source: e.source,
-                target: e.target
-              }));
-              
-              const simulation = forceSimulation(simNodes as any)
-                .force("link", forceLink(simEdges).id((d: any) => d.id).distance(150))
-                .force("charge", forceManyBody().strength(-400))
-                .force("collide", forceCollide().radius((d: any) => d.radius + 20))
-                .force("center", forceCenter(0, 0)) // Keep graph centered
-                .stop();
-                
-              for (let i = 0; i < 300; ++i) simulation.tick();
-              
-              return simNodes.map((simNode: any) => {
-                const existingNode = nds.find((n) => n.id === simNode.id);
-                const isRoot = simNode.id === "root";
-                
-                const style = {
-                  background: simNode.color,
-                  color: "#fff",
-                  border: isRoot ? "2px solid #fff" : "1px solid rgba(255,255,255,0.2)",
-                  borderRadius: "50%",
-                  width: simNode.size * 2,
-                  height: simNode.size * 2,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: isRoot ? "12px" : "10px",
-                  fontWeight: isRoot ? "bold" as const : "normal" as const,
-                };
-                
-                if (existingNode) {
-                  return {
-                    ...existingNode,
-                    position: { x: simNode.x, y: simNode.y },
-                    data: { label: simNode.label },
-                    style: { ...existingNode.style, ...style }
-                  };
-                }
-                
+
+              const simEdges = graphData.edges.map((e) => ({ source: e.source, target: e.target }));
+              // O(1) lookup per tick instead of O(n) find
+              const simNodeMap = new Map<string, any>(simNodes.map((n) => [n.id, n]));
+
+              const simulation = forceSimulation(simNodes)
+                .force("link", forceLink(simEdges).id((d: any) => d.id).distance(150).strength(0.4))
+                .force("charge", forceManyBody().strength(-600).distanceMax(500))
+                .force("collide", forceCollide().radius((d: any) => d.radius + 15).strength(0.9))
+                // Weak centering gravity — keeps graph from drifting without fighting spread
+                .force("x", forceX(0).strength(0.04))
+                .force("y", forceY(0).strength(0.04))
+                // Slow alpha decay → longer, more organic settling animation
+                .alphaDecay(0.015)
+                // Moderate friction — damped but not sluggish
+                .velocityDecay(0.3);
+
+              // On each tick, push updated positions into ReactFlow state
+              simulation.on("tick", () => {
+                setNodes((nds) =>
+                  nds.map((node) => {
+                    const sim = simNodeMap.get(node.id);
+                    if (!sim) return node;
+                    return { ...node, position: { x: sim.x ?? 0, y: sim.y ?? 0 } };
+                  })
+                );
+              });
+
+              simulationRef.current = simulation;
+
+              // Return initial node layout with style baked in
+              return graphData.nodes.map((n) => {
+                const sim = simNodeMap.get(n.id)!;
+                const isRoot = n.id === "root";
                 return {
-                  id: simNode.id,
-                  position: { x: simNode.x, y: simNode.y },
-                  data: { label: simNode.label },
-                  style
+                  id: n.id,
+                  position: { x: sim.x, y: sim.y },
+                  data: { label: n.label },
+                  style: {
+                    background: n.color,
+                    color: "#fff",
+                    border: isRoot ? "2px solid #fff" : "1px solid rgba(255,255,255,0.2)",
+                    borderRadius: "50%",
+                    width: n.size * 2,
+                    height: n.size * 2,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: isRoot ? "12px" : "10px",
+                    fontWeight: isRoot ? ("bold" as const) : ("normal" as const),
+                  },
                 };
               });
             });
@@ -249,6 +259,7 @@ export default function InvestigatePage() {
     return () => {
       eventSource?.close();
       if (pollInterval) clearInterval(pollInterval);
+      simulationRef.current?.stop();
     };
   }, [id]);
 
@@ -466,6 +477,7 @@ export default function InvestigatePage() {
                     ) : (
                       <ReactFlow
                         edges={edges}
+                        fitView
                         nodes={nodes}
                         onEdgesChange={onEdgesChange}
                         onNodesChange={onNodesChange}

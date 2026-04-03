@@ -87,15 +87,18 @@ export default function InvestigatePage() {
             setNodes((currentNodes) => {
               const existingPositions = new Map(currentNodes.map((n) => [n.id, n.position]));
 
-              // Build d3 sim nodes — no fx/fy so every node floats freely
+              // Build d3 sim nodes — pin only the root node at center so the graph has a stable anchor
               const simNodes: any[] = graphData.nodes.map((n) => {
                 const pos = existingPositions.get(n.id);
+                const isRoot = n.id === "root";
                 return {
                   id: n.id,
-                  // Existing nodes keep their position; new ones scatter from center
                   x: pos?.x ?? (Math.random() - 0.5) * 500,
                   y: pos?.y ?? (Math.random() - 0.5) * 500,
                   radius: n.size,
+                  // Root is fixed at origin — mirrors old Streamlit behaviour
+                  fx: isRoot ? 0 : undefined,
+                  fy: isRoot ? 0 : undefined,
                 };
               });
 
@@ -104,18 +107,22 @@ export default function InvestigatePage() {
               const simNodeMap = new Map<string, any>(simNodes.map((n) => [n.id, n]));
 
               const simulation = forceSimulation(simNodes)
-                .force("link", forceLink(simEdges).id((d: any) => d.id).distance(150).strength(0.4))
+                // Weak spring (0.08) matches old ForceAtlas2 springConstant — keeps edges loose and organic
+                .force("link", forceLink(simEdges).id((d: any) => d.id).distance(200).strength(0.08))
                 .force("charge", forceManyBody().strength(-600).distanceMax(500))
                 .force("collide", forceCollide().radius((d: any) => d.radius + 15).strength(0.9))
-                // Weak centering gravity — keeps graph from drifting without fighting spread
+                // Weak centering gravity — keeps non-root nodes from drifting too far
                 .force("x", forceX(0).strength(0.04))
                 .force("y", forceY(0).strength(0.04))
-                // Slow alpha decay → longer, more organic settling animation
                 .alphaDecay(0.015)
-                // Moderate friction — damped but not sluggish
-                .velocityDecay(0.3);
+                .velocityDecay(0.4); // matches old damping: 0.4
 
-              // On each tick, push updated positions into ReactFlow state
+              // Pre-stabilise 100 ticks silently so nodes don't appear in chaotic scatter
+              simulation.stop();
+              for (let i = 0; i < 100; i++) simulation.tick();
+
+              // Resume live animation from the pre-stabilised positions
+              simulation.restart();
               simulation.on("tick", () => {
                 setNodes((nds) =>
                   nds.map((node) => {
@@ -128,7 +135,7 @@ export default function InvestigatePage() {
 
               simulationRef.current = simulation;
 
-              // Return initial node layout with style baked in
+              // Return pre-stabilised initial positions
               return graphData.nodes.map((n) => {
                 const sim = simNodeMap.get(n.id)!;
                 const isRoot = n.id === "root";
@@ -158,6 +165,7 @@ export default function InvestigatePage() {
               source: edge.source,
               target: edge.target,
               label: edge.label,
+              type: "straight",
               style: { stroke: "#00fbfb", strokeWidth: 1 },
               labelStyle: { fill: "#adaaad", fontSize: "10px" },
               labelBgStyle: { fill: "#19191c", fillOpacity: 0.8 },
@@ -470,6 +478,8 @@ export default function InvestigatePage() {
                 {/* Render Graph if it is the graph tile */}
                 {tile.isGraph ? (
                   <div className="flex-grow w-full h-full min-h-[400px] mt-4 relative bg-[#0e0e10]/50 border border-cyan-400/20">
+                    {/* Hide ReactFlow connection handles — we don't want visible anchor dots */}
+                    <style>{`.react-flow__handle { opacity: 0 !important; pointer-events: none !important; }`}</style>
                     {loading ? (
                       <div className="absolute inset-0 flex items-center justify-center text-cyan-400 font-label text-xs">
                         LOADING_GRAPH_DATA...
@@ -479,6 +489,7 @@ export default function InvestigatePage() {
                         edges={edges}
                         fitView
                         nodes={nodes}
+                        nodesConnectable={false}
                         onEdgesChange={onEdgesChange}
                         onNodesChange={onNodesChange}
                       >
@@ -530,7 +541,9 @@ export default function InvestigatePage() {
                 <div className="w-full h-[70vh] bg-[#0e0e10]/50 border border-cyan-400/20">
                   <ReactFlow
                     edges={edges}
+                    fitView
                     nodes={nodes}
+                    nodesConnectable={false}
                     onEdgesChange={onEdgesChange}
                     onNodesChange={onNodesChange}
                   >

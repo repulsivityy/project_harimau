@@ -3,9 +3,51 @@
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState, useRef, ChangeEvent } from "react";
-import { Background, Controls, MiniMap, ReactFlow, useNodesState, useEdgesState, Handle, Position } from "@xyflow/react";
+import { Background, Controls, MiniMap, ReactFlow, useNodesState, useEdgesState, useInternalNode, getStraightPath, BaseEdge, type EdgeProps } from "@xyflow/react";
 import { forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY } from "d3-force";
 import "@xyflow/react/dist/style.css";
+
+// Floating edge — draws a straight line from the border of source to the border of target,
+// calculated via center-to-center geometry. No handles involved.
+const FloatingEdge = ({ id, source, target, style, label, labelStyle, labelBgStyle }: EdgeProps) => {
+  const sourceNode = useInternalNode(source);
+  const targetNode = useInternalNode(target);
+  if (!sourceNode || !targetNode) return null;
+
+  const sx = sourceNode.internals.positionAbsolute.x + (sourceNode.measured?.width  ?? 0) / 2;
+  const sy = sourceNode.internals.positionAbsolute.y + (sourceNode.measured?.height ?? 0) / 2;
+  const tx = targetNode.internals.positionAbsolute.x + (targetNode.measured?.width  ?? 0) / 2;
+  const ty = targetNode.internals.positionAbsolute.y + (targetNode.measured?.height ?? 0) / 2;
+
+  const dx = tx - sx;
+  const dy = ty - sy;
+  const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+
+  // Clip start/end to each node's circular border
+  const sr = (sourceNode.measured?.width ?? 0) / 2;
+  const tr = (targetNode.measured?.width ?? 0) / 2;
+  const x1 = sx + (dx / dist) * sr;
+  const y1 = sy + (dy / dist) * sr;
+  const x2 = tx - (dx / dist) * tr;
+  const y2 = ty - (dy / dist) * tr;
+
+  const [path] = getStraightPath({ sourceX: x1, sourceY: y1, targetX: x2, targetY: y2 });
+  const lx = (x1 + x2) / 2;
+  const ly = (y1 + y2) / 2;
+
+  return (
+    <BaseEdge
+      id={id}
+      path={path}
+      style={style}
+      label={label}
+      labelX={lx}
+      labelY={ly}
+      labelStyle={labelStyle}
+      labelBgStyle={labelBgStyle}
+    />
+  );
+};
 
 // Custom Node Component
 const CustomNode = ({ data, style }: any) => {
@@ -34,20 +76,11 @@ const CustomNode = ({ data, style }: any) => {
     icon = "radar";
   }
 
-  // Invisible handle style — present for edge routing, not visible
-  const handleCls = "!opacity-0 !w-1 !h-1 !min-w-0 !min-h-0 !border-0 !bg-transparent";
-
   return (
     <div
       className="relative group flex items-center justify-center rounded-full"
       style={{ ...style, transition: "all 0.2s ease" }}
     >
-      {/* Handles at all 4 sides so straight edges route to the closest border point */}
-      <Handle type="target" position={Position.Top}    className={handleCls} />
-      <Handle type="target" position={Position.Bottom} className={handleCls} />
-      <Handle type="target" position={Position.Left}   className={handleCls} />
-      <Handle type="target" position={Position.Right}  className={handleCls} />
-
       <div className="flex flex-col items-center justify-center">
         <span className="material-symbols-outlined" style={{ fontSize: "1.2em" }}>
           {icon}
@@ -68,18 +101,12 @@ const CustomNode = ({ data, style }: any) => {
           {title || "No metadata available"}
         </pre>
       </div>
-
-      <Handle type="source" position={Position.Top}    className={handleCls} />
-      <Handle type="source" position={Position.Bottom} className={handleCls} />
-      <Handle type="source" position={Position.Left}   className={handleCls} />
-      <Handle type="source" position={Position.Right}  className={handleCls} />
     </div>
   );
 };
 
-const nodeTypes = {
-  custom: CustomNode,
-};
+const nodeTypes = { custom: CustomNode };
+const edgeTypes = { floating: FloatingEdge };
 
 // Define TypeScript interfaces for the API response
 interface BackendNode {
@@ -235,7 +262,7 @@ export default function InvestigatePage() {
               source: edge.source,
               target: edge.target,
               label: edge.label,
-              type: "straight",
+              type: "floating",
               style: { stroke: "#00fbfb", strokeWidth: 1 },
               labelStyle: { fill: "#adaaad", fontSize: "10px" },
               labelBgStyle: { fill: "#19191c", fillOpacity: 0.8 },
@@ -548,8 +575,6 @@ export default function InvestigatePage() {
                 {/* Render Graph if it is the graph tile */}
                 {tile.isGraph ? (
                   <div className="flex-grow w-full h-full min-h-[400px] mt-4 relative bg-[#0e0e10]/50 border border-cyan-400/20">
-                    {/* Hide ReactFlow connection handles — we don't want visible anchor dots */}
-                    <style>{`.react-flow__handle { opacity: 0 !important; pointer-events: none !important; }`}</style>
                     {loading ? (
                       <div className="absolute inset-0 flex items-center justify-center text-cyan-400 font-label text-xs">
                         LOADING_GRAPH_DATA...
@@ -557,6 +582,7 @@ export default function InvestigatePage() {
                     ) : (
                       <ReactFlow
                         edges={edges}
+                        edgeTypes={edgeTypes}
                         fitView
                         nodes={nodes}
                         nodesConnectable={false}
@@ -612,9 +638,11 @@ export default function InvestigatePage() {
                 <div className="w-full h-[70vh] bg-[#0e0e10]/50 border border-cyan-400/20">
                   <ReactFlow
                     edges={edges}
+                    edgeTypes={edgeTypes}
                     fitView
                     nodes={nodes}
                     nodesConnectable={false}
+                    nodeTypes={nodeTypes}
                     onEdgesChange={onEdgesChange}
                     onNodesChange={onNodesChange}
                   >

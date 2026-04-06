@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState, useRef, ChangeEvent } from "react";
-import { Background, Controls, MiniMap, ReactFlow, useNodesState, useEdgesState, useInternalNode, getStraightPath, BaseEdge, type EdgeProps } from "@xyflow/react";
+import { Background, Controls, MiniMap, ReactFlow, useNodesState, useEdgesState, useInternalNode, getStraightPath, BaseEdge, type EdgeProps, Handle, Position } from "@xyflow/react";
 import { forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY } from "d3-force";
 import "@xyflow/react/dist/style.css";
 

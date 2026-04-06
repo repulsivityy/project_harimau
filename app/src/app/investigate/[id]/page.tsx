@@ -3,51 +3,9 @@
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState, useRef, ChangeEvent } from "react";
-import { Background, Controls, MiniMap, ReactFlow, useNodesState, useEdgesState, useInternalNode, getStraightPath, BaseEdge, type EdgeProps, Handle, Position } from "@xyflow/react";
+import { Background, Controls, MiniMap, ReactFlow, useNodesState, useEdgesState, Handle, Position } from "@xyflow/react";
 import { forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY } from "d3-force";
 import "@xyflow/react/dist/style.css";
-
-// Floating edge — draws a straight line from the border of source to the border of target,
-// calculated via center-to-center geometry. No handles involved.
-const FloatingEdge = ({ id, source, target, style, label, labelStyle, labelBgStyle }: EdgeProps) => {
-  const sourceNode = useInternalNode(source);
-  const targetNode = useInternalNode(target);
-  if (!sourceNode || !targetNode) return null;
-
-  const sx = sourceNode.internals.positionAbsolute.x + (sourceNode.measured?.width  ?? 0) / 2;
-  const sy = sourceNode.internals.positionAbsolute.y + (sourceNode.measured?.height ?? 0) / 2;
-  const tx = targetNode.internals.positionAbsolute.x + (targetNode.measured?.width  ?? 0) / 2;
-  const ty = targetNode.internals.positionAbsolute.y + (targetNode.measured?.height ?? 0) / 2;
-
-  const dx = tx - sx;
-  const dy = ty - sy;
-  const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-
-  // Clip start/end to each node's circular border
-  const sr = (sourceNode.measured?.width ?? 0) / 2;
-  const tr = (targetNode.measured?.width ?? 0) / 2;
-  const x1 = sx + (dx / dist) * sr;
-  const y1 = sy + (dy / dist) * sr;
-  const x2 = tx - (dx / dist) * tr;
-  const y2 = ty - (dy / dist) * tr;
-
-  const [path] = getStraightPath({ sourceX: x1, sourceY: y1, targetX: x2, targetY: y2 });
-  const lx = (x1 + x2) / 2;
-  const ly = (y1 + y2) / 2;
-
-  return (
-    <BaseEdge
-      id={id}
-      path={path}
-      style={style}
-      label={label}
-      labelX={lx}
-      labelY={ly}
-      labelStyle={labelStyle}
-      labelBgStyle={labelBgStyle}
-    />
-  );
-};
 
 // Custom Node Component
 const CustomNode = ({ data, style }: any) => {
@@ -265,7 +223,7 @@ export default function InvestigatePage() {
               source: edge.source,
               target: edge.target,
               label: edge.label,
-              type: "floating",
+              type: "straight",
               style: { stroke: "#00fbfb", strokeWidth: 1 },
               labelStyle: { fill: "#adaaad", fontSize: "10px" },
               labelBgStyle: { fill: "#19191c", fillOpacity: 0.8 },
@@ -585,7 +543,6 @@ export default function InvestigatePage() {
                     ) : (
                       <ReactFlow
                         edges={edges}
-                        edgeTypes={edgeTypes}
                         fitView
                         nodes={nodes}
                         nodesConnectable={false}

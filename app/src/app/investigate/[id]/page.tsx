@@ -81,7 +81,10 @@ const CustomNode = ({ data, style }: any) => {
       className="relative group flex items-center justify-center rounded-full"
       style={{ ...style, transition: "all 0.2s ease" }}
     >
-      <div className="flex flex-col items-center justify-center">
+      <Handle type="target" position={Position.Top} className="opacity-0 absolute" style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }} />
+      <Handle type="source" position={Position.Bottom} className="opacity-0 absolute" style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }} />
+
+      <div className="flex flex-col items-center justify-center pointer-events-none">
         <span className="material-symbols-outlined" style={{ fontSize: "1.2em" }}>
           {icon}
         </span>

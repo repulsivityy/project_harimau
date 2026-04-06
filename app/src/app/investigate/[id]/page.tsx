@@ -3,9 +3,83 @@
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState, useRef, ChangeEvent } from "react";
-import { Background, Controls, MiniMap, ReactFlow, useNodesState, useEdgesState } from "@xyflow/react";
+import { Background, Controls, MiniMap, ReactFlow, useNodesState, useEdgesState, Handle, Position } from "@xyflow/react";
 import { forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY } from "d3-force";
 import "@xyflow/react/dist/style.css";
+
+// Custom Node Component
+const CustomNode = ({ data, style }: any) => {
+  // Determine icon based on label or title
+  let icon = "hub";
+  const label = data.label || "";
+  const title = data.title || "";
+  
+  if (label.match(/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/)) {
+    icon = "terminal"; // IP
+  } else if (label.startsWith("http")) {
+    icon = "link"; // URL
+  } else if (label.match(/^[a-fA-F0-9]{32,64}$/)) {
+    icon = "description"; // Hash/File
+  } else if (label.includes(".")) {
+    icon = "language"; // Domain (globe)
+  }
+
+  // Check if it's a specialist node (marked by title or label in backend)
+  if (title.includes("Specialist") || label.includes("specialist")) {
+    icon = "smart_toy";
+  }
+
+  // Root node
+  if (data.isRoot) {
+    icon = "radar";
+  }
+
+  // Invisible handle style — present for edge routing, not visible
+  const handleCls = "!opacity-0 !w-1 !h-1 !min-w-0 !min-h-0 !border-0 !bg-transparent";
+
+  return (
+    <div
+      className="relative group flex items-center justify-center rounded-full"
+      style={{ ...style, transition: "all 0.2s ease" }}
+    >
+      {/* Handles at all 4 sides so straight edges route to the closest border point */}
+      <Handle type="target" position={Position.Top}    className={handleCls} />
+      <Handle type="target" position={Position.Bottom} className={handleCls} />
+      <Handle type="target" position={Position.Left}   className={handleCls} />
+      <Handle type="target" position={Position.Right}  className={handleCls} />
+
+      <div className="flex flex-col items-center justify-center">
+        <span className="material-symbols-outlined" style={{ fontSize: "1.2em" }}>
+          {icon}
+        </span>
+        {data.isRoot && (
+          <span className="text-[0.6em] text-center px-1 overflow-hidden text-ellipsis whitespace-nowrap w-full">
+            {label}
+          </span>
+        )}
+      </div>
+
+      {/* Tooltip on hover */}
+      <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 w-48 bg-[#19191c]/95 backdrop-blur border border-pink-500 p-2 rounded shadow-xl opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none text-left">
+        <div className="text-[10px] text-cyan-400 font-label uppercase mb-1 border-b border-cyan-400/30 pb-1 break-all">
+          {label}
+        </div>
+        <pre className="text-[9px] text-[#adaaad] font-mono whitespace-pre-wrap leading-tight">
+          {title || "No metadata available"}
+        </pre>
+      </div>
+
+      <Handle type="source" position={Position.Top}    className={handleCls} />
+      <Handle type="source" position={Position.Bottom} className={handleCls} />
+      <Handle type="source" position={Position.Left}   className={handleCls} />
+      <Handle type="source" position={Position.Right}  className={handleCls} />
+    </div>
+  );
+};
+
+const nodeTypes = {
+  custom: CustomNode,
+};
 
 // Define TypeScript interfaces for the API response
 interface BackendNode {
@@ -141,8 +215,9 @@ export default function InvestigatePage() {
                 const isRoot = n.id === "root";
                 return {
                   id: n.id,
+                  type: "custom",
                   position: { x: sim.x, y: sim.y },
-                  data: { label: n.label },
+                  data: { label: n.label, title: n.title, isRoot },
                   style: {
                     background: n.color,
                     color: "#fff",
@@ -150,11 +225,6 @@ export default function InvestigatePage() {
                     borderRadius: "50%",
                     width: n.size * 2,
                     height: n.size * 2,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: isRoot ? "12px" : "10px",
-                    fontWeight: isRoot ? ("bold" as const) : ("normal" as const),
                   },
                 };
               });
@@ -490,6 +560,7 @@ export default function InvestigatePage() {
                         fitView
                         nodes={nodes}
                         nodesConnectable={false}
+                        nodeTypes={nodeTypes}
                         onEdgesChange={onEdgesChange}
                         onNodesChange={onNodesChange}
                       >

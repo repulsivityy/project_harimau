@@ -39,19 +39,22 @@ async def lifespan(app: FastAPI):
             # Create main investigations table
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS investigations (
-                    job_id       TEXT PRIMARY KEY,
-                    status       VARCHAR(50)  NOT NULL DEFAULT 'running',
-                    ioc          VARCHAR(255) NOT NULL,
-                    ioc_type     VARCHAR(50),
-                    risk_level   VARCHAR(50),
-                    gti_score    VARCHAR(50),
-                    created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-                    completed_at TIMESTAMPTZ,
-                    final_report TEXT,
-                    metadata     JSONB
+                    job_id              TEXT PRIMARY KEY,
+                    status              VARCHAR(50)  NOT NULL DEFAULT 'running',
+                    ioc                 VARCHAR(255) NOT NULL,
+                    ioc_type            VARCHAR(50),
+                    risk_level          VARCHAR(50),
+                    gti_score           VARCHAR(50),
+                    created_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+                    completed_at        TIMESTAMPTZ,
+                    final_report        TEXT,
+                    metadata            JSONB,
+                    investigation_graph JSONB
                 );
                 CREATE INDEX IF NOT EXISTS idx_investigations_created ON investigations(created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_investigations_status ON investigations(status);
+                -- Idempotent: add column to existing tables that predate this migration
+                ALTER TABLE investigations ADD COLUMN IF NOT EXISTS investigation_graph JSONB;
             """)
         return pool
 
@@ -143,10 +146,14 @@ async def save_job(job_id: str, data: dict):
                 metadata["specialist_results"] = data.get("specialist_results", metadata.get("specialist_results", {}))
                 metadata["transparency_log"] = data.get("transparency_log", metadata.get("transparency_log", []))
 
+                # Serialise the investigation graph if present (nx.node_link_data() is a plain dict)
+                raw_graph = data.get("investigation_graph")
+                graph_json = json.dumps(raw_graph) if raw_graph is not None else None
+
                 await conn.execute("""
                     INSERT INTO investigations (
-                        job_id, status, ioc, ioc_type, risk_level, gti_score, final_report, metadata
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+                        job_id, status, ioc, ioc_type, risk_level, gti_score, final_report, metadata, investigation_graph
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb)
                     ON CONFLICT (job_id) DO UPDATE SET
                         status = EXCLUDED.status,
                         ioc_type = EXCLUDED.ioc_type,
@@ -154,16 +161,18 @@ async def save_job(job_id: str, data: dict):
                         gti_score = EXCLUDED.gti_score,
                         final_report = EXCLUDED.final_report,
                         metadata = EXCLUDED.metadata,
+                        investigation_graph = COALESCE(EXCLUDED.investigation_graph, investigations.investigation_graph),
                         completed_at = CASE WHEN EXCLUDED.status IN ('completed', 'failed') THEN NOW() ELSE investigations.completed_at END
-                """, 
-                job_id, 
-                data.get("status"), 
+                """,
+                job_id,
+                data.get("status"),
                 data.get("ioc"),
                 data.get("ioc_type"),
                 data.get("risk_level"),
                 str(data.get("gti_score", "N/A")),
                 data.get("final_report"),
-                json.dumps(metadata)
+                json.dumps(metadata),
+                graph_json,
                 )
         except Exception as e:
             logger.error("save_job_db_failed", job_id=job_id, error=str(e),
@@ -198,6 +207,10 @@ async def get_job(job_id: str):
                         job_data.setdefault("rich_intel", metadata.get("rich_intel", {}))
                         job_data.setdefault("specialist_results", metadata.get("specialist_results", {}))
                         job_data.setdefault("transparency_log", metadata.get("transparency_log", []))
+
+                    # Parse investigation_graph JSONB if returned as string
+                    if isinstance(job_data.get("investigation_graph"), str):
+                        job_data["investigation_graph"] = json.loads(job_data["investigation_graph"])
 
                     return job_data
         except Exception as e:
@@ -392,8 +405,8 @@ async def _run_investigation_background(job_id: str, ioc: str, max_iterations: i
             "rich_intel": final_state.get("metadata", {}).get("rich_intel", {}),
             "specialist_results": specialist_results,
             "metadata": final_state.get("metadata", {}),
-            # NOTE: investigation_graph (NetworkX object) intentionally excluded — not JSON-serializable.
-            # Graph data is served via /api/investigations/{job_id}/graph using rich_intel.
+            # nx.node_link_data() returns a plain dict — fully JSON/JSONB serializable.
+            "investigation_graph": final_state.get("investigation_graph"),
             "transparency_log": transparency_log  # Agent transparency events
         }
         await save_job(job_id, result)
@@ -732,14 +745,17 @@ async def get_investigation_graph(job_id: str):
 @app.get("/api/investigations/{job_id}/graph")
 async def get_investigation_graph(job_id: str):
     """
-    Returns graph data with improved naming conventions for visualization.
+    Returns graph data for visualization.
+    Prefers the persisted NetworkX graph (richer data) when available;
+    falls back to rich_intel reconstruction for running jobs or legacy records.
     """
     job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-
-    from backend.utils.graph_formatter import format_investigation_graph
+    from backend.utils.graph_formatter import format_graph_from_cache, format_investigation_graph
+    if job.get("investigation_graph"):
+        return format_graph_from_cache(job_id, job)
     return format_investigation_graph(job_id, job)
 
 @app.get("/api/investigations/{job_id}/history")

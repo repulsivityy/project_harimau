@@ -1,7 +1,152 @@
 import json
+import os
 from backend.utils.logger import get_logger
 
 logger = get_logger("graph-formatter")
+
+
+def format_graph_from_cache(job_id: str, job: dict) -> dict:
+    """
+    Build frontend graph data from the persisted NetworkX investigation_graph.
+
+    Richer than format_investigation_graph() because it reads the full GTI attribute
+    set stored during the investigation rather than the downsampled rich_intel snapshot.
+    Falls back to format_investigation_graph() if the stored graph is absent.
+    """
+    from backend.utils.graph_cache import InvestigationCache
+
+    graph_data = job.get("investigation_graph")
+    if not graph_data:
+        logger.warning("graph_cache_missing_fallback", job_id=job_id)
+        return format_investigation_graph(job_id, job)
+
+    ioc = job.get("ioc", "Unknown")
+    ioc_type = job.get("ioc_type", "Unknown")
+
+    cache = InvestigationCache(graph_data)
+    stats = cache.get_stats()
+    logger.info("graph_from_cache", job_id=job_id,
+                nodes=stats["nodes"], edges=stats["edges"])
+
+    COLOR_MAP = {
+        "file":       "#9B59B6",
+        "domain":     "#E67E22",
+        "ip_address": "#E67E22",
+        "url":        "#2ECC71",
+        "collection": "#3498DB",
+    }
+
+    nodes = []
+    edges = []
+    edge_registry: set = set()
+
+    for node_id, data in cache.graph.nodes(data=True):
+        etype = data.get("entity_type", "unknown")
+        is_root = (node_id == ioc)
+
+        # ── Label ──────────────────────────────────────────────────────────
+        if is_root:
+            if ioc_type == "URL":
+                label = f"URL: {ioc}" if len(ioc) < 64 else f"URL: {ioc[:60]}..."
+            elif ioc_type in ("File", "IP", "Domain"):
+                label = f"{ioc_type}: {ioc}"
+            else:
+                label = ioc
+        elif etype == "domain":
+            label = data.get("host_name", node_id)
+        elif etype == "ip_address":
+            label = node_id
+        elif etype == "url":
+            label = data.get("last_final_url") or data.get("url") or node_id
+        elif etype == "file":
+            name = data.get("meaningful_name") or (data.get("names") or [None])[0]
+            if name:
+                base, ext = os.path.splitext(name)
+                truncated = (base[:48] + "..." + ext) if len(base) > 48 else name
+                label = f"{node_id}\n({truncated})"
+            else:
+                label = node_id
+        else:
+            label = data.get("name") or data.get("title") or node_id
+
+        # ── Threat fields from raw GTI attribute structure ─────────────────
+        gti = data.get("gti_assessment") or {}
+        verdict_raw = gti.get("verdict") or {}
+        verdict = verdict_raw.get("value") if isinstance(verdict_raw, dict) else None
+        score_raw = gti.get("threat_score") or {}
+        threat_score = score_raw.get("value") if isinstance(score_raw, dict) else None
+        analysis_stats = data.get("last_analysis_stats") or {}
+        malicious_count = analysis_stats.get("malicious", 0) if isinstance(analysis_stats, dict) else 0
+
+        # ── Tooltip ────────────────────────────────────────────────────────
+        if is_root:
+            tooltip = f"IOC: {ioc}\nType: {ioc_type}"
+        else:
+            lines = []
+            specialist_ctx = data.get("malware_context") or data.get("infra_context")
+            if specialist_ctx:
+                lines.append(f"🚩 Specialist Finding: {specialist_ctx.replace('_', ' ').title()}")
+            if threat_score:
+                lines.append(f"Threat Score: {threat_score}")
+            if malicious_count:
+                s = "s" if malicious_count != 1 else ""
+                lines.append(f"{malicious_count} vendor{s} detected as malicious")
+            if etype == "file":
+                fname = data.get("meaningful_name") or (data.get("names") or [None])[0]
+                if fname:
+                    lines.append(f"Filename: {fname}")
+                ftype = data.get("type_description")
+                if ftype:
+                    lines.append(f"Type: {ftype}")
+                fsize = data.get("size")
+                if fsize:
+                    lines.append(f"Size: {fsize / (1024 * 1024):.2f} MB")
+            elif etype == "url":
+                cats = data.get("categories")
+                if cats:
+                    if isinstance(cats, dict):
+                        cat_list = ", ".join(cats.values())
+                    elif isinstance(cats, list):
+                        cat_list = ", ".join(cats)
+                    else:
+                        cat_list = str(cats)
+                    lines.append(f"Categories: {cat_list}")
+            if verdict:
+                lines.append(f"Verdict: {verdict}")
+            tooltip = "\n".join(lines) if lines else f"{etype.title()}: {node_id}"
+
+        # ── isMalicious ────────────────────────────────────────────────────
+        is_malicious = bool(
+            (malicious_count and malicious_count > 0)
+            or (verdict and "malicious" in str(verdict).lower())
+            or (threat_score and isinstance(threat_score, (int, float)) and threat_score >= 70)
+        )
+
+        nodes.append({
+            "id":          node_id,
+            "label":       label,
+            "color":       "#FF4B4B" if is_root else COLOR_MAP.get(etype, "#95A5A6"),
+            "size":        35 if is_root else 20,
+            "title":       tooltip,
+            "isRoot":      is_root,
+            "isMalicious": is_malicious,
+        })
+
+    # ── Edges ──────────────────────────────────────────────────────────────
+    for source, target, edata in cache.graph.edges(data=True):
+        rel = edata.get("relationship", "")
+        key = (source, target, rel)
+        if key not in edge_registry:
+            edges.append({
+                "source": source,
+                "target": target,
+                "label":  rel.replace("_", " "),
+            })
+            edge_registry.add(key)
+
+    logger.info("graph_from_cache_complete", job_id=job_id,
+                total_nodes=len(nodes), total_edges=len(edges))
+    return {"nodes": nodes, "edges": edges}
 
 def format_investigation_graph(job_id: str, job: dict) -> dict:
     """

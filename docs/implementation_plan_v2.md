@@ -107,11 +107,12 @@ This document tracks the iterative evolution of the Harimau platform, organized 
 *   [x] **Shodan MCP Server**: Built FastMCP server for IP/DNS exposure data.
 *   [x] **Infrastructure Wiring**: Integrated JARM, SSL/TLS, and service exposure into Infra Agent analysis.
 
-### Milestone 3: Graph Persistence (Zero-Ops Fix) [/]
-*   [ ] **Schema Migration**: Add `investigation_graph` JSONB column to `investigations` table in Cloud SQL.
-*   [ ] **Persist NetworkX Graph**: Include `final_state["investigation_graph"]` (already JSON-serializable via `nx.node_link_data()`) in `save_job()` on investigation completion.
-*   [ ] **Update Graph Endpoint**: Serve visualization from stored `InvestigationCache` graph via `export_for_visualization()` instead of reconstructing from `rich_intel.relationships`.
-*   [ ] **Retire `graph_formatter.py`**: Remove the post-hoc reconstruction logic once the stored graph is the source of truth.
+### Milestone 3: Graph Persistence (Zero-Ops Fix) ✅
+*   [x] **Schema Migration**: Added `investigation_graph JSONB` column to `investigations` table; `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` ensures idempotent rollout to existing Cloud SQL instances.
+*   [x] **Persist NetworkX Graph**: `final_state["investigation_graph"]` (serialised via `nx.node_link_data()`) included in `save_job()`; `COALESCE` in the upsert prevents intermediate status updates from overwriting a completed graph.
+*   [x] **Update Graph Endpoint**: `/api/investigations/{job_id}/graph` now calls `format_graph_from_cache()` when the stored graph is present; falls back to `format_investigation_graph()` for running jobs and legacy records.
+*   [x] **New `format_graph_from_cache()`**: Added to `graph_formatter.py` — reads raw GTI attributes directly from `InvestigationCache` (resolving nested paths like `gti_assessment.verdict.value`) and produces richer tooltips, isMalicious flags, and typed colours.
+*   [ ] **Retire `graph_formatter.py` reconstruction path**: Remove `format_investigation_graph()` and the `rich_intel`-based fallback once all records have migrated and the new path is validated in production.
 
 **Why**: The NetworkX graph built by agents during investigation is richer than `rich_intel.relationships` but is currently discarded at job completion. Storing it in the existing JSONB column requires no new infrastructure and unlocks full edge metadata, typed relationships, and more accurate visualization.
 

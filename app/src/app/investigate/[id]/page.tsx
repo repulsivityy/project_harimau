@@ -7,6 +7,10 @@ import { Background, Controls, MiniMap, ReactFlow, useNodesState, useEdgesState,
 import { forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY } from "d3-force";
 import "@xyflow/react/dist/style.css";
 
+// Precompiled Regexes
+const IP_REGEX = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/;
+const HASH_REGEX = /^[a-fA-F0-9]{32,64}$/;
+
 // Custom Node Component
 const CustomNode = ({ data, style }: any) => {
   // Determine icon based on label or title
@@ -14,11 +18,11 @@ const CustomNode = ({ data, style }: any) => {
   const label = data.label || "";
   const title = data.title || "";
   
-  if (label.match(/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/)) {
+  if (IP_REGEX.test(label)) {
     icon = "terminal"; // IP
   } else if (label.startsWith("http")) {
     icon = "link"; // URL
-  } else if (label.match(/^[a-fA-F0-9]{32,64}$/)) {
+  } else if (HASH_REGEX.test(label)) {
     icon = "description"; // Hash/File
   } else if (label.includes(".")) {
     icon = "language"; // Domain (globe)
@@ -67,7 +71,6 @@ const CustomNode = ({ data, style }: any) => {
 };
 
 const nodeTypes = { custom: CustomNode };
-const edgeTypes = { floating: FloatingEdge };
 
 // Define TypeScript interfaces for the API response
 interface BackendNode {
@@ -599,7 +602,6 @@ export default function InvestigatePage() {
                 <div className="w-full h-[70vh] bg-[#0e0e10]/50 border border-cyan-400/20">
                   <ReactFlow
                     edges={edges}
-                    edgeTypes={edgeTypes}
                     fitView
                     nodes={nodes}
                     nodesConnectable={false}

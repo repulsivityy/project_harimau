@@ -41,7 +41,11 @@ const CustomNode = ({ data, style }: any) => {
   return (
     <div
       className="relative group flex items-center justify-center rounded-full"
-      style={{ ...style, transition: "all 0.2s ease" }}
+      style={{
+        ...style,
+        transition: "all 0.2s ease",
+        boxShadow: data.isMalicious ? "0 0 15px 5px rgba(239, 68, 68, 0.4)" : style?.boxShadow,
+      }}
     >
       <Handle type="target" position={Position.Top} className="opacity-0 absolute" style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }} />
       <Handle type="source" position={Position.Bottom} className="opacity-0 absolute" style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }} />
@@ -80,6 +84,7 @@ interface BackendNode {
   size: number;
   title?: string;
   isRoot?: boolean;
+  isMalicious?: boolean;
 }
 
 interface BackendEdge {
@@ -209,7 +214,7 @@ export default function InvestigatePage() {
                   id: n.id,
                   type: "custom",
                   position: { x: sim.x, y: sim.y },
-                  data: { label: n.label, title: n.title, isRoot },
+                  data: { label: n.label, title: n.title, isRoot, isMalicious: n.isMalicious },
                   style: {
                     background: n.color,
                     color: "#fff",

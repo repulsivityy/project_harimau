@@ -227,6 +227,12 @@ def format_investigation_graph(job_id: str, job: dict) -> dict:
                     if verdict:
                         tooltip_lines.append(f"Verdict: {verdict}")
                     
+                    is_malicious = bool(
+                        (m_count and m_count > 0) or 
+                        (verdict and isinstance(verdict, str) and "malicious" in verdict.lower()) or 
+                        (score and isinstance(score, (int, float)) and score >= 70)
+                    )
+
                     tooltip_text = "\n".join(tooltip_lines) if tooltip_lines else f"{ent_type.title()}: {ent_id}"
                     
                     nodes.append({
@@ -234,7 +240,8 @@ def format_investigation_graph(job_id: str, job: dict) -> dict:
                         "label": get_entity_label(entity),
                         "color": color,
                         "size": 20,
-                        "title": tooltip_text
+                        "title": tooltip_text,
+                        "isMalicious": is_malicious
                     })
                     node_registry.add(ent_id)
 

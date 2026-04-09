@@ -114,6 +114,7 @@ Future: FalkorDB (Phase 7 - Planned):
 * **Query Patterns**:
   - **For LLM**: Minimal field extraction (9 essential fields).
   - **For Specialists**: Full attribute retrieval.
+  - **For Lead Hunter Synthesis**: Graph-derived summaries (high-signal nodes, relationships, IOC pivots) combined with triage and specialist summaries.
   - **For Graph UI**: Display fields (URLs, filenames, scores).
 
 ### 2.5 Token Optimization Strategy
@@ -288,11 +289,13 @@ This ensures that updating an agent (backend) does not trigger a needless rebuil
 2. **Store Everything**: NetworkX graph caches complete attributes.
 3. **Query Minimal**: LLM receives filtered 9-field summaries.
 4. **Enrich On-Demand**: Specialists pull full data from cache.
+5. **Synthesize with All Context**: Lead Hunter uses the persisted NetworkX investigation graph together with triage findings and specialist summaries to produce the final report.
 
 **Benefits**:
 - No re-fetching (faster, fewer API calls)
 - LLM stays under token limits
 - Specialists have full context
+- Lead Hunter synthesizes from graph structure and analyst summaries, not just flat IOC lists
 - Graph UI shows rich tooltips
 
 ### 4.2 Triage vs Specialists
@@ -311,6 +314,14 @@ This ensures that updating an agent (backend) does not trigger a needless rebuil
 - **Reporting Strategy**: Specialist Agents generate structured Python reports instead of embedding Markdown in JSON. This prevents parsing errors and ensures 100% stability.
 - **Data Sync**: Findings are "Double Committed" to the NetworkX cache (Data Layer) and the LangGraph state (Control Layer) for immediate frontend rendering.
 - **Token Budget**: No limits (focused analysis on 5-10 entities).
+
+**Lead Hunter** (Synthesis):
+- Consumes the triage executive summary and key findings.
+- Consumes specialist summaries and structured findings from malware and infrastructure agents.
+- Consumes a compact summary derived from the persisted NetworkX investigation graph, including high-signal nodes, root IOC relationships, and key edges.
+- **High-Signal Node Rule**: Node must have `gti_score > 60`, and must satisfy at least 2 of: `malicious_count > 5`, appears in multiple important relationship types, or bridges malware and infrastructure entity types.
+- **Key Edge Rule**: Edge uses the target node's GTI signal (`malicious` / `suspicious` verdict, or non-zero malicious vendor count) and must satisfy at least 1 of: analytically important relationship type, target node is high-signal, or the edge links malware behavior to infrastructure pivots.
+- Produces the final Markdown intelligence report using all three inputs together.
 
 ### 4.3 Specialist Handoff & Visualization
 1. **Dynamic Routing**: Triage identifies specialists (e.g., `malware_specialist`) based on IOC properties.

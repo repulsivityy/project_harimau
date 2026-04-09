@@ -6,6 +6,38 @@ from backend.graph.state import AgentState
 
 logger = get_logger("agent_lead_hunter_planning")
 
+
+def _format_lead_for_prompt(node: dict) -> str:
+    """Render a cache node into a planner-friendly one-line lead summary."""
+    node_id = node.get("id", "unknown")
+    entity_type = node.get("entity_type", "unknown")
+
+    if entity_type == "file":
+        label = node.get("meaningful_name") or (node.get("names") or [node_id])[0]
+    elif entity_type == "url":
+        label = node.get("last_final_url") or node.get("url") or node_id
+    elif entity_type == "domain":
+        label = node.get("host_name") or node_id
+    else:
+        label = node.get("name") or node.get("title") or node_id
+
+    context_bits = []
+    if node.get("malware_context"):
+        context_bits.append(f"malware_context={node['malware_context']}")
+    if node.get("infra_context"):
+        context_bits.append(f"infra_context={node['infra_context']}")
+
+    gti_assessment = node.get("gti_assessment") or {}
+    verdict = gti_assessment.get("verdict") or {}
+    threat_score = gti_assessment.get("threat_score") or {}
+    if isinstance(verdict, dict) and verdict.get("value"):
+        context_bits.append(f"verdict={verdict['value']}")
+    if isinstance(threat_score, dict) and threat_score.get("value") is not None:
+        context_bits.append(f"threat_score={threat_score['value']}")
+
+    suffix = f" | Context: {', '.join(context_bits)}" if context_bits else ""
+    return f"Type: {entity_type} | ID: {node_id} | Label: {label}{suffix}"
+
 # --- PROMPT: ITERATIVE PLANNING ---
 LEAD_HUNTER_PLANNING_PROMPT = """
 You are the Lead Threat Hunter orchestrating an active investigation.
@@ -87,7 +119,7 @@ async def run_planning_phase(state: AgentState, llm, cache: InvestigationCache, 
     try:
         root_ioc = state.get("ioc")
         uninvestigated_leads = [
-            f"Type: {n.get('type')} | ID: {n['id']} | Label: {n.get('label', n['id'])}"
+            _format_lead_for_prompt(n)
             for n in actionable_nodes
             if n["id"] != root_ioc
         ]

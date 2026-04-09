@@ -72,6 +72,7 @@ This document tracks the iterative evolution of the Harimau platform, organized 
 *   [x] **Lead Threat Hunter**: Created synthesis agent to review specialist reports and find gaps.
 *   [x] **Iterative Workflow**: Implemented 3-loop iteration logic (Triage -> Specialists -> Lead Hunter -> Specialists...).
 *   [x] **Gap Analysis**: Automated discovery of "uninvestigated nodes" in the NetworkX cache to drive next steps.
+*   [x] **Graph-Aware Final Synthesis**: Lead Hunter final report now combines triage context, specialist summaries, and a compact summary derived from the persisted NetworkX investigation graph.
 
 ### Milestone 2: Performance & Token Optimization ✅
 *   [x] **Sub-3s Triage**: Parallel `aiohttp` enrichment for immediate frontend feedback.

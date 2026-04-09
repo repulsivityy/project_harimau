@@ -67,12 +67,11 @@ The Lead Hunter must produce a **comprehensive threat intelligence analysis**, n
     *   **Control Layer (LangGraph)**: Acts as the "RAM". Stores **token-optimized summaries** (<5% of data). Agents write minified arrays of IDs to this layer to fuel further LLM reasoning. Wait lists and `previous_report` accumulation loops operate here.
 *   **Rule**: "Store First, Summarize Second". Agents never pass raw API JSON into the LangGraph state `messages` or `context` to prevent context window exhaustion, and LLMs are no longer allowed to structurally define or assume relationship nodes.
 
-### 3.4 Artifact Persistence (Report & Graph) *(Phase 6 - Planned)*
-*   **Storage**: Google Cloud Storage (GCS) Bucket.
-*   **Report**: Backend saves final markdown report to `.md` after investigation completes.
-*   **Graph**: Backend saves graph state to `.json` for replay/reference.
-*   **Structure**: `gs://[bucket]/[job_id]/report.md` & `graph.json`.
-*   **Status**: Not yet implemented — investigations currently held in-memory (`JOBS` dict). Planned alongside Cloud SQL persistence in Phase 6.
+### 3.4 Artifact Persistence (Report & Graph)
+*   **Storage**: Cloud SQL (PostgreSQL).
+*   **Report & Graph**: Backend saves investigation metadata, reports, and generated graph relationships natively into a PostgreSQL database `investigations` table as JSONB.
+*   **State Recovery**: LangGraph checkpoints are persisted directly to PostgreSQL using `AsyncPostgresSaver` allowing history tracking and potential resumption.
+*   **Status**: Implemented. An in-memory `JOBS` dict is only retained as an emergency fallback if the database connection fails on startup.
 
 ## 4. Operational Requirements
 *   **Deployment**: 
@@ -85,11 +84,10 @@ The Lead Hunter must produce a **comprehensive threat intelligence analysis**, n
     *   **Tier 1 (INFO)**: High-level milestones ("Job Started", "Verdict Reached").
     *   **Tier 2 (DEBUG)**: Deep Trace. Captures Agent "Thought", Tool Input/Output, and Raw API Payloads.
     *   **Context**: All logs must carry a `trace_id` or `job_id` to correlate Backend actions with Frontend requests.
-*   **Resiliency (Phase 5)**:
-    *   **State Recovery**: Must save LangGraph checkpoints to Postgres/Redis to allow resuming if the container crashes.
+*   **Resiliency**:
+    *   **State Recovery**: LangGraph checkpoints are saved to Postgres via `AsyncPostgresSaver`.
 *   **Frontend UX**:
-    *   **MVP**: Polling interval set to 10s (Configurable via `POLL_INTERVAL` env var).
-    *   **Roadmap**: Migrate to SSE for sub-second updates.
+    *   **Real-time Updates**: Streaming architecture implemented using Server-Sent Events (SSE) providing sub-second updates of agent tasks and tool calls.
 
 ## 5. Testing Strategy
 We adopt a "Verify-as-we-Build" approach.

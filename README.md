@@ -22,7 +22,7 @@ The application takes an IOC (like a file hash, URL, or IP address) and kicks of
 * **MCP**: Embedded GTI + Shodan MCP Servers (stdio) - Threat intelligence & internet exposure data
 * **Brain**: Gemini 2.5 Flash / Pro - Powered by advanced AI reasoning
 * **Database**: Cloud SQL (PostgreSQL) - Persistent investigation results & LangGraph checkpoints
-* **Investigation Cache**: NetworkX (in-memory graph per investigation)
+* **Investigation Cache**: NetworkX (in-memory graph per investigation) → Cloud SQL JSONB persistence in progress
 
 ## Core Capabilities
 * **Automated Malware Analysis**: Deep behavioral analysis, capability assessment, and attribution tracking
@@ -83,17 +83,20 @@ You can still use the legacy `deploy.sh` script for manual deployments if needed
 
 
 ## 📊 Status
--   **Phase 1 (Infrastructure)**: ✅ Complete
--   **Phase 2 (The Brain)**: ✅ Complete
--   **Phase 3 (Interface + Hybrid Triage + Token Optimization)**: ✅ Complete
--   **Phase 4 (Specialist Agents)**: ✅ Complete
--   **Phase 5 (Iterative Investigation Workflow)**: ✅ Complete
--   **Phase 6 (Core Infrastructure & A2A Integration)**: 🚧 In Progress (6.1 Cloud SQL Persistence ✅, 6.2 Shodan MCP ✅, 6.1.1 CI/CD + Cloud SQL connectivity fixes ✅)
 
-### 🛠️ Code Quality Overhaul
--   **Robustness**: Consolidated state, deep-merge cache deduplication, and specific exception handling.
--   **Reliability**: Dual-fallback JSON parsing and guaranteed format delivery.
--   **Efficiency**: Parallel specialist execution with iterative synthesis.
+| Capability | Status |
+|---|---|
+| Infrastructure & Cloud Run Deployment | ✅ Complete |
+| LangGraph Orchestration & Agent Suite | ✅ Complete |
+| Cloud SQL Persistence & Checkpointing | ✅ Complete |
+| Shodan MCP Enrichment | ✅ Complete |
+| Real-time SSE Streaming | ✅ Complete |
+| Next.js Investigation Dashboard | ✅ Complete |
+| Graph Persistence (NetworkX → Cloud SQL JSONB) | 🚧 In Progress |
+| Authentication (Cloud IAP) | ⏳ Planned |
+| A2A Integration | ⏳ Planned |
+
+For detailed milestone tracking, see [Implementation Plan](docs/implementation_plan_v2.md).
 
 ## Architecture Principles
 
@@ -115,21 +118,22 @@ You can still use the legacy `deploy.sh` script for manual deployments if needed
 - **Triage**: Quick assessment, relationship discovery
 - **Specialists**: Deep domain expertise, intelligence gathering
 - **Lead Hunter**: Strategic synthesis, campaign tracking, and iterative investigation (3 rounds)
-- **OSINT Agent**: Helps with OSINT research / Attribution
-- **Detection Agent**: Helps with detection engineering and creation of hunt package
-- **SOC Agent**: Connects to SIEM platforms to hunt internally with the help of the hunt package (Might combine with Detection Agent)
+- **OSINT Agent**: *(Planned)* OSINT research and attribution
+- **Detection Agent**: *(Planned)* Detection engineering and hunt package creation — lives in the separate `detection_agent` repo, integrated via A2A
+- **SOC Agent**: *(Planned)* SIEM connectivity for internal hunting
 
 ## Documentation
 * [Product Requirements (PRD)](docs/PRD.md)
 * [Architecture Proposal](docs/architecture.md)
-* [Implementation Plan](docs/implementation_plan.md)
+* [Implementation Plan](docs/implementation_plan_v2.md)
+* [Documentation Framework](docs/FRAMEWORK.md)
 
 ## Technology Stack
 - **Orchestration**: LangGraph
 - **API**: FastAPI
 - **UI**: Next.js
 - **LLM**: Vertex AI (Gemini 2.5)
-- **Cache**: NetworkX (in-memory, per investigation)
+- **Cache**: NetworkX (in-memory, per investigation) → Cloud SQL JSONB persistence in progress
 - **Deployment**: Google Cloud Run
 - **Secrets**: Google Secret Manager
 

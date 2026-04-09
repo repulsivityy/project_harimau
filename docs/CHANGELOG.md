@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-09
+
+### Added
+- **Next.js Frontend**: Completely rebuilt the user interface using Next.js (App Router, React, Tailwind CSS), replacing the legacy Streamlit application.
+- **Real-Time Streaming**: Implemented Server-Sent Events (SSE) to replace the 10-second polling mechanism, providing sub-second, real-time updates for agent tasks and tool calls.
+- **Shodan MCP Integration**: Added a Shodan FastMCP server to enrich the Infrastructure Agent with internet exposure data, port scans, and CVE lookups.
+- **Configurable Investigation Depth**: Unified loop limiters into a single `max_iterations` state parameter, allowing users to control the depth of each hunt via a frontend slider.
+
+### Fixed
+- **Cloud SQL Connectivity**: Added necessary Terraform annotations (`run.googleapis.com/cloudsql-instances`) and Cloud Build flags to ensure the Cloud SQL Auth Proxy socket is correctly injected into the backend Cloud Run container.
+- **Frontend API Routing**: Replaced build-time `next.config.ts` rewrites with a runtime catch-all API route (`app/src/app/api/[...path]/route.ts`) so the Next.js container correctly resolves the dynamic backend URL provided by Cloud Run.
+
 ## [0.4.0] - 2026-03-23
 
 ### Added

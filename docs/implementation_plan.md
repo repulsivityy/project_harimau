@@ -770,50 +770,6 @@ gcloud run services update harimau-backend --set-env-vars HUNT_ITERATIONS=5
 
 ---
 
-### Phase 6.2: Agent Configuration (`agents.yaml`)
-**Goal**: Centralize agent tuning parameters into a config file, removing hardcoded constants from agent code.
-
-**Why**: Currently, key operational parameters are scattered across individual agent files (e.g., `malware_iterations = 10` in `malware.py`, model names hardcoded per agent). As the agent count grows (OSINT, Detection, SOC agents planned), per-file management becomes unwieldy. Model selection (Flash vs Pro) and iteration limits are tuning concerns, not code concerns — changing them should not require a deployment.
-
-**What goes in `agents.yaml` vs stays in code:**
-
-| In `agents.yaml` | Stays in code |
-|---|---|
-| Model name per agent (flash vs pro) | System prompts (too long, no syntax support in YAML) |
-| Iteration limits | Tool definitions |
-| Max targets | LangGraph node logic |
-| Temperature | Error handling |
-| Feature flags (e.g., `detection_agent_enabled`) | |
-
-**Tasks:**
-- [ ] Define `backend/config/agents.yaml` schema with triage, malware, infrastructure, lead_hunter entries
-- [ ] Update each agent to read model, iterations, max targets, and temperature from config via `load_agents_config()`
-- [ ] Add `detection_agent_enabled` and `detection_agent_url` as config entries (alongside env var support)
-- [ ] Validate config on startup with clear error messages for missing/invalid values
-- [X] **Real-Time Streaming**: Refactor Frontend/Backend to use SSE (Server-Sent Events) instead of polling.
-
-- [ ] **A2A Integration**: Expose Harimau as an A2A-compatible agent:
-    - Publish `/.well-known/agent.json` Agent Card
-    - Add inbound A2A task endpoint (`POST /a2a/tasks/send`) to trigger investigations from external agents
-    - Add optional outbound handoff to detection_agent on investigation completion
-    - Controlled by `DETECTION_AGENT_ENABLED` + `DETECTION_AGENT_URL` env vars on the **backend Cloud Run service only** — the frontend is unaware of this integration
-    - Toggle live without redeploying: `gcloud run services update harimau-backend --set-env-vars DETECTION_AGENT_ENABLED=true,DETECTION_AGENT_URL=https://...`
-- [ ] **Authentication Hardening**: Switch from `--allow-unauthenticated` to IAP/IAM.
-- [ ] **Advanced Error Handling**: Implement exponential backoff for GTI API and automatic agent retries.
-- [ ] **Smart Entity Filtering**: Implement user-configurable filters at investigation start to prioritize malicious/high-score entities by threat score, verdict, and recency.
-- [ ] **Enhance security**: Implement security measures
-- [ ] **Ongoing Efforts**
-    - [ ] Advanced prompting for autonomous decisions
-    - [ ] Adaptive iteration limits
-    - [ ] Hunt package generation (YARA/Sigma)
-    - [X] Timeline reconstruction
-    - [X] Tools - Webrisk
-    - [ ] Tools - URLScan
-    - [X] Tools - Shodan
-    - [ ] Tools - OpenCTI
-
----
-
 ### Phase 6.3: Authentication — Cloud IAP [PLANNED]
 **Goal**: Add proper authentication via Google Cloud IAP in front of Cloud Run, replacing the current unauthenticated access.
 
@@ -841,7 +797,7 @@ gcloud run services update harimau-backend --set-env-vars HUNT_ITERATIONS=5
 
 **Why**: Allows updating agents without rebuilding the frontend, reducing deployment time and blast radius.
 
-### Phase 6.3: Multi-User Support & Persistence
+### Phase 6.5: Multi-User Support & Persistence
 
 > **Status**: Planned for Phase 6 — design documented below
 > **Current MVP**: Single-user, ephemeral architecture
@@ -963,11 +919,56 @@ gcloud run services update harimau-backend --set-env-vars HUNT_ITERATIONS=5
 └─────────────────────────────┘
 ```
 
-## Phase 6.4: Update UX to React/Next.js
+## Phase 6.6: Update UX to React/Next.js
 
 - [X] Update UX to React/Next.js
 
-## Phase 7: Detached Detection Agent Architecture [MOVED]
+
+### Phase 7: Agent Configuration (`agents.yaml`)
+**Goal**: Centralize agent tuning parameters into a config file, removing hardcoded constants from agent code.
+
+**Why**: Currently, key operational parameters are scattered across individual agent files (e.g., `malware_iterations = 10` in `malware.py`, model names hardcoded per agent). As the agent count grows (OSINT, Detection, SOC agents planned), per-file management becomes unwieldy. Model selection (Flash vs Pro) and iteration limits are tuning concerns, not code concerns — changing them should not require a deployment.
+
+**What goes in `agents.yaml` vs stays in code:**
+
+| In `agents.yaml` | Stays in code |
+|---|---|
+| Model name per agent (flash vs pro) | System prompts (too long, no syntax support in YAML) |
+| Iteration limits | Tool definitions |
+| Max targets | LangGraph node logic |
+| Temperature | Error handling |
+| Feature flags (e.g., `detection_agent_enabled`) | |
+
+**Tasks:**
+- [ ] Define `backend/config/agents.yaml` schema with triage, malware, infrastructure, lead_hunter entries
+- [ ] Update each agent to read model, iterations, max targets, and temperature from config via `load_agents_config()`
+- [ ] Add `detection_agent_enabled` and `detection_agent_url` as config entries (alongside env var support)
+- [ ] Validate config on startup with clear error messages for missing/invalid values
+- [X] **Real-Time Streaming**: Refactor Frontend/Backend to use SSE (Server-Sent Events) instead of polling.
+
+- [ ] **A2A Integration**: Expose Harimau as an A2A-compatible agent:
+    - Publish `/.well-known/agent.json` Agent Card
+    - Add inbound A2A task endpoint (`POST /a2a/tasks/send`) to trigger investigations from external agents
+    - Add optional outbound handoff to detection_agent on investigation completion
+    - Controlled by `DETECTION_AGENT_ENABLED` + `DETECTION_AGENT_URL` env vars on the **backend Cloud Run service only** — the frontend is unaware of this integration
+    - Toggle live without redeploying: `gcloud run services update harimau-backend --set-env-vars DETECTION_AGENT_ENABLED=true,DETECTION_AGENT_URL=https://...`
+- [ ] **Authentication Hardening**: Switch from `--allow-unauthenticated` to IAP/IAM.
+- [ ] **Advanced Error Handling**: Implement exponential backoff for GTI API and automatic agent retries.
+- [ ] **Smart Entity Filtering**: Implement user-configurable filters at investigation start to prioritize malicious/high-score entities by threat score, verdict, and recency.
+- [ ] **Enhance security**: Implement security measures
+- [ ] **Ongoing Efforts**
+    - [ ] Advanced prompting for autonomous decisions
+    - [ ] Adaptive iteration limits
+    - [ ] Hunt package generation (YARA/Sigma)
+    - [X] Timeline reconstruction
+    - [X] Tools - Webrisk
+    - [ ] Tools - URLScan
+    - [X] Tools - Shodan
+    - [ ] Tools - OpenCTI
+
+---
+
+## Phase 8: Detached Detection Agent Architecture [MOVED]
 
 ### Goal:
 Automate the feedback loop between Google SecOps SIEM (lagging indicators) and Project Harimau (forward threat indicators). 

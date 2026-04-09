@@ -591,70 +591,68 @@ Seamlessly rewrite and update your PREVIOUS REPORT's findings to incorporate the
                 if job_id and 'final_text' in locals():
                     await emit_reasoning(job_id, "infrastructure", final_text)
                 
-                # Removed LLM JSON-to-Graph parsing. Graph population is now deterministically handled by the tools directly.
-                
-                # Relationship Expansion
-                # For each analyzed entity, fetch its relationships and expand the graph
-                from backend.tools import gti
-                import re
-                
-                for target in unique_targets:
-                    target_value = target["value"]
-                    logger.info("infra_expanding_relationships", target=target_value)
-                    
-                    try:
-                        # Determine entity type and fetch appropriate relationships
-                        is_ip = re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", target_value)
-                        is_url = "http" in target_value
-                        is_domain = not is_ip and not is_url and "." in target_value
-                        
-                        rel_data = None
-                        
-                        if is_ip:
-                            # Fetch IP relationships
-                            rel_data = await gti.get_ip_report(
-                                target_value,
-                                relationships=["resolutions", "communicating_files", "downloaded_files"]
-                            )
-                        elif is_domain:
-                            # Fetch domain relationships
-                            rel_data = await gti.get_domain_report(
-                                target_value,
-                                relationships=["resolutions", "subdomains", "communicating_files", "downloaded_files"]
-                            )
-                        elif is_url:
-                            # Fetch URL relationships
-                            rel_data = await gti.get_url_report(
-                                target_value,
-                                relationships=["network_location", "downloaded_files", "contacted_domains", "contacted_ips"]
-                            )
-                        
-                        if rel_data and "data" in rel_data:
-                            raw_rels = rel_data["data"].get("relationships", {})
-                            new_entities_count = 0
-                            
-                            for rel_name, rel_content in raw_rels.items():
-                                entities = rel_content.get("data", [])
-                                for entity in entities:
-                                    entity_id = entity.get("id")
-                                    entity_type = entity.get("type")
-                                    entity_attrs = entity.get("attributes", {})
-                                    
-                                    # Add to cache
-                                    cache.add_entity(
-                                        entity_id=entity_id,
-                                        entity_type=entity_type,
-                                        attributes=entity_attrs
-                                    )
-                                    cache.add_relationship(target_value, entity_id, rel_name)
-                                    new_entities_count += 1
-                            
-                            logger.info("infra_graph_expanded", 
-                                       target=target_value, 
-                                       new_entities=new_entities_count,
-                                       relationships=list(raw_rels.keys()))
-                    except Exception as expand_err:
-                        logger.error("infra_expansion_error", target=target_value, error=str(expand_err))
+                # Removed LLM JSON-to-Graph parsing. Graph population is now deterministically
+                # handled by the MCP-backed tools used during the investigation loop.
+                #
+                # Previous duplicate expansion logic kept here for human review:
+                #
+                # from backend.tools import gti
+                # import re
+                #
+                # for target in unique_targets:
+                #     target_value = target["value"]
+                #     logger.info("infra_expanding_relationships", target=target_value)
+                #
+                #     try:
+                #         is_ip = re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", target_value)
+                #         is_url = "http" in target_value
+                #         is_domain = not is_ip and not is_url and "." in target_value
+                #
+                #         rel_data = None
+                #
+                #         if is_ip:
+                #             rel_data = await gti.get_ip_report(
+                #                 target_value,
+                #                 relationships=["resolutions", "communicating_files", "downloaded_files"]
+                #             )
+                #         elif is_domain:
+                #             rel_data = await gti.get_domain_report(
+                #                 target_value,
+                #                 relationships=["resolutions", "subdomains", "communicating_files", "downloaded_files"]
+                #             )
+                #         elif is_url:
+                #             rel_data = await gti.get_url_report(
+                #                 target_value,
+                #                 relationships=["network_location", "downloaded_files", "contacted_domains", "contacted_ips"]
+                #             )
+                #
+                #         if rel_data and "data" in rel_data:
+                #             raw_rels = rel_data["data"].get("relationships", {})
+                #             new_entities_count = 0
+                #
+                #             for rel_name, rel_content in raw_rels.items():
+                #                 entities = rel_content.get("data", [])
+                #                 for entity in entities:
+                #                     entity_id = entity.get("id")
+                #                     entity_type = entity.get("type")
+                #                     entity_attrs = entity.get("attributes", {})
+                #
+                #                     cache.add_entity(
+                #                         entity_id=entity_id,
+                #                         entity_type=entity_type,
+                #                         attributes=entity_attrs
+                #                     )
+                #                     cache.add_relationship(target_value, entity_id, rel_name)
+                #                     new_entities_count += 1
+                #
+                #             logger.info(
+                #                 "infra_graph_expanded",
+                #                 target=target_value,
+                #                 new_entities=new_entities_count,
+                #                 relationships=list(raw_rels.keys())
+                #             )
+                #     except Exception as expand_err:
+                #         logger.error("infra_expansion_error", target=target_value, error=str(expand_err))
                 
                 # Mark all analyzed targets as investigated (for Lead Hunter tracking)
                 for target_info in unique_targets:
@@ -736,15 +734,6 @@ Seamlessly rewrite and update your PREVIOUS REPORT's findings to incorporate the
                 # [RACE CONDITION FIX] Do not update final_report here.
                 # Lead Hunter will assemble it to avoid race conditions.
 
-                
-                # Update Subtask Status
-                new_subtasks = []
-                for task in state.get("subtasks", []):
-                    if task.get("agent") in ["infrastructure_specialist", "infrastructure"]:
-                        task["status"] = "completed"
-                        task["result_summary"] = result.get("summary")
-                    new_subtasks.append(task)
-                state["subtasks"] = new_subtasks
                 
                 logger.info("infra_agent_success", verdict=result.get("verdict"))
             except Exception as e:

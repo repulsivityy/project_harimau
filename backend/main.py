@@ -462,6 +462,7 @@ async def _run_investigation_background(job_id: str, ioc: str, max_iterations: i
         raise
     finally:
         ACTIVE_TASKS.pop(job_id, None)
+        sse_manager.clear_history(job_id)
 
 @app.post("/api/investigations/{job_id}/cancel")
 async def cancel_investigation(job_id: str):

@@ -6,11 +6,12 @@ This document tracks the implementation of the network graph improvements in Pro
 - [x] Investigate and integrate a physics-based layout engine (e.g., `d3-force` or similar) with `ReactFlow`.
 - [x] Nodes should repel each other and edges should act as springs, creating an organic, VirusTotal-like graph layout.
 - [x] Ensure layout updates smoothly and handles initial loading properly.
+- [x] Ensure all nodes are connected to to the center of the graph
 
 ## 2. Custom Node Components (Icons & Rich Data)
-- [ ] Create a custom React component for nodes in `ReactFlow`.
-- [ ] Integrate icons based on entity type (e.g., globe for domain, terminal for IP, file for hash).
-- [ ] Display rich data on mouse hover (e.g., risk score, subtitles).
+- [x] Create a custom React component for nodes in `ReactFlow`.
+- [x] Integrate icons based on entity type (e.g., globe for domain, terminal for IP, file for hash).
+- [x] Display rich data on mouse hover (e.g., risk score, subtitles).
 
 ## 3. Node Selection and Detail Panel
 - [ ] Implement `onNodeClick` handler for graph nodes.
@@ -27,4 +28,4 @@ This document tracks the implementation of the network graph improvements in Pro
 
 ---
 
-**Current Status:** Step 1 completed. Moving to Step 2 (Custom Node Components).
+**Current Status:** Step 2 completed. Moving to Step 3.

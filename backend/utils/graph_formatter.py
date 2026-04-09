@@ -34,7 +34,8 @@ def format_investigation_graph(job_id: str, job: dict) -> dict:
             "label": root_label, 
             "color": "#FF4B4B",  # Red for IOC
             "size": 35,
-            "title": f"IOC: {ioc}\nType: {ioc_type}"
+            "title": f"IOC: {ioc}\nType: {ioc_type}",
+            "isRoot": True
         }
     ]
     edges = []

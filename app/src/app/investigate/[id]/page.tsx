@@ -76,6 +76,7 @@ interface BackendNode {
   color: string;
   size: number;
   title?: string;
+  isRoot?: boolean;
 }
 
 interface BackendEdge {
@@ -152,7 +153,7 @@ export default function InvestigatePage() {
               // Build d3 sim nodes — pin only the root node at center so the graph has a stable anchor
               const simNodes: any[] = graphData.nodes.map((n) => {
                 const pos = existingPositions.get(n.id);
-                const isRoot = n.id === "root";
+                const isRoot = n.isRoot === true;
                 return {
                   id: n.id,
                   x: pos?.x ?? (Math.random() - 0.5) * 500,
@@ -200,7 +201,7 @@ export default function InvestigatePage() {
               // Return pre-stabilised initial positions
               return graphData.nodes.map((n) => {
                 const sim = simNodeMap.get(n.id)!;
-                const isRoot = n.id === "root";
+                const isRoot = n.isRoot === true;
                 return {
                   id: n.id,
                   type: "custom",

@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -59,16 +60,19 @@ export default function Home() {
       {/* TopNavBar */}
       <header className="fixed top-0 left-0 w-full z-50 bg-[#0e0e10]/80 backdrop-blur-xl border-b-2 border-secondary/30 flex justify-between items-center px-6 py-4 shadow-[0_0_40px_rgba(255,124,245,0.15)]">
         <div className="flex items-center gap-8">
-          <span className="text-3xl font-black italic text-pink-500 drop-shadow-[0_0_10px_rgba(255,0,255,0.8)] font-headline tracking-tighter uppercase">
+          <Link
+            href="/"
+            className="text-3xl font-black italic text-pink-500 drop-shadow-[0_0_10px_rgba(255,0,255,0.8)] font-headline tracking-tighter uppercase"
+          >
             HARIMAU
-          </span>
+          </Link>
           <nav className="hidden md:flex space-x-8">
-            <a
+            <Link
               className="text-pink-500 border-b-4 border-pink-500 pb-2 font-headline tracking-tighter uppercase"
-              href="#"
+              href="/"
             >
               HUNT
-            </a>
+            </Link>
             <a
               className="text-cyan-400/60 hover:text-yellow-400 font-headline tracking-tighter uppercase"
               href="#"

@@ -612,7 +612,7 @@ Seamlessly rewrite and update your PREVIOUS REPORT's findings to incorporate the
                         
                         if is_ip:
                             # Fetch IP relationships
-                            rel_data = await gti.get_ip_address_report(
+                            rel_data = await gti.get_ip_report(
                                 target_value,
                                 relationships=["resolutions", "communicating_files", "downloaded_files"]
                             )

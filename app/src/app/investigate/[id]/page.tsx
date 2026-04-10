@@ -405,9 +405,19 @@ export default function InvestigatePage() {
         <div className="flex items-center gap-8">
           <Link
             href="/"
-            className="text-3xl font-black italic text-pink-500 drop-shadow-[0_0_10px_rgba(255,0,255,0.8)] font-headline tracking-tighter uppercase"
+            className="flex items-center gap-3 hover:opacity-80 transition-opacity"
           >
-            HARIMAU
+            <div className="w-10 h-10 border-2 border-pink-500 rounded-sm overflow-hidden relative">
+              <Image
+                src="/avatar.jpeg"
+                alt="Harimau Logo"
+                fill
+                className="object-cover"
+              />
+            </div>
+            <span className="text-3xl font-black italic text-pink-500 drop-shadow-[0_0_10px_rgba(255,0,255,0.8)] font-headline tracking-tighter uppercase">
+              HARIMAU
+            </span>
           </Link>
           <nav className="hidden md:flex space-x-8">
             <Link

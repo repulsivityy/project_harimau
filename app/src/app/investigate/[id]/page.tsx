@@ -9,6 +9,51 @@ import { Background, BackgroundVariant, Controls, MiniMap, ReactFlow, useNodesSt
 import { forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY } from "d3-force";
 import "@xyflow/react/dist/style.css";
 
+// Custom Markdown Renderer for high readability
+const MarkdownRenderer = ({ content }: { content: string }) => (
+  <ReactMarkdown
+    className="font-body text-sm md:text-base leading-relaxed text-gray-300 space-y-4"
+    components={{
+      h1: ({ node, ...props }) => <h1 className="text-2xl md:text-3xl font-headline font-black text-pink-500 mt-8 mb-4 uppercase tracking-tighter" {...props} />,
+      h2: ({ node, ...props }) => <h2 className="text-xl md:text-2xl font-headline font-bold text-cyan-400 mt-8 mb-4 border-b border-cyan-400/20 pb-2 uppercase tracking-wide" {...props} />,
+      h3: ({ node, ...props }) => <h3 className="text-lg md:text-xl font-headline font-bold text-[#fffbfe] mt-6 mb-3 uppercase" {...props} />,
+      h4: ({ node, ...props }) => <h4 className="text-base font-headline font-semibold text-gray-200 mt-4 mb-2" {...props} />,
+      p: ({ node, ...props }) => <p className="mb-4 text-gray-300" {...props} />,
+      ul: ({ node, ...props }) => <ul className="list-disc pl-6 mb-4 space-y-2 marker:text-pink-500" {...props} />,
+      ol: ({ node, ...props }) => <ol className="list-decimal pl-6 mb-4 space-y-2 marker:text-cyan-400" {...props} />,
+      li: ({ node, ...props }) => <li className="pl-1" {...props} />,
+      table: ({ node, ...props }) => <div className="overflow-x-auto mb-6 rounded border border-cyan-400/20"><table className="w-full text-left border-collapse text-sm" {...props} /></div>,
+      thead: ({ node, ...props }) => <thead className="bg-[#19191c] text-cyan-400" {...props} />,
+      th: ({ node, ...props }) => <th className="p-3 font-semibold tracking-wide border-b border-cyan-400/20 whitespace-nowrap" {...props} />,
+      td: ({ node, ...props }) => <td className="p-3 border-b border-[#19191c] text-gray-300" {...props} />,
+      tr: ({ node, ...props }) => <tr className="hover:bg-[#19191c]/50 transition-colors" {...props} />,
+      strong: ({ node, ...props }) => <strong className="font-bold text-[#fffbfe]" {...props} />,
+      a: ({ node, ...props }) => <a className="text-cyan-400 hover:text-pink-500 underline decoration-cyan-400/30 underline-offset-2 transition-colors" {...props} />,
+      blockquote: ({ node, ...props }) => <blockquote className="border-l-4 border-pink-500 bg-[#19191c] py-3 px-5 mb-4 italic text-gray-400 rounded-r" {...props} />,
+      code(props) {
+        const { children, className, node, ...rest } = props;
+        const match = /language-(\w+)/.exec(className || '');
+        const isInline = !match && !className;
+        return isInline ? (
+          <code className="bg-[#19191c] text-pink-400 px-1.5 py-0.5 rounded text-sm font-mono border border-pink-500/10" {...rest}>
+            {children}
+          </code>
+        ) : (
+          <div className="relative mb-4 group">
+            <pre className="bg-[#0e0e10] p-4 rounded border border-cyan-400/20 overflow-x-auto text-xs md:text-sm font-mono text-cyan-300 shadow-inner">
+              <code className={className} {...rest}>
+                {children}
+              </code>
+            </pre>
+          </div>
+        );
+      }
+    }}
+  >
+    {content}
+  </ReactMarkdown>
+);
+
 // Typewriter Component for smoother report reading
 const Typewriter = ({ text, speed = 1 }: { text: string; speed?: number }) => {
   const [displayedText, setDisplayedText] = useState("");
@@ -26,7 +71,7 @@ const Typewriter = ({ text, speed = 1 }: { text: string; speed?: number }) => {
     }
   }, [index, text, speed]);
 
-  return <ReactMarkdown className="markdown-report">{displayedText}</ReactMarkdown>;
+  return <MarkdownRenderer content={displayedText} />;
 };
 
 // Precompiled Regexes
@@ -704,30 +749,30 @@ export default function InvestigatePage() {
                     )}
                   </div>
                 ) : tile.isTriage && tile.content ? (
-                   <div className="flex-grow flex flex-col justify-center gap-4 mt-2">
-                      <div className="flex justify-between items-end border-b border-cyan-400/20 pb-2">
+                   <div className="flex-grow flex flex-col justify-center gap-5 mt-2">
+                      <div className="flex justify-between items-end border-b border-cyan-400/20 pb-3">
                         <div>
-                          <p className="text-[10px] font-label text-cyan-400/40 uppercase">GTI Verdict</p>
-                          <p className={`text-xl font-headline font-black italic tracking-tighter ${(tile.content as any).verdict.toUpperCase() === 'MALICIOUS' ? 'text-pink-500' : 'text-cyan-400'}`}>
+                          <p className="text-xs font-label text-cyan-400/60 uppercase mb-1">GTI Verdict</p>
+                          <p className={`text-3xl font-headline font-black italic tracking-tighter ${(tile.content as any).verdict.toUpperCase() === 'MALICIOUS' ? 'text-pink-500' : 'text-cyan-400'}`}>
                             {(tile.content as any).verdict}
                           </p>
                         </div>
                         <div className="text-right">
-                          <p className="text-[10px] font-label text-cyan-400/40 uppercase">Threat Score</p>
-                          <p className="text-xl font-headline font-black text-[#fffbfe]">
-                            {(tile.content as any).score}<span className="text-xs text-cyan-400/40">/100</span>
+                          <p className="text-xs font-label text-cyan-400/60 uppercase mb-1">Threat Score</p>
+                          <p className="text-3xl font-headline font-black text-[#fffbfe]">
+                            {(tile.content as any).score}<span className="text-lg text-cyan-400/40">/100</span>
                           </p>
                         </div>
                       </div>
                       
-                      <div className="flex justify-between items-center bg-[#0e0e10] p-3 border border-cyan-400/10">
+                      <div className="flex justify-between items-center bg-[#0e0e10] p-4 rounded border border-cyan-400/10">
                         <div>
-                          <p className="text-[10px] font-label text-cyan-400/60 uppercase">VT Detections</p>
-                          <p className="text-lg font-headline font-black text-cyan-400">
-                            {(tile.content as any).malicious}<span className="text-xs text-cyan-400/40"> / {(tile.content as any).total}</span>
+                          <p className="text-xs font-label text-cyan-400/80 uppercase">VT Detections</p>
+                          <p className="text-xl font-headline font-black text-cyan-400">
+                            {(tile.content as any).malicious}<span className="text-sm text-cyan-400/40"> / {(tile.content as any).total}</span>
                           </p>
                         </div>
-                        <div className="w-24 h-1.5 bg-[#19191c] rounded-full overflow-hidden">
+                        <div className="w-32 h-2 bg-[#19191c] rounded-full overflow-hidden shadow-inner">
                            <div 
                              className={`h-full ${(tile.content as any).malicious > 0 ? 'bg-pink-500' : 'bg-green-400'}`} 
                              style={{ width: `${Math.min(((tile.content as any).malicious / ((tile.content as any).total || 1)) * 100, 100)}%` }}
@@ -735,7 +780,7 @@ export default function InvestigatePage() {
                         </div>
                       </div>
                       
-                      <p className="text-[10px] font-body text-[#adaaad] line-clamp-2 italic">
+                      <p className="text-xs md:text-sm font-body text-gray-300 line-clamp-3 italic leading-relaxed">
                         "{(tile.content as any).summary}"
                       </p>
                    </div>
@@ -799,38 +844,36 @@ export default function InvestigatePage() {
               ) : (
                 <>
                   {expandedTile === 1 && (
-                    <div className="space-y-4">
+                    <div className="space-y-6">
                       <section>
-                        <h3 className="text-xl font-headline font-black text-pink-500 uppercase mb-2">
+                        <h3 className="text-2xl font-headline font-black text-pink-500 uppercase mb-4">
                           Triage Report
                         </h3>
-                        <div className="prose prose-invert max-w-none">
-                           <ReactMarkdown>
-                             {job?.rich_intel?.triage_analysis?.markdown_report || "No summary available."}
-                           </ReactMarkdown>
+                        <div className="bg-[#0e0e10] p-6 rounded border border-cyan-400/20 shadow-lg">
+                           <MarkdownRenderer content={job?.rich_intel?.triage_analysis?.markdown_report || "No summary available."} />
                         </div>
                       </section>
                       <section>
-                        <h3 className="text-xl font-headline font-black text-pink-500 uppercase mb-2 mt-8">
+                        <h3 className="text-2xl font-headline font-black text-pink-500 uppercase mb-4 mt-8">
                           Generated Tasks
                         </h3>
-                        <ul className="space-y-2">
+                        <ul className="space-y-4">
                           {job?.subtasks?.map((task: any, idx: number) => (
                             <li
-                              className="bg-[#19191c] p-4 border-l-2 border-cyan-400"
+                              className="bg-[#19191c] p-5 border-l-4 border-cyan-400 shadow-md"
                               key={idx}
                             >
-                              <div className="flex justify-between items-center mb-1">
-                                <strong className="font-headline text-[#fffbfe] uppercase tracking-tighter">
+                              <div className="flex justify-between items-center mb-2">
+                                <strong className="font-headline text-[#fffbfe] text-lg uppercase tracking-tighter">
                                   {task.agent}
                                 </strong>
                                 <span
-                                  className={`text-xs font-label uppercase ${task.status === "completed" ? "text-green-400" : "text-yellow-400"}`}
+                                  className={`text-sm font-label uppercase ${task.status === "completed" ? "text-green-400" : "text-yellow-400"}`}
                                 >
                                   {task.status}
                                 </span>
                               </div>
-                              <p className="text-xs text-[#adaaad]">
+                              <p className="text-sm text-gray-300 leading-relaxed">
                                 {task.task}
                               </p>
                             </li>
@@ -841,7 +884,7 @@ export default function InvestigatePage() {
                   )}
                   {expandedTile === 3 && (
                     <div className="space-y-6">
-                      <h3 className="text-xl font-headline font-black text-pink-500 uppercase mb-4">
+                      <h3 className="text-2xl font-headline font-black text-pink-500 uppercase mb-6">
                         Specialist Reports
                       </h3>
                       {job?.specialist_results ? (
@@ -849,28 +892,26 @@ export default function InvestigatePage() {
                           ([agent, result]: [string, any]) => (
                             <div
                               key={agent}
-                              className="bg-[#19191c] p-6 border-l-2 border-cyan-400"
+                              className="bg-[#19191c] p-8 border-l-4 border-cyan-400 shadow-xl mb-6"
                             >
-                              <div className="flex justify-between items-center mb-4">
-                                <h4 className="font-headline text-lg font-black text-[#fffbfe] uppercase tracking-tighter">
+                              <div className="flex justify-between items-center mb-6">
+                                <h4 className="font-headline text-xl md:text-2xl font-black text-[#fffbfe] uppercase tracking-tighter">
                                   {agent.replace("_", " ").toUpperCase()}
                                 </h4>
                                 <span
-                                  className={`text-xs font-label uppercase ${result.verdict?.toUpperCase() === "MALICIOUS" ? "text-pink-500" : result.verdict?.toUpperCase() === "SUSPICIOUS" ? "text-yellow-400" : "text-green-400"}`}
+                                  className={`text-sm md:text-base font-label uppercase ${result.verdict?.toUpperCase() === "MALICIOUS" ? "text-pink-500" : result.verdict?.toUpperCase() === "SUSPICIOUS" ? "text-yellow-400" : "text-green-400"}`}
                                 >
                                   {result.verdict || "N/A"}
                                 </span>
                               </div>
-                              <div className="prose prose-invert max-w-none text-xs leading-relaxed text-[#adaaad] bg-[#0e0e10] p-4 border border-cyan-400/20">
-                                <ReactMarkdown>
-                                  {result.markdown_report || "No report content."}
-                                </ReactMarkdown>
+                              <div className="bg-[#0e0e10] p-6 md:p-8 rounded border border-cyan-400/20 shadow-inner overflow-x-auto">
+                                <MarkdownRenderer content={result.markdown_report || "No report content."} />
                               </div>
                             </div>
                           ),
                         )
                       ) : (
-                        <p className="text-sm text-[#adaaad]">
+                        <p className="text-base text-gray-400 italic">
                           No specialist reports available.
                         </p>
                       )}
@@ -878,11 +919,11 @@ export default function InvestigatePage() {
                   )}
                   {expandedTile === 4 && (
                     <div className="space-y-4">
-                      <h3 className="text-xl font-headline font-black text-pink-500 uppercase mb-4">
+                      <h3 className="text-2xl font-headline font-black text-pink-500 uppercase mb-6">
                         Final Intelligence Report
                       </h3>
-                      <div className="bg-[#19191c] p-6 border-l-2 border-cyan-400">
-                        <div className="prose prose-invert max-w-none text-sm leading-relaxed text-[#adaaad] bg-[#0e0e10] p-4 border border-cyan-400/20">
+                      <div className="bg-[#19191c] p-6 md:p-8 border-l-4 border-cyan-400 shadow-2xl">
+                        <div className="bg-[#0e0e10] p-6 md:p-8 rounded border border-cyan-400/20 shadow-inner overflow-x-auto">
                           <Typewriter text={job?.final_report || "No report available."} speed={5} />
                         </div>
                       </div>

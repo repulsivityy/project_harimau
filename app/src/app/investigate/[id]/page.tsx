@@ -4,9 +4,30 @@ import Image from "next/image";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState, useRef, ChangeEvent } from "react";
+import ReactMarkdown from "react-markdown";
 import { Background, Controls, MiniMap, ReactFlow, useNodesState, useEdgesState, Handle, Position } from "@xyflow/react";
 import { forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY } from "d3-force";
 import "@xyflow/react/dist/style.css";
+
+// Typewriter Component for smoother report reading
+const Typewriter = ({ text, speed = 1 }: { text: string; speed?: number }) => {
+  const [displayedText, setDisplayedText] = useState("");
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    if (index < text.length) {
+      const timeout = setTimeout(() => {
+        // Append next chunk of characters for faster "typewriter" effect
+        const chunk = text.slice(index, index + 20);
+        setDisplayedText((prev) => prev + chunk);
+        setIndex((prev) => prev + 20);
+      }, speed);
+      return () => clearTimeout(timeout);
+    }
+  }, [index, text, speed]);
+
+  return <ReactMarkdown className="markdown-report">{displayedText}</ReactMarkdown>;
+};
 
 // Precompiled Regexes
 const IP_REGEX = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/;
@@ -345,9 +366,16 @@ export default function InvestigatePage() {
       title: "Triage & Plan",
       icon: "radar",
       size: "col-span-12 lg:col-span-5",
+      isTriage: true,
       content: job
-        ? `Status: ${job.status}\nVerdict: ${job.risk_level || "Unknown"}\nScore: ${job.gti_score || "N/A"}`
-        : "Loading triage data...",
+        ? {
+            verdict: job.risk_level || "Unknown",
+            score: job.gti_score || "N/A",
+            malicious: job.rich_intel?.malicious_stats || 0,
+            total: job.rich_intel?.total_stats || 0,
+            summary: job.rich_intel?.triage_summary || ""
+          }
+        : null,
     },
     {
       id: 2,
@@ -581,9 +609,45 @@ export default function InvestigatePage() {
                       </ReactFlow>
                     )}
                   </div>
+                ) : tile.isTriage && tile.content ? (
+                   <div className="flex-grow flex flex-col justify-center gap-4 mt-2">
+                      <div className="flex justify-between items-end border-b border-cyan-400/20 pb-2">
+                        <div>
+                          <p className="text-[10px] font-label text-cyan-400/40 uppercase">GTI Verdict</p>
+                          <p className={`text-xl font-headline font-black italic tracking-tighter ${(tile.content as any).verdict.toUpperCase() === 'MALICIOUS' ? 'text-pink-500' : 'text-cyan-400'}`}>
+                            {(tile.content as any).verdict}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[10px] font-label text-cyan-400/40 uppercase">Threat Score</p>
+                          <p className="text-xl font-headline font-black text-[#fffbfe]">
+                            {(tile.content as any).score}<span className="text-xs text-cyan-400/40">/100</span>
+                          </p>
+                        </div>
+                      </div>
+                      
+                      <div className="flex justify-between items-center bg-[#0e0e10] p-3 border border-cyan-400/10">
+                        <div>
+                          <p className="text-[10px] font-label text-cyan-400/60 uppercase">VT Detections</p>
+                          <p className="text-lg font-headline font-black text-cyan-400">
+                            {(tile.content as any).malicious}<span className="text-xs text-cyan-400/40"> / {(tile.content as any).total}</span>
+                          </p>
+                        </div>
+                        <div className="w-24 h-1.5 bg-[#19191c] rounded-full overflow-hidden">
+                           <div 
+                             className={`h-full ${(tile.content as any).malicious > 0 ? 'bg-pink-500' : 'bg-green-400'}`} 
+                             style={{ width: `${Math.min(((tile.content as any).malicious / ((tile.content as any).total || 1)) * 100, 100)}%` }}
+                           />
+                        </div>
+                      </div>
+                      
+                      <p className="text-[10px] font-body text-[#adaaad] line-clamp-2 italic">
+                        "{(tile.content as any).summary}"
+                      </p>
+                   </div>
                 ) : (
                   <p className="font-label text-xs text-cyan-400/60 mt-2">
-                    {tile.content}
+                    {tile.content as string}
                   </p>
                 )}
 
@@ -641,14 +705,16 @@ export default function InvestigatePage() {
                     <div className="space-y-4">
                       <section>
                         <h3 className="text-xl font-headline font-black text-pink-500 uppercase mb-2">
-                          Triage Summary
+                          Triage Report
                         </h3>
-                        <p className="text-sm text-[#adaaad] font-body whitespace-pre-wrap">
-                          {job?.rich_intel?.triage_summary || "No summary available."}
-                        </p>
+                        <div className="prose prose-invert max-w-none">
+                           <ReactMarkdown>
+                             {job?.rich_intel?.triage_analysis?.markdown_report || "No summary available."}
+                           </ReactMarkdown>
+                        </div>
                       </section>
                       <section>
-                        <h3 className="text-xl font-headline font-black text-pink-500 uppercase mb-2">
+                        <h3 className="text-xl font-headline font-black text-pink-500 uppercase mb-2 mt-8">
                           Generated Tasks
                         </h3>
                         <ul className="space-y-2">
@@ -698,9 +764,11 @@ export default function InvestigatePage() {
                                   {result.verdict || "N/A"}
                                 </span>
                               </div>
-                              <pre className="whitespace-pre-wrap text-[11px] leading-relaxed text-[#adaaad] font-mono bg-[#0e0e10] p-4 border border-cyan-400/20">
-                                {result.markdown_report || "No report content."}
-                              </pre>
+                              <div className="prose prose-invert max-w-none text-xs leading-relaxed text-[#adaaad] bg-[#0e0e10] p-4 border border-cyan-400/20">
+                                <ReactMarkdown>
+                                  {result.markdown_report || "No report content."}
+                                </ReactMarkdown>
+                              </div>
                             </div>
                           ),
                         )
@@ -717,9 +785,9 @@ export default function InvestigatePage() {
                         Final Intelligence Report
                       </h3>
                       <div className="bg-[#19191c] p-6 border-l-2 border-cyan-400">
-                        <pre className="whitespace-pre-wrap text-xs leading-relaxed text-[#adaaad] font-mono bg-[#0e0e10] p-4 border border-cyan-400/20">
-                          {job?.final_report || "No report available."}
-                        </pre>
+                        <div className="prose prose-invert max-w-none text-sm leading-relaxed text-[#adaaad] bg-[#0e0e10] p-4 border border-cyan-400/20">
+                          <Typewriter text={job?.final_report || "No report available."} speed={5} />
+                        </div>
                       </div>
                     </div>
                   )}

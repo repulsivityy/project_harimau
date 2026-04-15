@@ -229,8 +229,8 @@ def extract_triage_data(data: dict, ioc_type: str) -> dict:
         return curr
         
     triage_data["id"] = data.get("id")
-    triage_data["malicious_stats"] = get_val(data, "attributes.last_analysis_stats.malicious")
     stats = get_val(data, "attributes.last_analysis_stats") or {}
+    triage_data["malicious_stats"] = stats.get("malicious", 0)
     triage_data["total_stats"] = (
         stats.get("malicious", 0) + 
         stats.get("harmless", 0) + 
@@ -271,7 +271,7 @@ def prepare_detailed_context_for_llm(relationships_data: dict) -> dict:
     
     return detailed_context
 
-def generate_markdown_report_locally(analysis: dict, ioc: str, ioc_type: str) -> str:
+def generate_markdown_report_locally(analysis: dict, ioc: str, ioc_type: str, triage_data: dict = None) -> str:
     """
     Generates a markdown report from the structured JSON analysis.
     This avoids JSON parsing errors caused by large markdown strings in LLM output.
@@ -279,14 +279,27 @@ def generate_markdown_report_locally(analysis: dict, ioc: str, ioc_type: str) ->
     try:
         md = f"## IOC Triage Report\n\n"
         
-        # 1. IOC Summary
-        md += "### IOC Summary\n"
-        md += f"*   **IOC Type:** {ioc_type}\n"
-        md += f"*   **IOC Value:** `{ioc}`\n"
-        md += f"*   **Verdict:** {analysis.get('verdict', 'Unknown')}\n"
+        # 1. Detection Summary (GTI + VT)
+        md += "### Detection Summary\n"
+        verdict = analysis.get('verdict', triage_data.get('verdict') if triage_data else 'Unknown')
+        score = analysis.get('threat_score', triage_data.get('threat_score') if triage_data else 'N/A')
+        
+        # Color-coded verdict (emoji-based for markdown)
+        v_emoji = "✅"
+        if verdict.lower() == "malicious": v_emoji = "🔴"
+        elif verdict.lower() == "suspicious": v_emoji = "🟠"
+        
+        md += f"*   **GTI Verdict:** {v_emoji} **{verdict}**\n"
+        md += f"*   **Threat Score:** `{score}/100`\n"
+        
+        if triage_data and triage_data.get("total_stats"):
+            m = triage_data.get("malicious_stats", 0)
+            t = triage_data["total_stats"]
+            ratio = (m / t) * 100 if t > 0 else 0
+            md += f"*   **VT Detection Ratio:** `{m}/{t}` ({ratio:.1f}%)\n"
+        
         md += f"*   **Confidence:** {analysis.get('confidence', 'Unknown')}\n"
-        md += f"*   **Severity:** {analysis.get('severity', 'Unknown')}\n"
-        md += f"*   **Threat Score:** {analysis.get('threat_score', 'N/A')}\n\n"
+        md += f"*   **Severity:** {analysis.get('severity', 'Unknown')}\n\n"
         
         # 2. Executive Summary
         md += "### Executive Summary\n"
@@ -471,7 +484,7 @@ Perform comprehensive first-level triage analysis now.
                     logger.error("triage_webrisk_failed", error=str(e))
                     analysis["webrisk_result"] = {"error": str(e)}
         
-        analysis["markdown_report"] = generate_markdown_report_locally(analysis, ioc, ioc_type)
+        analysis["markdown_report"] = generate_markdown_report_locally(analysis, ioc, ioc_type, triage_data)
         analysis["_llm_reasoning"] = final_text  # Store for transparency
         
         # Emit LLM reasoning for real-time transparency
@@ -495,7 +508,7 @@ Perform comprehensive first-level triage analysis now.
         import traceback
         tb = traceback.format_exc()
         
-        return {
+        analysis = {
             "ioc_type": ioc_type,
             "verdict": triage_data.get("verdict", "Unknown"),
             "confidence": "Low",
@@ -512,6 +525,8 @@ Perform comprehensive first-level triage analysis now.
             "investigation_notes": f"System Error: {str(e)}",
             "_llm_reasoning": f"## Parsing Error\n\nThe LLM output could not be parsed:\n\n```\n{str(e)}\n```\n\n### Raw Output\n```\n{final_text if 'final_text' in locals() else str(response.content)}\n```\n\n### Traceback\n```\n{tb}\n```"
         }
+        analysis["markdown_report"] = generate_markdown_report_locally(analysis, ioc, ioc_type, triage_data)
+        return analysis
 
 
 async def triage_node(state: AgentState):

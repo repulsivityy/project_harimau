@@ -106,14 +106,31 @@ async def run_planning_phase(state: AgentState, llm, cache: InvestigationCache, 
     specialist_data = state.get("specialist_results", {})
 
     # 1. Gather Context
-    context_str = f"""
-    **Triage Context:**
-    {str(triage_data.get('triage_analysis', {}).get('executive_summary', 'N/A'))}
-
-    **Specialist Findings (Latest):**
-    """
+    context_str = f"**Triage Context:**\n{str(triage_data.get('triage_analysis', {}).get('executive_summary', 'N/A'))}\n\n"
+    context_str += "**Specialist Findings (Latest):**\n"
     for agent, res in specialist_data.items():
-        context_str += f"- {agent}: {res.get('summary', 'No summary')}\n"
+        context_str += f"\n#### {agent.replace('_', ' ').title()}:\n"
+        context_str += f"Verdict: {res.get('verdict', 'N/A')} | Summary: {res.get('summary', 'No summary')}\n"
+
+        # Network indicators from malware specialist — these are confirmed C2 and need infra investigation
+        if res.get("network_indicators"):
+            context_str += "Network indicators found (need infrastructure investigation — Shodan/passive DNS not yet run):\n"
+            for ind in res["network_indicators"][:15]:
+                context_str += f"  - {ind}\n"
+
+        # Related infrastructure from infra specialist — may host malware files
+        if res.get("related_indicators"):
+            context_str += "Related infrastructure discovered (may serve malicious files):\n"
+            for ind in res["related_indicators"][:15]:
+                context_str += f"  - {ind}\n"
+
+        # Already-analyzed targets — do not re-task these
+        analyzed = res.get("analyzed_targets", [])
+        if analyzed:
+            ids = [t.get("value") or t if isinstance(t, dict) else str(t) for t in analyzed[:10]]
+            ids = [i for i in ids if i]
+            if ids:
+                context_str += f"Already analyzed (do NOT re-task): {', '.join(ids)}\n"
 
     # 2. Format pre-filtered uninvestigated nodes (passed in from lead_hunter_node)
     try:

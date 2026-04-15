@@ -583,9 +583,41 @@ Seamlessly rewrite and update your PREVIOUS REPORT's findings to incorporate the
                     raise ValueError(f"No JSON structure found in LLM output. Content starts with: {final_text[:100]}")
 
                 
-                # Generate Report
+                # --- Code-enforced accumulation ---
+                # Merge previous iteration's findings regardless of LLM behaviour.
+                prev = state.get("specialist_results", {}).get("infrastructure", {})
+                if prev:
+                    # analyzed_targets: keyed by indicator; newer analysis wins for same target
+                    prev_by_ind = {t["indicator"]: t for t in prev.get("analyzed_targets", []) if isinstance(t, dict) and t.get("indicator")}
+                    new_by_ind  = {t["indicator"]: t for t in result.get("analyzed_targets", []) if isinstance(t, dict) and t.get("indicator")}
+                    result["analyzed_targets"] = list({**prev_by_ind, **new_by_ind}.values())
+
+                    # Ordered-set union for all accumulating list fields
+                    for field in ["pivot_findings", "related_indicators", "associated_campaigns"]:
+                        seen, merged = set(), []
+                        for v in prev.get(field, []) + result.get(field, []):
+                            if v not in seen:
+                                seen.add(v)
+                                merged.append(v)
+                        result[field] = merged
+
+                    llm_target_count    = len(new_by_ind)
+                    merged_target_count = len(result["analyzed_targets"])
+                    logger.info("infra_incremental_merge",
+                                prev_targets=len(prev_by_ind),
+                                llm_new_targets=llm_target_count,
+                                merged_targets=merged_target_count,
+                                python_recovered=merged_target_count - llm_target_count,
+                                merged_pivot_findings=len(result.get("pivot_findings", [])),
+                                merged_related_indicators=len(result.get("related_indicators", [])))
+                    if llm_target_count < len(prev_by_ind):
+                        logger.warning("infra_incremental_regression",
+                                       detail="LLM dropped analyzed_targets from previous iteration — Python enforcement recovered them",
+                                       prev=len(prev_by_ind), llm_produced=llm_target_count, after_merge=merged_target_count)
+
+                # Generate Report from merged result
                 result["markdown_report"] = generate_infrastructure_markdown_report(result, ioc)
-                
+
                 # Emit final LLM reasoning for transparency (matches triage pattern)
                 job_id = state.get("job_id")
                 if job_id and 'final_text' in locals():

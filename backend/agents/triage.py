@@ -146,8 +146,10 @@ For MALICIOUS files:
 - Who made it? (associations → campaigns/actors)
 - How does it work? (attack_techniques)
 - Where is the infrastructure? (contacted_domains/ips)
-- **ACTION**: Assign to `malware_specialist` if file analysis is needed.
-- **ACTION**: Assign to `infrastructure_specialist` if critical C2 IPs/Domains need deep pivoting.
+- **ACTION**: ALWAYS assign the root file hash to `malware_specialist` for deep behavioral and capability analysis.
+- **ACTION**: For EACH entity in `contacted_domains`, `contacted_ips`, `contacted_urls`, `embedded_domains`, or `embedded_ips` relationships — create a SEPARATE `infrastructure_specialist` subtask. Do NOT skip this even if the malware specialist will also call network activity tools. The infrastructure specialist has Shodan, WebRisk, and passive DNS tools that the malware specialist does NOT have.
+- **ACTION**: For EACH entity in `dropped_files` relationships — create a SEPARATE `malware_specialist` subtask.
+- Do NOT bundle multiple entities into a single subtask. One entity = one subtask.
 
 For MALICIOUS infrastructure (IP/Domain):
 - What's hosted here? (downloaded_files, urls)

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState, useRef, ChangeEvent } from "react";
 import ReactMarkdown from "react-markdown";
-import { Background, Controls, MiniMap, ReactFlow, useNodesState, useEdgesState, Handle, Position } from "@xyflow/react";
+import { Background, BackgroundVariant, Controls, MiniMap, ReactFlow, useNodesState, useEdgesState, Handle, Position, MarkerType } from "@xyflow/react";
 import { forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY } from "d3-force";
 import "@xyflow/react/dist/style.css";
 
@@ -33,64 +33,152 @@ const Typewriter = ({ text, speed = 1 }: { text: string; speed?: number }) => {
 const IP_REGEX = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/;
 const HASH_REGEX = /^[a-fA-F0-9]{32,64}$/;
 
-// Custom Node Component
+// Custom Node Component — Wiz-inspired dark security graph style
 const CustomNode = ({ data, style }: any) => {
-  // Determine icon based on label or title
   let icon = "hub";
   const label = data.label || "";
   const title = data.title || "";
-  
-  if (IP_REGEX.test(label)) {
-    icon = "terminal"; // IP
-  } else if (label.startsWith("http")) {
-    icon = "link"; // URL
-  } else if (HASH_REGEX.test(label)) {
-    icon = "description"; // Hash/File
-  } else if (label.includes(".")) {
-    icon = "language"; // Domain (globe)
-  }
 
-  // Check if it's a specialist node (marked by title or label in backend)
-  if (title.includes("Specialist") || label.includes("specialist")) {
-    icon = "smart_toy";
-  }
+  if (IP_REGEX.test(label)) icon = "router";
+  else if (label.startsWith("http")) icon = "link";
+  else if (HASH_REGEX.test(label)) icon = "fingerprint";
+  else if (label.includes(".")) icon = "language";
 
-  // Root node
-  if (data.isRoot) {
-    icon = "radar";
-  }
+  if (title.includes("Specialist") || label.includes("specialist")) icon = "manage_search";
+  if (data.isRoot) icon = "my_location";
+
+  const isMalicious = data.isMalicious;
+  const isRoot = data.isRoot;
+  const nodeSize = style?.width || 48;
+  const iconSize = Math.max(14, nodeSize * 0.38);
+
+  const borderColor = isRoot ? "#3b82f6" : isMalicious ? "#dc2626" : "#1e2844";
+  const glowShadow = isRoot
+    ? "0 0 20px rgba(59,130,246,0.4), inset 0 1px 0 rgba(255,255,255,0.05)"
+    : isMalicious
+    ? "0 0 20px rgba(220,38,38,0.35), inset 0 1px 0 rgba(255,255,255,0.03)"
+    : "inset 0 1px 0 rgba(255,255,255,0.03)";
+  const iconColor = isRoot ? "#60a5fa" : isMalicious ? "#f87171" : "#3d4f6e";
+  const bgGradient = isRoot
+    ? "linear-gradient(145deg, #1e3158 0%, #111d3a 100%)"
+    : isMalicious
+    ? "linear-gradient(145deg, #3a1010 0%, #180808 100%)"
+    : "linear-gradient(145deg, #141b2c 0%, #0d1320 100%)";
+  const truncatedLabel = label.length > 16 ? label.substring(0, 14) + "…" : label;
 
   return (
-    <div
-      className="relative group flex items-center justify-center rounded-full"
-      style={{
-        ...style,
-        transition: "all 0.2s ease",
-        boxShadow: data.isMalicious ? "0 0 15px 5px rgba(239, 68, 68, 0.4)" : style?.boxShadow,
-      }}
-    >
-      <Handle type="target" position={Position.Top} className="opacity-0 absolute" style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }} />
-      <Handle type="source" position={Position.Bottom} className="opacity-0 absolute" style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }} />
+    <div className="relative group flex flex-col items-center" style={{ overflow: "visible" }}>
+      <Handle type="target" position={Position.Top} className="!opacity-0 !absolute" style={{ left: "50%", top: "50%", transform: "translate(-50%,-50%)" }} />
+      <Handle type="source" position={Position.Bottom} className="!opacity-0 !absolute" style={{ left: "50%", top: "50%", transform: "translate(-50%,-50%)" }} />
 
-      <div className="flex flex-col items-center justify-center pointer-events-none">
-        <span className="material-symbols-outlined" style={{ fontSize: "1.2em" }}>
+      {/* Circle */}
+      <div
+        style={{
+          width: nodeSize,
+          height: nodeSize,
+          borderRadius: "50%",
+          background: bgGradient,
+          border: `1.5px solid ${borderColor}`,
+          boxShadow: glowShadow,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          transition: "all 0.2s ease",
+          position: "relative",
+        }}
+      >
+        <span className="material-symbols-outlined" style={{ fontSize: iconSize, color: iconColor, userSelect: "none" }}>
           {icon}
         </span>
-        {data.isRoot && (
-          <span className="text-[0.6em] text-center px-1 overflow-hidden text-ellipsis whitespace-nowrap w-full">
-            {label}
-          </span>
+        {/* Malicious pulse ring */}
+        {isMalicious && (
+          <div
+            className="animate-ping"
+            style={{
+              position: "absolute",
+              inset: -4,
+              borderRadius: "50%",
+              border: "1px solid rgba(220,38,38,0.35)",
+              pointerEvents: "none",
+            }}
+          />
         )}
       </div>
 
-      {/* Tooltip on hover */}
-      <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 w-48 bg-[#19191c]/95 backdrop-blur border border-pink-500 p-2 rounded shadow-xl opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none text-left">
-        <div className="text-[10px] text-cyan-400 font-label uppercase mb-1 border-b border-cyan-400/30 pb-1 break-all">
-          {label}
+      {/* Label below */}
+      <div
+        style={{
+          marginTop: 5,
+          fontSize: 10,
+          color: isMalicious ? "#f87171" : isRoot ? "#4a6fa8" : "#2e3c54",
+          fontFamily: "'JetBrains Mono', 'Fira Code', 'Courier New', monospace",
+          letterSpacing: "0.02em",
+          maxWidth: 90,
+          textAlign: "center",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          pointerEvents: "none",
+        }}
+      >
+        {truncatedLabel}
+      </div>
+
+      {/* Tooltip */}
+      <div
+        className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 pointer-events-none"
+        style={{ width: 230, transition: "opacity 0.15s ease", zIndex: 9999 }}
+      >
+        <div
+          style={{
+            background: "#080b12",
+            border: "1px solid #1e2844",
+            borderRadius: 8,
+            padding: "10px 12px",
+            boxShadow: "0 16px 48px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.02)",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10,
+              color: isRoot ? "#60a5fa" : isMalicious ? "#f87171" : "#3b5ea8",
+              fontFamily: "monospace",
+              marginBottom: 6,
+              paddingBottom: 6,
+              borderBottom: "1px solid #141d30",
+              wordBreak: "break-all",
+              lineHeight: 1.4,
+            }}
+          >
+            {label}
+          </div>
+          <pre
+            style={{
+              fontSize: 9,
+              color: "#2e3c54",
+              fontFamily: "monospace",
+              whiteSpace: "pre-wrap",
+              lineHeight: 1.6,
+              margin: 0,
+            }}
+          >
+            {title || "No metadata available"}
+          </pre>
         </div>
-        <pre className="text-[9px] text-[#adaaad] font-mono whitespace-pre-wrap leading-tight">
-          {title || "No metadata available"}
-        </pre>
+        <div
+          style={{
+            position: "absolute",
+            bottom: -5,
+            left: "50%",
+            transform: "translateX(-50%) rotate(45deg)",
+            width: 10,
+            height: 10,
+            background: "#080b12",
+            border: "1px solid #1e2844",
+            borderTop: "none",
+            borderLeft: "none",
+          }}
+        />
       </div>
     </div>
   );
@@ -236,14 +324,14 @@ export default function InvestigatePage() {
                   id: n.id,
                   type: "custom",
                   position: { x: sim.x, y: sim.y },
-                  data: { label: n.label, title: n.title, isRoot, isMalicious: n.isMalicious },
+                  data: { label: n.label, title: n.title, isRoot, isMalicious: n.isMalicious, accent: n.color },
                   style: {
-                    background: n.color,
-                    color: "#fff",
-                    border: isRoot ? "2px solid #fff" : "1px solid rgba(255,255,255,0.2)",
-                    borderRadius: "50%",
+                    background: "transparent",
+                    border: "none",
+                    padding: 0,
                     width: n.size * 2,
                     height: n.size * 2,
+                    overflow: "visible",
                   },
                 };
               });
@@ -254,10 +342,13 @@ export default function InvestigatePage() {
               source: edge.source,
               target: edge.target,
               label: edge.label,
-              type: "straight",
-              style: { stroke: "#00fbfb", strokeWidth: 1 },
-              labelStyle: { fill: "#adaaad", fontSize: "10px" },
-              labelBgStyle: { fill: "#19191c", fillOpacity: 0.8 },
+              type: "smoothstep",
+              style: { stroke: "#1a2540", strokeWidth: 1.5, opacity: 0.8 },
+              labelStyle: { fill: "#2a3a55", fontSize: "9px", fontFamily: "monospace" },
+              labelBgStyle: { fill: "#080b12", fillOpacity: 0.9 },
+              labelBgPadding: [3, 5] as [number, number],
+              labelBgBorderRadius: 3,
+              markerEnd: { type: MarkerType.ArrowClosed, width: 10, height: 10, color: "#1a2540" },
             }));
             setEdges(calculatedEdges);
           }
@@ -600,11 +691,14 @@ export default function InvestigatePage() {
                         nodeTypes={nodeTypes}
                         onEdgesChange={onEdgesChange}
                         onNodesChange={onNodesChange}
+                        style={{ background: "#080b12" }}
                       >
-                        <Background color="#00fbfb" gap={16} size={1} />
-                        <Controls />
+                        <Background color="#111828" gap={28} size={1} variant={BackgroundVariant.Dots} />
+                        <Controls style={{ background: "#0d1120", border: "1px solid #1a2540", boxShadow: "none" }} />
                         <MiniMap
-                          nodeColor={(n: any) => n.style?.background || "#19191c"}
+                          nodeColor={(n: any) => n.data?.isMalicious ? "#dc2626" : n.data?.isRoot ? "#3b82f6" : "#141d2e"}
+                          maskColor="rgba(8,11,18,0.85)"
+                          style={{ background: "#080b12", border: "1px solid #1a2540" }}
                         />
                       </ReactFlow>
                     )}
@@ -691,11 +785,14 @@ export default function InvestigatePage() {
                     nodeTypes={nodeTypes}
                     onEdgesChange={onEdgesChange}
                     onNodesChange={onNodesChange}
+                    style={{ background: "#080b12" }}
                   >
-                    <Background color="#00fbfb" gap={16} size={1} />
-                    <Controls />
+                    <Background color="#111828" gap={28} size={1} variant={BackgroundVariant.Dots} />
+                    <Controls style={{ background: "#0d1120", border: "1px solid #1a2540", boxShadow: "none" }} />
                     <MiniMap
-                      nodeColor={(n: any) => n.style?.background || "#19191c"}
+                      nodeColor={(n: any) => n.data?.isMalicious ? "#dc2626" : n.data?.isRoot ? "#3b82f6" : "#141d2e"}
+                      maskColor="rgba(8,11,18,0.85)"
+                      style={{ background: "#080b12", border: "1px solid #1a2540" }}
                     />
                   </ReactFlow>
                 </div>

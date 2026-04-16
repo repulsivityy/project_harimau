@@ -56,222 +56,194 @@ export default function Home() {
       : "/tiger_logo.png";
 
   return (
-    <div className="font-body selection:bg-pink-500 selection:text-white min-h-screen bg-[#0e0e10] text-[#fffbfe] relative flex flex-col justify-between">
-      {/* TopNavBar */}
-      <header className="fixed top-0 left-0 w-full z-50 bg-[#0e0e10]/80 backdrop-blur-xl border-b-2 border-secondary/30 flex justify-between items-center px-6 py-4 shadow-[0_0_40px_rgba(255,124,245,0.15)]">
-        <div className="flex items-center gap-8">
-          <Link
-            href="/"
-            className="flex items-center gap-3 hover:opacity-80 transition-opacity"
-          >
-            <div className="w-10 h-10 border-2 border-pink-500 rounded-sm overflow-hidden relative">
-              <Image
-                src="/avatar.jpeg"
-                alt="Harimau Logo"
-                fill
-                className="object-cover"
-              />
+    <div className="min-h-screen bg-surface text-foreground relative flex flex-col selection:bg-primary selection:text-on-primary overflow-hidden">
+      {/* Background HUD elements */}
+      <div className="fixed inset-0 pointer-events-none opacity-20">
+        <div className="absolute top-0 left-0 w-full h-full radar-sweep"></div>
+        <div className="absolute top-0 left-0 w-full h-full opacity-10" style={{ backgroundImage: "linear-gradient(var(--secondary) 1px, transparent 1px), linear-gradient(90deg, var(--secondary) 1px, transparent 1px)", backgroundSize: "64px 64px" }}></div>
+      </div>
+
+      {/* Asymmetric Tactical Header */}
+      <header className="relative z-50 flex items-stretch h-20 border-b border-outline-variant/30 bg-surface/80 backdrop-blur-xl">
+        <div className="flex items-center px-8 bg-primary/10 border-r border-primary/30 skew-x-[-12deg] -ml-4 pr-12">
+          <Link href="/" className="flex items-center gap-4 skew-x-[12deg]">
+            <div className="w-10 h-10 border-2 border-primary relative overflow-hidden">
+              <Image src="/avatar.jpeg" alt="Logo" fill className="object-cover" />
             </div>
-            <span className="text-3xl font-black italic text-pink-500 drop-shadow-[0_0_10px_rgba(255,0,255,0.8)] font-headline tracking-tighter uppercase">
+            <span className="text-4xl font-black italic tracking-tighter uppercase font-headline text-primary glow-text-primary">
               HARIMAU
             </span>
           </Link>
-          <nav className="hidden md:flex space-x-8">
-            <Link
-              className="text-pink-500 border-b-4 border-pink-500 pb-2 font-headline tracking-tighter uppercase"
-              href="/"
-            >
-              HUNT
-            </Link>
-            <a
-              className="text-cyan-400/60 hover:text-yellow-400 font-headline tracking-tighter uppercase"
-              href="#"
-            >
-              INVESTIGATE
-            </a>
-            <a
-              className="text-cyan-400/60 hover:text-yellow-400 font-headline tracking-tighter uppercase"
-              href="#"
-            >
-              INTEL
-            </a>
-          </nav>
         </div>
-        <div className="flex items-center gap-6">
-          {/* Jobs History Dropdown */}
-          <div className="relative group hidden lg:block">
+        
+        <nav className="flex-grow flex items-center px-12 gap-8">
+          <Link href="/" className="font-headline text-primary border-b-2 border-primary pb-1 uppercase tracking-widest text-sm">Hunt</Link>
+          <Link href="#" className="font-headline text-secondary/60 hover:text-primary transition-colors uppercase tracking-widest text-sm">Investigate</Link>
+          <Link href="#" className="font-headline text-secondary/60 hover:text-primary transition-colors uppercase tracking-widest text-sm">Intel</Link>
+        </nav>
+
+        <div className="flex items-center px-8 gap-6 border-l border-outline-variant/30">
+          <div className="hidden lg:block">
             <select
-              className="relative bg-[#19191c] border-b-2 border-pink-500 text-pink-500 text-xs px-4 py-2 focus:ring-0 w-48 font-label cursor-pointer appearance-none"
+              className="bg-surface-container border-b-2 border-secondary text-secondary text-[10px] px-3 py-1 font-label uppercase outline-none cursor-pointer"
               value=""
               onChange={(e) => {
                 if (e.target.value) router.push(`/investigate/${e.target.value}`);
               }}
             >
-              <option value="">
-                {recentJobs.length > 0 ? "Recent Jobs..." : "No Recent Jobs"}
-              </option>
+              <option value="">RECORDS_HISTORY</option>
               {recentJobs.map((job: any) => (
                 <option key={job.job_id} value={job.job_id}>
-                  {job.ioc} — {job.status}
+                  {job.ioc} // {job.status}
                 </option>
               ))}
             </select>
-            <span className="absolute right-2 top-2.5 text-pink-500 material-symbols-outlined text-sm pointer-events-none">
-              arrow_drop_down
-            </span>
           </div>
-
-          <div className="flex gap-4">
-            <span className="material-symbols-outlined text-cyan-400 hover:text-pink-500 cursor-pointer">
-              terminal
-            </span>
-            <span className="material-symbols-outlined text-cyan-400 hover:text-pink-500 cursor-pointer">
-              settings
-            </span>
-            <div className="w-10 h-10 border-2 border-pink-500 grayscale hover:grayscale-0 relative">
-              <Image
-                alt="Hunter Avatar"
-                className="object-cover"
-                fill
-                sizes="40px"
-                src="/avatar.jpeg"
-              />
-            </div>
+          <div className="flex gap-4 text-secondary">
+            <span className="material-symbols-outlined cursor-pointer hover:text-primary transition-colors">terminal</span>
+            <span className="material-symbols-outlined cursor-pointer hover:text-primary transition-colors">settings</span>
           </div>
         </div>
       </header>
 
-      {/* Floating Info Card (Top Right) */}
-      <div className="fixed top-24 right-6 w-80 bg-[#19191c]/80 backdrop-blur-xl p-4 border-l-2 border-pink-500 z-40">
-        <h3 className="font-headline text-xs font-black text-pink-500 uppercase mb-2">
-          Platform Info
-        </h3>
-        <p className="font-label text-[10px] text-[#adaaad] leading-tight space-y-2">
-          <span>
-            Harimau (Tiger in Malay) is an AI-powered threat hunting platform
-            that uses multiple specialized threat hunt agents to analyze and
-            investigate IOCs (IPs, Domains, Hashes, URLs).
-          </span>
-          <br />
-          <br />
-          <span>
-            Harimau leverages LangGraph with multiple specialized threat hunt
-            agents to mimic the flow of a threat hunting program.
-          </span>
-          <br />
-          <br />
-          <span>
-            Harimau is currently in Beta Phase. Expect some bugs and unexpected
-            behavior. Current investigation takes ~7-8 minutes to complete.
-          </span>
-        </p>
-      </div>
-
-      {/* Tiger Watermark (Centered Background) */}
-      <div className="fixed inset-0 flex items-center justify-center pointer-events-none opacity-[0.05] z-0">
-        <div className="relative w-[600px] h-[600px]">
-          <img
-            alt="Tiger Watermark"
-            className="w-full h-full object-contain"
-            src={imageSrc}
-          />
+      <main className="flex-grow flex relative z-10">
+        {/* Left Side: Asymmetric Info Panels */}
+        <div className="hidden xl:flex flex-col w-1/3 pt-32 pl-12 gap-6">
+          <div className="bg-surface-container-low border-l-4 border-primary p-6 relative overflow-hidden scanline">
+            <h3 className="font-headline text-primary text-xs font-black uppercase mb-4 tracking-widest">System_Briefing</h3>
+            <p className="font-body text-xs text-outline leading-relaxed">
+              AI-POWERED THREAT HUNTING CORE V2.5. UTILIZING MULTI-AGENT LANGGRAPH ORCHESTRATION FOR AUTONOMOUS FORENSICS.
+            </p>
+          </div>
+          
+          <div className="bg-surface-container-highest/30 border-l-2 border-secondary/50 p-6 backdrop-blur-md -ml-8">
+            <h3 className="font-headline text-secondary text-[10px] font-black uppercase mb-3 tracking-widest">Specialist_Nodes</h3>
+            <div className="space-y-2">
+              <div className="flex justify-between items-center text-[10px] font-label">
+                <span className="text-outline">TRIAGE_AGENT</span>
+                <span className="text-secondary">ACTIVE</span>
+              </div>
+              <div className="flex justify-between items-center text-[10px] font-label">
+                <span className="text-outline">INFRA_AGENT</span>
+                <span className="text-secondary">ACTIVE</span>
+              </div>
+              <div className="flex justify-between items-center text-[10px] font-label">
+                <span className="text-outline">MALWARE_AGENT</span>
+                <span className="text-secondary">ACTIVE</span>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
 
-      {/* Main Content Area (Centered Search) */}
-      <main className="flex-grow flex flex-col items-center justify-center px-6 z-10">
-        <div className="w-full max-w-4xl text-center space-y-8 flex flex-col items-center">
-          <h1 className="text-5xl font-black italic font-headline tracking-tighter uppercase text-pink-500 drop-shadow-[0_0_20px_rgba(255,0,255,0.5)]">
-            Harimau - AI Threat Hunter
-          </h1>
-          <p className="font-label text-sm text-cyan-400/60 uppercase">
-            Enter IP, Domain, Hash, or URL to begin investigation
-          </p>
-
-          <form
-            className="relative flex flex-col items-center gap-6 w-full"
-            onSubmit={handleSearch}
-          >
-            <div className="flex gap-4 w-full">
-              <input
-                className="flex-grow bg-[#19191c] border-2 pulse-border text-cyan-400 px-6 py-4 placeholder-cyan-400/40 font-headline tracking-tighter text-xl focus:ring-0 focus:border-pink-500 outline-none uppercase"
-                onChange={(e) => setIoc(e.target.value)}
-                placeholder="ENTER_IOC_HERE_..."
-                type="text"
-                value={ioc}
-              />
-              <button
-                className="bg-pink-500 text-[#0e0e10] font-headline font-black px-8 py-4 uppercase tracking-tighter hover:bg-cyan-400 transition-colors flex items-center gap-2 text-xl"
-                type="submit"
-              >
-                HUNT
-                <span className="material-symbols-outlined text-base font-bold">
-                  arrow_forward
-                </span>
-              </button>
+        {/* Center: Main Hunting HUD */}
+        <div className="flex-grow flex flex-col items-center justify-center px-12">
+          <div className="w-full max-w-2xl flex flex-col items-center text-center gap-12">
+            <div className="relative">
+              <h1 className="text-6xl font-black italic font-headline tracking-tighter uppercase text-primary drop-shadow-[0_0_20px_rgba(255,124,245,0.3)]">
+                Digital Predator
+              </h1>
+              <div className="absolute -top-6 -right-12 px-2 py-1 bg-secondary text-surface text-[10px] font-black uppercase tracking-widest">
+                Protocol_H
+              </div>
             </div>
 
-            {/* Rotary Dial for Depth */}
-            <div className="flex flex-col items-center gap-2 mt-4">
-              <label className="font-label text-xs text-cyan-400/60 uppercase">
-                Investigation Depth Control
-              </label>
-              <div className="relative w-24 h-24 flex items-center justify-center">
-                {/* Visual Dial */}
-                <div
-                  className="w-20 h-20 bg-[#19191c] border-4 border-cyan-400 rounded-full flex items-center justify-center relative transition-transform duration-300"
-                  style={{ transform: `rotate(${rotationDegrees}deg)` }}
-                >
-                  {/* Pointer line */}
-                  <div className="absolute top-0 left-1/2 w-1 h-10 bg-pink-500 -translate-x-1/Origin-bottom"></div>
-                  {/* Center dot */}
-                  <div className="w-4 h-4 bg-[#0e0e10] border-2 border-pink-500 rounded-full z-10"></div>
-                </div>
-
-                {/* Hidden Native Slider to control rotation */}
+            <form className="w-full flex flex-col items-center gap-12" onSubmit={handleSearch}>
+              {/* Predator Input Field */}
+              <div className="w-full relative group">
                 <input
-                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-20"
-                  max="5"
-                  min="1"
-                  onChange={(e) => setDepth(parseInt(e.target.value))}
-                  type="range"
-                  value={depth}
+                  className="w-full bg-surface-container-high/50 border-b-2 border-secondary/30 text-secondary px-8 py-6 font-headline text-2xl tracking-tighter focus:outline-none focus:border-primary transition-all placeholder:text-outline/30 uppercase"
+                  onChange={(e) => setIoc(e.target.value)}
+                  placeholder="INJECT_IOC_IDENTIFIER_..."
+                  type="text"
+                  value={ioc}
                 />
+                <div className="absolute bottom-0 left-0 h-[2px] bg-primary w-0 group-focus-within:w-full transition-all duration-500 shadow-[0_0_10px_var(--primary)]"></div>
+                
+                <button
+                  className="absolute right-0 bottom-full mb-4 bg-primary text-on-primary font-headline font-black px-6 py-2 uppercase italic tracking-tighter hover:bg-secondary transition-colors"
+                  type="submit"
+                >
+                  Initiate_Hunt
+                </button>
+              </div>
 
-                {/* Depth Labels surrounding the dial */}
-                <div className="absolute inset-0 flex justify-between items-center px-2 pointer-events-none text-xs font-label text-cyan-400/40">
-                  <span>1</span>
-                  <span>5</span>
+              {/* Tactical Depth Dial */}
+              <div className="flex flex-col items-center gap-4">
+                <span className="font-label text-[10px] text-outline uppercase tracking-widest">Investigation_Depth_Control</span>
+                <div className="relative w-32 h-32 flex items-center justify-center">
+                  {/* Outer Ring */}
+                  <div className="absolute inset-0 border border-outline-variant/30 rounded-full"></div>
+                  
+                  {/* Moving Dial */}
+                  <div 
+                    className="w-24 h-24 bg-surface-container-highest border-2 border-secondary rounded-full flex items-center justify-center transition-transform duration-500 ease-out shadow-[0_0_30px_rgba(0,251,251,0.2)]"
+                    style={{ transform: `rotate(${rotationDegrees}deg)` }}
+                  >
+                    <div className="absolute top-1 left-1/2 -translate-x-1/2 w-1 h-6 bg-primary"></div>
+                    <div className="w-4 h-4 bg-primary glow-primary rounded-full"></div>
+                  </div>
+
+                  <input
+                    className="absolute inset-0 opacity-0 cursor-pointer z-20"
+                    max="5"
+                    min="1"
+                    onChange={(e) => setDepth(parseInt(e.target.value))}
+                    type="range"
+                    value={depth}
+                  />
+
+                  {/* Tick Marks */}
+                  <div className="absolute inset-[-20px] pointer-events-none">
+                    {[1, 2, 3, 4, 5].map(d => (
+                      <div 
+                        key={d} 
+                        className={`absolute w-1 h-3 transition-colors duration-300 ${depth === d ? 'bg-primary' : 'bg-outline-variant/50'}`}
+                        style={{ 
+                          left: '50%', 
+                          top: '50%', 
+                          transformOrigin: '0 52px',
+                          transform: `translateX(-50%) rotate(${(d - 3) * 30}deg) translateY(-52px)`
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+                <div className="font-headline text-primary font-black uppercase tracking-widest text-lg">
+                  Lvl_{depth}
                 </div>
               </div>
-              <div className="font-label text-xs text-pink-500 uppercase mt-2">
-                Depth Level: {depth}
-              </div>
-              <p className="text-[10px] text-cyan-400/40">
-                Turn the dial to set investigation rounds
-              </p>
-            </div>
-          </form>
+            </form>
+          </div>
+        </div>
 
-          <div className="flex gap-4 justify-center text-xs font-label text-cyan-400/40 mt-12">
-            <span>TIP: Press Enter to fast-track investigation</span>
-            <span>|</span>
-            <span>API_STATUS: READY</span>
+        {/* Right Side: Floating Status Panel */}
+        <div className="hidden xl:flex flex-col w-1/4 pt-32 pr-12 gap-6 items-end">
+          <div className="bg-surface-container border-r-4 border-secondary p-4 w-full glass-panel">
+            <h3 className="font-headline text-secondary text-[10px] font-black uppercase mb-2">Node_Status</h3>
+            <div className="font-label text-[10px] text-outline space-y-1">
+              <div className="flex justify-between"><span>CPU_LOAD</span><span className="text-secondary">12.4%</span></div>
+              <div className="flex justify-between"><span>MEM_USE</span><span className="text-secondary">4.2GB</span></div>
+              <div className="flex justify-between"><span>API_LATENCY</span><span className="text-primary">42ms</span></div>
+            </div>
+          </div>
+          
+          <div className="relative w-48 h-48 border border-outline-variant/30 flex items-center justify-center overflow-hidden">
+             <Image src={imageSrc} alt="Tiger" fill className="object-contain opacity-10 p-4" />
+             <div className="absolute inset-0 radar-sweep opacity-50"></div>
           </div>
         </div>
       </main>
 
-      {/* Background Grid Lines */}
-      <div className="fixed inset-0 pointer-events-none z-[-1] opacity-[0.03]">
-        <div
-          className="h-full w-full"
-          style={{
-            backgroundImage:
-              "linear-gradient(#00fbfb 1px, transparent 1px), linear-gradient(90deg, #00fbfb 1px, transparent 1px)",
-            backgroundSize: "100px 100px",
-          }}
-        ></div>
-      </div>
+      {/* Footer Branding */}
+      <footer className="relative z-50 h-12 border-t border-outline-variant/30 bg-surface flex items-center justify-between px-8">
+        <div className="text-[10px] font-label text-outline uppercase tracking-widest">
+          &copy; 2026 PROJECT_HARIMAU // DIGITAL_PREDATOR_CORE
+        </div>
+        <div className="flex items-center gap-4 text-[10px] font-label text-secondary uppercase">
+          <span className="flex items-center gap-1"><div className="w-1.5 h-1.5 bg-secondary glow-secondary"></div> GRID_STABLE</span>
+          <span>EST_COMPLETION: 480S</span>
+        </div>
+      </footer>
     </div>
   );
 }

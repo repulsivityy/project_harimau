@@ -1,26 +1,104 @@
 @import "tailwindcss";
 
+@theme {
+  --font-headline: var(--font-space-grotesk), ui-sans-serif, system-ui;
+  --font-body: var(--font-epilogue), ui-sans-serif, system-ui;
+  --font-label: var(--font-space-grotesk), ui-sans-serif, system-ui;
+
+  --color-primary: #ff7cf5;
+  --color-primary-container: #ff5af9;
+  --color-on-primary: #580058;
+  
+  --color-secondary: #00fbfb;
+  --color-secondary-container: #006a6a;
+  --color-on-secondary: #005c5c;
+  
+  --color-tertiary: #fffeac;
+  --color-tertiary-container: #f3f300;
+  
+  --color-surface-container-lowest: #000000;
+  --color-surface-container-low: #131316;
+  --color-surface-container: #19191c;
+  --color-surface-container-high: #1f1f22;
+  --color-surface-container-highest: #262529;
+}
+
 :root {
   --background: #0e0e10;
   --foreground: #fffbfe;
+  
+  /* Harimau Design System Tokens (duplicate for CSS variable usage if needed) */
+  --primary: #ff7cf5;
+  --primary-container: #ff5af9;
+  --on-primary: #580058;
+  
+  --secondary: #00fbfb;
+  --secondary-container: #006a6a;
+  --on-secondary: #005c5c;
+  
+  --tertiary: #fffeac;
+  --tertiary-container: #f3f300;
+  
+  --surface: #0e0e10;
+  --surface-bright: #2c2c2f;
+  --surface-container-lowest: #000000;
+  --surface-container-low: #131316;
+  --surface-container: #19191c;
+  --surface-container-high: #1f1f22;
+  --surface-container-highest: #262529;
+  
+  --outline: #767578;
+  --outline-variant: #48474a;
+  
+  --error: #ff6e84;
 }
 
 body {
   background-color: var(--background);
   color: var(--foreground);
   overflow-x: hidden;
+  font-family: var(--font-epilogue);
 }
 
-.glitch-effect:hover {
-  text-shadow: 2px 0 #ff7cf5, -2px 0 #00fbfb;
+/* Fractured Precision: Global Sharp Edges */
+* {
+  border-radius: 0 !important;
 }
 
-.asymmetric-clip {
-  clip-path: polygon(0 0, 100% 0, 95% 100%, 0% 100%);
+/* Neon Glow Effects */
+.glow-primary {
+  box-shadow: 0 0 20px rgba(255, 124, 245, 0.4);
 }
 
+.glow-secondary {
+  box-shadow: 0 0 20px rgba(0, 251, 251, 0.4);
+}
+
+.glow-text-primary {
+  text-shadow: 0 0 10px rgba(255, 124, 245, 0.8);
+}
+
+.glow-text-secondary {
+  text-shadow: 0 0 10px rgba(0, 251, 251, 0.8);
+}
+
+/* Ghost Borders */
+.ghost-border {
+  border: 1px solid rgba(72, 71, 74, 0.15);
+}
+
+.ghost-border-secondary {
+  border: 1px solid rgba(0, 251, 251, 0.15);
+}
+
+/* Glitch Effects */
+.glitch-hover:hover {
+  text-shadow: 2px 0 var(--primary), -2px 0 var(--secondary);
+}
+
+/* HUD elements */
 .radar-sweep {
-  background: conic-gradient(from 0deg, transparent 0deg, rgba(0, 251, 251, 0.2) 90deg, transparent 91deg);
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(0, 251, 251, 0.1) 90deg, transparent 91deg);
 }
 
 .glass-panel {
@@ -28,12 +106,64 @@ body {
   backdrop-filter: blur(20px);
 }
 
+/* Animations */
 @keyframes pulse-cyan-pink {
-  0% { border-color: #00fbfb; }
-  50% { border-color: #ff007f; }
-  100% { border-color: #00fbfb; }
+  0% { border-color: var(--secondary); }
+  50% { border-color: var(--primary); }
+  100% { border-color: var(--secondary); }
 }
 
 .pulse-border {
   animation: pulse-cyan-pink 3s infinite ease-in-out;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite linear;
+}
+
+@keyframes scanline {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
+
+.scanline::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: rgba(0, 251, 251, 0.1);
+  animation: scanline 4s linear infinite;
+  pointer-events: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: var(--surface-container-lowest);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--outline-variant);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--secondary);
 }

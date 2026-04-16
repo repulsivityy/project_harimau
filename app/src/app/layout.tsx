@@ -33,7 +33,7 @@ export default function RootLayout({
           href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
         />
       </head>
-      <body className="font-body selection:bg-pink-500 selection:text-white min-h-screen bg-[#0e0e10] text-[#fffbfe]">
+      <body className="font-body selection:bg-primary selection:text-on-primary min-h-screen bg-surface text-foreground">
         {children}
       </body>
     </html>

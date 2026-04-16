@@ -9,38 +9,36 @@ import { Background, BackgroundVariant, Controls, MiniMap, ReactFlow, useNodesSt
 import { forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY } from "d3-force";
 import "@xyflow/react/dist/style.css";
 
-// Custom Markdown Renderer for high readability
+// Custom Markdown Renderer for high readability - Adjusted for new design
 const MarkdownRenderer = ({ content }: { content: string }) => (
   <ReactMarkdown
-    className="font-body text-sm md:text-base leading-relaxed text-gray-300 space-y-4"
+    className="font-body text-sm leading-relaxed text-outline space-y-4"
     components={{
-      h1: ({ node, ...props }) => <h1 className="text-2xl md:text-3xl font-headline font-black text-pink-500 mt-8 mb-4 uppercase tracking-tighter" {...props} />,
-      h2: ({ node, ...props }) => <h2 className="text-xl md:text-2xl font-headline font-bold text-cyan-400 mt-8 mb-4 border-b border-cyan-400/20 pb-2 uppercase tracking-wide" {...props} />,
-      h3: ({ node, ...props }) => <h3 className="text-lg md:text-xl font-headline font-bold text-[#fffbfe] mt-6 mb-3 uppercase" {...props} />,
-      h4: ({ node, ...props }) => <h4 className="text-base font-headline font-semibold text-gray-200 mt-4 mb-2" {...props} />,
-      p: ({ node, ...props }) => <p className="mb-4 text-gray-300" {...props} />,
-      ul: ({ node, ...props }) => <ul className="list-disc pl-6 mb-4 space-y-2 marker:text-pink-500" {...props} />,
-      ol: ({ node, ...props }) => <ol className="list-decimal pl-6 mb-4 space-y-2 marker:text-cyan-400" {...props} />,
-      li: ({ node, ...props }) => <li className="pl-1" {...props} />,
-      table: ({ node, ...props }) => <div className="overflow-x-auto mb-6 rounded border border-cyan-400/20"><table className="w-full text-left border-collapse text-sm" {...props} /></div>,
-      thead: ({ node, ...props }) => <thead className="bg-[#19191c] text-cyan-400" {...props} />,
-      th: ({ node, ...props }) => <th className="p-3 font-semibold tracking-wide border-b border-cyan-400/20 whitespace-nowrap" {...props} />,
-      td: ({ node, ...props }) => <td className="p-3 border-b border-[#19191c] text-gray-300" {...props} />,
-      tr: ({ node, ...props }) => <tr className="hover:bg-[#19191c]/50 transition-colors" {...props} />,
-      strong: ({ node, ...props }) => <strong className="font-bold text-[#fffbfe]" {...props} />,
-      a: ({ node, ...props }) => <a className="text-cyan-400 hover:text-pink-500 underline decoration-cyan-400/30 underline-offset-2 transition-colors" {...props} />,
-      blockquote: ({ node, ...props }) => <blockquote className="border-l-4 border-pink-500 bg-[#19191c] py-3 px-5 mb-4 italic text-gray-400 rounded-r" {...props} />,
+      h1: ({ node, ...props }) => <h1 className="text-2xl font-headline font-black text-primary mt-8 mb-4 uppercase tracking-tighter glow-text-primary" {...props} />,
+      h2: ({ node, ...props }) => <h2 className="text-xl font-headline font-bold text-secondary mt-8 mb-4 border-b border-secondary/20 pb-2 uppercase tracking-wide" {...props} />,
+      h3: ({ node, ...props }) => <h3 className="text-lg font-headline font-bold text-foreground mt-6 mb-3 uppercase" {...props} />,
+      p: ({ node, ...props }) => <p className="mb-4" {...props} />,
+      ul: ({ node, ...props }) => <ul className="list-disc pl-6 mb-4 space-y-2 marker:text-primary" {...props} />,
+      ol: ({ node, ...props }) => <ol className="list-decimal pl-6 mb-4 space-y-2 marker:text-secondary" {...props} />,
+      table: ({ node, ...props }) => <div className="overflow-x-auto mb-6 border border-outline-variant/30"><table className="w-full text-left border-collapse text-xs" {...props} /></div>,
+      thead: ({ node, ...props }) => <thead className="bg-surface-container-high text-secondary" {...props} />,
+      th: ({ node, ...props }) => <th className="p-3 font-semibold tracking-wide border-b border-outline-variant/30 whitespace-nowrap" {...props} />,
+      td: ({ node, ...props }) => <td className="p-3 border-b border-surface-container text-outline" {...props} />,
+      tr: ({ node, ...props }) => <tr className="hover:bg-surface-container-highest/50 transition-colors" {...props} />,
+      strong: ({ node, ...props }) => <strong className="font-bold text-foreground" {...props} />,
+      a: ({ node, ...props }) => <a className="text-secondary hover:text-primary underline decoration-secondary/30 underline-offset-2 transition-colors" {...props} />,
+      blockquote: ({ node, ...props }) => <blockquote className="border-l-4 border-primary bg-surface-container-low py-3 px-5 mb-4 italic text-outline" {...props} />,
       code(props) {
         const { children, className, node, ...rest } = props;
         const match = /language-(\w+)/.exec(className || '');
         const isInline = !match && !className;
         return isInline ? (
-          <code className="bg-[#19191c] text-pink-400 px-1.5 py-0.5 rounded text-sm font-mono border border-pink-500/10" {...rest}>
+          <code className="bg-surface-container-highest text-primary px-1.5 py-0.5 text-xs font-mono" {...rest}>
             {children}
           </code>
         ) : (
           <div className="relative mb-4 group">
-            <pre className="bg-[#0e0e10] p-4 rounded border border-cyan-400/20 overflow-x-auto text-xs md:text-sm font-mono text-cyan-300 shadow-inner">
+            <pre className="bg-surface-container-lowest p-4 border border-outline-variant/30 overflow-x-auto text-xs font-mono text-secondary/80">
               <code className={className} {...rest}>
                 {children}
               </code>
@@ -54,7 +52,7 @@ const MarkdownRenderer = ({ content }: { content: string }) => (
   </ReactMarkdown>
 );
 
-// Typewriter Component for smoother report reading
+// Typewriter Component
 const Typewriter = ({ text, speed = 1 }: { text: string; speed?: number }) => {
   const [displayedText, setDisplayedText] = useState("");
   const [index, setIndex] = useState(0);
@@ -62,10 +60,9 @@ const Typewriter = ({ text, speed = 1 }: { text: string; speed?: number }) => {
   useEffect(() => {
     if (index < text.length) {
       const timeout = setTimeout(() => {
-        // Append next chunk of characters for faster "typewriter" effect
-        const chunk = text.slice(index, index + 20);
+        const chunk = text.slice(index, index + 25);
         setDisplayedText((prev) => prev + chunk);
-        setIndex((prev) => prev + 20);
+        setIndex((prev) => prev + 25);
       }, speed);
       return () => clearTimeout(timeout);
     }
@@ -74,11 +71,10 @@ const Typewriter = ({ text, speed = 1 }: { text: string; speed?: number }) => {
   return <MarkdownRenderer content={displayedText} />;
 };
 
-// Precompiled Regexes
 const IP_REGEX = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/;
 const HASH_REGEX = /^[a-fA-F0-9]{32,64}$/;
 
-// Custom Node Component — Wiz-inspired dark security graph style
+// Custom Node Component - Fractured Design (Sharp Edges)
 const CustomNode = ({ data, style }: any) => {
   let icon = "hub";
   const label = data.label || "";
@@ -95,135 +91,42 @@ const CustomNode = ({ data, style }: any) => {
   const isMalicious = data.isMalicious;
   const isRoot = data.isRoot;
   const nodeSize = style?.width || 48;
-  const iconSize = Math.max(14, nodeSize * 0.38);
+  const iconSize = Math.max(14, nodeSize * 0.4);
 
-  const borderColor = isRoot ? "#3b82f6" : isMalicious ? "#dc2626" : "#1e2844";
-  const glowShadow = isRoot
-    ? "0 0 20px rgba(59,130,246,0.4), inset 0 1px 0 rgba(255,255,255,0.05)"
-    : isMalicious
-    ? "0 0 20px rgba(220,38,38,0.35), inset 0 1px 0 rgba(255,255,255,0.03)"
-    : "inset 0 1px 0 rgba(255,255,255,0.03)";
-  const iconColor = isRoot ? "#60a5fa" : isMalicious ? "#f87171" : "#3d4f6e";
-  const bgGradient = isRoot
-    ? "linear-gradient(145deg, #1e3158 0%, #111d3a 100%)"
-    : isMalicious
-    ? "linear-gradient(145deg, #3a1010 0%, #180808 100%)"
-    : "linear-gradient(145deg, #141b2c 0%, #0d1320 100%)";
-  const truncatedLabel = label.length > 16 ? label.substring(0, 14) + "…" : label;
+  const color = isRoot ? "var(--secondary)" : isMalicious ? "var(--primary)" : "var(--outline)";
+  const bgColor = isRoot ? "rgba(0, 251, 251, 0.1)" : isMalicious ? "rgba(255, 124, 245, 0.1)" : "rgba(72, 71, 74, 0.1)";
 
   return (
-    <div className="relative group flex flex-col items-center" style={{ overflow: "visible" }}>
-      <Handle type="target" position={Position.Top} className="!opacity-0 !absolute" style={{ left: "50%", top: "50%", transform: "translate(-50%,-50%)" }} />
-      <Handle type="source" position={Position.Bottom} className="!opacity-0 !absolute" style={{ left: "50%", top: "50%", transform: "translate(-50%,-50%)" }} />
+    <div className="relative group flex flex-col items-center">
+      <Handle type="target" position={Position.Top} className="!opacity-0" style={{ left: "50%", top: "50%" }} />
+      <Handle type="source" position={Position.Bottom} className="!opacity-0" style={{ left: "50%", top: "50%" }} />
 
-      {/* Circle */}
       <div
+        className={`transition-all duration-300 ${isMalicious ? 'animate-pulse' : ''}`}
         style={{
           width: nodeSize,
           height: nodeSize,
-          borderRadius: "50%",
-          background: bgGradient,
-          border: `1.5px solid ${borderColor}`,
-          boxShadow: glowShadow,
+          background: bgColor,
+          border: `2px solid ${color}`,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          transition: "all 0.2s ease",
-          position: "relative",
+          boxShadow: `0 0 15px ${color}33`,
         }}
       >
-        <span className="material-symbols-outlined" style={{ fontSize: iconSize, color: iconColor, userSelect: "none" }}>
+        <span className="material-symbols-outlined" style={{ fontSize: iconSize, color: color }}>
           {icon}
         </span>
-        {/* Malicious pulse ring */}
-        {isMalicious && (
-          <div
-            className="animate-ping"
-            style={{
-              position: "absolute",
-              inset: -4,
-              borderRadius: "50%",
-              border: "1px solid rgba(220,38,38,0.35)",
-              pointerEvents: "none",
-            }}
-          />
-        )}
       </div>
 
-      {/* Label below */}
-      <div
-        style={{
-          marginTop: 5,
-          fontSize: 10,
-          color: isMalicious ? "#f87171" : isRoot ? "#4a6fa8" : "#2e3c54",
-          fontFamily: "'JetBrains Mono', 'Fira Code', 'Courier New', monospace",
-          letterSpacing: "0.02em",
-          maxWidth: 90,
-          textAlign: "center",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          pointerEvents: "none",
-        }}
-      >
-        {truncatedLabel}
+      <div className="mt-2 text-[9px] font-label uppercase tracking-widest text-outline whitespace-nowrap overflow-hidden text-ellipsis max-w-[100px]">
+        {label}
       </div>
 
-      {/* Tooltip */}
-      <div
-        className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 pointer-events-none"
-        style={{ width: 230, transition: "opacity 0.15s ease", zIndex: 9999 }}
-      >
-        <div
-          style={{
-            background: "#080b12",
-            border: "1px solid #1e2844",
-            borderRadius: 8,
-            padding: "10px 12px",
-            boxShadow: "0 16px 48px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.02)",
-          }}
-        >
-          <div
-            style={{
-              fontSize: 10,
-              color: isRoot ? "#60a5fa" : isMalicious ? "#f87171" : "#3b5ea8",
-              fontFamily: "monospace",
-              marginBottom: 6,
-              paddingBottom: 6,
-              borderBottom: "1px solid #141d30",
-              wordBreak: "break-all",
-              lineHeight: 1.4,
-            }}
-          >
-            {label}
-          </div>
-          <pre
-            style={{
-              fontSize: 9,
-              color: "#2e3c54",
-              fontFamily: "monospace",
-              whiteSpace: "pre-wrap",
-              lineHeight: 1.6,
-              margin: 0,
-            }}
-          >
-            {title || "No metadata available"}
-          </pre>
-        </div>
-        <div
-          style={{
-            position: "absolute",
-            bottom: -5,
-            left: "50%",
-            transform: "translateX(-50%) rotate(45deg)",
-            width: 10,
-            height: 10,
-            background: "#080b12",
-            border: "1px solid #1e2844",
-            borderTop: "none",
-            borderLeft: "none",
-          }}
-        />
+      {/* Simplified Tooltip */}
+      <div className="absolute bottom-full mb-2 hidden group-hover:block z-50 bg-surface-container-highest border border-outline-variant p-2 text-[8px] font-mono text-foreground min-w-[150px] shadow-2xl">
+        <div className="text-secondary mb-1 border-b border-outline-variant/30 pb-1">{label}</div>
+        <div className="text-outline/80 leading-tight">{title || "NO_METADATA"}</div>
       </div>
     </div>
   );
@@ -231,7 +134,6 @@ const CustomNode = ({ data, style }: any) => {
 
 const nodeTypes = { custom: CustomNode };
 
-// Define TypeScript interfaces for the API response
 interface BackendNode {
   id: string;
   label: string;
@@ -263,20 +165,16 @@ export default function InvestigatePage() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<any>([]);
   const [loading, setLoading] = useState(true);
   const [job, setJob] = useState<any>(null);
-  // SSE / polling state
   const [jobStatus, setJobStatus] = useState<string>("running");
   const [progress, setProgress] = useState<number>(0);
-  const [statusMessage, setStatusMessage] = useState<string>("Connecting to investigation stream...");
+  const [statusMessage, setStatusMessage] = useState<string>("Initializing secure channel...");
   const [activityLog, setActivityLog] = useState<string[]>([]);
-  // Jobs history dropdown
   const [recentJobs, setRecentJobs] = useState<any[]>([]);
-  // Physics simulation ref — persists across renders, cleaned up on unmount
   const simulationRef = useRef<any>(null);
 
   useEffect(() => {
     if (!id) return;
 
-    // Fetch past jobs for the history dropdown (independent of the main investigation useEffect)
     fetch("/api/investigations")
       .then((r) => r.json())
       .then((jobs) => setRecentJobs(Array.isArray(jobs) ? jobs : []))
@@ -285,8 +183,6 @@ export default function InvestigatePage() {
     let pollInterval: ReturnType<typeof setInterval> | null = null;
     let eventSource: EventSource | null = null;
 
-    // Shared function: fetch full job + graph data and update state.
-    // Returns the job status string so the caller can decide whether to keep polling.
     const refetch = async (): Promise<string> => {
       try {
         const [graphRes, jobRes] = await Promise.all([
@@ -300,11 +196,9 @@ export default function InvestigatePage() {
         setJob(jobData);
         setJobStatus(jobData.status ?? "running");
 
-        // Only build graph if the response has nodes
         if (graphRes.ok) {
           const graphData: GraphData = await graphRes.json();
           if (graphData.nodes?.length > 0) {
-            // Stop any previous simulation before starting a new one
             if (simulationRef.current) {
               simulationRef.current.stop();
               simulationRef.current = null;
@@ -313,7 +207,6 @@ export default function InvestigatePage() {
             setNodes((currentNodes) => {
               const existingPositions = new Map(currentNodes.map((n) => [n.id, n.position]));
 
-              // Build d3 sim nodes — pin only the root node at center so the graph has a stable anchor
               const simNodes: any[] = graphData.nodes.map((n) => {
                 const pos = existingPositions.get(n.id);
                 const isRoot = n.isRoot === true;
@@ -322,32 +215,26 @@ export default function InvestigatePage() {
                   x: pos?.x ?? (Math.random() - 0.5) * 500,
                   y: pos?.y ?? (Math.random() - 0.5) * 500,
                   radius: n.size,
-                  // Root is fixed at origin — mirrors old Streamlit behaviour
                   fx: isRoot ? 0 : undefined,
                   fy: isRoot ? 0 : undefined,
                 };
               });
 
               const simEdges = graphData.edges.map((e) => ({ source: e.source, target: e.target }));
-              // O(1) lookup per tick instead of O(n) find
               const simNodeMap = new Map<string, any>(simNodes.map((n) => [n.id, n]));
 
               const simulation = forceSimulation(simNodes)
-                // Weak spring (0.08) matches old ForceAtlas2 springConstant — keeps edges loose and organic
-                .force("link", forceLink(simEdges).id((d: any) => d.id).distance(200).strength(0.08))
-                .force("charge", forceManyBody().strength(-600).distanceMax(500))
-                .force("collide", forceCollide().radius((d: any) => d.radius + 15).strength(0.9))
-                // Weak centering gravity — keeps non-root nodes from drifting too far
-                .force("x", forceX(0).strength(0.04))
-                .force("y", forceY(0).strength(0.04))
-                .alphaDecay(0.015)
-                .velocityDecay(0.4); // matches old damping: 0.4
+                .force("link", forceLink(simEdges).id((d: any) => d.id).distance(180).strength(0.1))
+                .force("charge", forceManyBody().strength(-800).distanceMax(600))
+                .force("collide", forceCollide().radius((d: any) => d.radius + 20).strength(0.9))
+                .force("x", forceX(0).strength(0.05))
+                .force("y", forceY(0).strength(0.05))
+                .alphaDecay(0.02)
+                .velocityDecay(0.4);
 
-              // Pre-stabilise 100 ticks silently so nodes don't appear in chaotic scatter
               simulation.stop();
-              for (let i = 0; i < 100; i++) simulation.tick();
+              for (let i = 0; i < 120; i++) simulation.tick();
 
-              // Resume live animation from the pre-stabilised positions
               simulation.restart();
               simulation.on("tick", () => {
                 setNodes((nds) =>
@@ -361,7 +248,6 @@ export default function InvestigatePage() {
 
               simulationRef.current = simulation;
 
-              // Return pre-stabilised initial positions
               return graphData.nodes.map((n) => {
                 const sim = simNodeMap.get(n.id)!;
                 const isRoot = n.isRoot === true;
@@ -387,13 +273,12 @@ export default function InvestigatePage() {
               source: edge.source,
               target: edge.target,
               label: edge.label,
-              type: "smoothstep",
-              style: { stroke: "#1a2540", strokeWidth: 1.5, opacity: 0.8 },
-              labelStyle: { fill: "#2a3a55", fontSize: "9px", fontFamily: "monospace" },
-              labelBgStyle: { fill: "#080b12", fillOpacity: 0.9 },
-              labelBgPadding: [3, 5] as [number, number],
-              labelBgBorderRadius: 3,
-              markerEnd: { type: MarkerType.ArrowClosed, width: 10, height: 10, color: "#1a2540" },
+              type: "straight",
+              style: { stroke: "rgba(0, 251, 251, 0.2)", strokeWidth: 1 },
+              labelStyle: { fill: "rgba(255, 124, 245, 0.6)", fontSize: "8px", fontFamily: "var(--font-space-grotesk)", textTransform: "uppercase" },
+              labelBgStyle: { fill: "var(--surface-container-lowest)", fillOpacity: 0.8 },
+              labelBgPadding: [2, 4] as [number, number],
+              markerEnd: { type: MarkerType.ArrowClosed, width: 8, height: 8, color: "rgba(0, 251, 251, 0.4)" },
             }));
             setEdges(calculatedEdges);
           }
@@ -407,38 +292,25 @@ export default function InvestigatePage() {
       }
     };
 
-    // Fallback: poll every 10 seconds (mirrors Streamlit's 10s polling interval)
     const startPolling = () => {
-      let pollCount = 0;
-      const MAX_POLLS = 150; // 25 minutes max
-      setStatusMessage("Real-time stream unavailable. Polling every 10 seconds...");
+      setStatusMessage("Stream failure. Initializing emergency polling...");
       pollInterval = setInterval(async () => {
-        pollCount++;
-        const elapsed = pollCount * 10;
-        const estimatedDuration = 510; // ~8.5 min average
-        const estimatedProgress = Math.min(Math.round((elapsed / estimatedDuration) * 100), 95);
-        setProgress(estimatedProgress);
-        setStatusMessage(`Polling... elapsed: ${elapsed}s`);
-
         const status = await refetch();
-        if (status === "completed" || status === "failed" || pollCount >= MAX_POLLS) {
+        if (status === "completed" || status === "failed") {
           if (pollInterval) clearInterval(pollInterval);
           setProgress(100);
-          setStatusMessage(status === "completed" ? "Investigation complete!" : "Investigation failed.");
+          setStatusMessage(status === "completed" ? "Investigation finalized." : "System error occurred.");
         }
       }, 10_000);
     };
 
-    // 1. Initial fetch to pick up status (handles page refresh on a completed job)
     refetch().then((status) => {
       if (status === "completed" || status === "failed") {
         setProgress(100);
-        setStatusMessage(status === "completed" ? "Investigation complete!" : "Investigation failed.");
-        return; // Already done — no SSE needed
+        setStatusMessage(status === "completed" ? "Investigation finalized." : "System error occurred.");
+        return;
       }
 
-      // 2. Open SSE stream (mirrors api_client.py stream_investigation_events)
-      setStatusMessage("Connecting to real-time event stream...");
       eventSource = new EventSource(`/api/investigations/${id}/stream`);
 
       eventSource.onmessage = async (e: MessageEvent) => {
@@ -454,24 +326,23 @@ export default function InvestigatePage() {
 
           if (eventType === "investigation_completed") {
             setProgress(100);
-            setStatusMessage("Investigation complete!");
+            setStatusMessage("Mission complete.");
             await refetch();
             eventSource?.close();
           } else if (eventType === "investigation_failed") {
             setProgress(100);
-            setStatusMessage(`Investigation failed: ${data.error ?? "Unknown error"}`);
+            setStatusMessage(`Mission failure: ${data.error ?? "ERR_UNKNOWN"}`);
             await refetch();
             eventSource?.close();
           } else if (eventType === "tool_invocation") {
-            const tool: string = data.tool ?? "unknown";
-            setActivityLog((prev) => [`🔧 ${agent}: calling ${tool}`, ...prev].slice(0, 20));
+            setActivityLog((prev) => [`🔧 ${agent}: EXECUTING_${data.tool}`, ...prev].slice(0, 20));
           } else if (eventType === "agent_reasoning") {
-            setActivityLog((prev) => [`💭 ${agent}: reasoning (${(data.thought ?? "").length} chars)`, ...prev].slice(0, 20));
+            setActivityLog((prev) => [`💭 ${agent}: ANALYZING_DATA`, ...prev].slice(0, 20));
           } else if (eventType.includes("_started")) {
             setStatusMessage(`🤖 ${msg || agent}`);
           } else if (eventType.includes("_completed")) {
             setStatusMessage(`✅ ${msg || agent}`);
-            if (agent) setActivityLog((prev) => [`✅ ${agent}: completed`, ...prev].slice(0, 20));
+            if (agent) setActivityLog((prev) => [`✅ ${agent}: SYNOPSIS_READY`, ...prev].slice(0, 20));
           } else {
             if (msg) setStatusMessage(msg);
           }
@@ -480,15 +351,12 @@ export default function InvestigatePage() {
         }
       };
 
-      // 3. If SSE errors, fall back to polling (same as Streamlit fallback)
       eventSource.onerror = () => {
-        console.warn("SSE connection failed, falling back to polling");
         eventSource?.close();
         startPolling();
       };
     });
 
-    // Cleanup on unmount
     return () => {
       eventSource?.close();
       if (pollInterval) clearInterval(pollInterval);
@@ -499,115 +367,76 @@ export default function InvestigatePage() {
   const tiles = [
     {
       id: 1,
-      title: "Triage & Plan",
+      title: "Tactical_Triage",
       icon: "radar",
       size: "col-span-12 lg:col-span-5",
       isTriage: true,
-      content: job
-        ? {
-            verdict: job.risk_level || "Unknown",
-            score: job.gti_score || "N/A",
+      content: job ? {
+            verdict: job.risk_level || "UNKNOWN",
+            score: job.gti_score || "0",
             malicious: job.rich_intel?.malicious_stats || 0,
             total: job.rich_intel?.total_stats || 0,
             summary: job.rich_intel?.triage_summary || ""
-          }
-        : null,
+          } : null,
     },
     {
       id: 2,
-      title: "Graph",
+      title: "Intelligence_Graph",
       icon: "hub",
       size: "col-span-12 lg:col-span-7 row-span-2",
-      content: "Interactive visualization using React Flow.",
       isGraph: true,
     },
     {
       id: 3,
-      title: "Specialist Reports",
+      title: "Specialist_Dossiers",
       icon: "reorder",
       size: "col-span-12 lg:col-span-5",
-      content:
-        job && job.specialist_results
-          ? `Reports found: ${Object.keys(job.specialist_results).length}`
-          : "Loading specialist reports...",
+      isReports: true,
     },
     {
       id: 4,
-      title: "Final Report",
+      title: "Final_Intelligence_Synthesis",
       icon: "description",
-      size: "col-span-12 lg:col-span-6",
-      content: job
-        ? job.final_report?.substring(0, 100) + "..."
-        : "Loading final report...",
+      size: "col-span-12 lg:col-span-12 h-auto",
+      isFinalReport: true,
     },
     {
       id: 5,
-      title: "Timeline",
+      title: "Mission_Timeline",
       icon: "history",
-      size: "col-span-12 lg:col-span-3",
-      content:
-        job && job.subtasks
-          ? `Tasks executed: ${job.subtasks.length}`
-          : "Loading timeline...",
+      size: "col-span-12 lg:col-span-6",
+      isTimeline: true,
     },
     {
       id: 6,
-      title: "Agent Transparency",
+      title: "Agent_Transparency",
       icon: "terminal",
-      size: "col-span-12 lg:col-span-3",
-      content:
-        job && job.transparency_log
-          ? `Events logged: ${job.transparency_log.length}`
-          : "Loading transparency log...",
+      size: "col-span-12 lg:col-span-6",
+      isTransparency: true,
     },
   ];
 
   return (
-    <div className="font-body selection:bg-pink-500 selection:text-white min-h-screen bg-[#0e0e10] text-[#fffbfe] relative flex flex-col justify-between">
-      {/* TopNavBar */}
-      <header className="fixed top-0 left-0 w-full z-50 bg-[#0e0e10]/80 backdrop-blur-xl border-b-2 border-secondary/30 flex justify-between items-center px-6 py-4 shadow-[0_0_40px_rgba(255,124,245,0.15)]">
-        <div className="flex items-center gap-8">
-          <Link
-            href="/"
-            className="flex items-center gap-3 hover:opacity-80 transition-opacity"
-          >
-            <div className="w-10 h-10 border-2 border-pink-500 rounded-sm overflow-hidden relative">
-              <Image
-                src="/avatar.jpeg"
-                alt="Harimau Logo"
-                fill
-                className="object-cover"
-              />
-            </div>
-            <span className="text-3xl font-black italic text-pink-500 drop-shadow-[0_0_10px_rgba(255,0,255,0.8)] font-headline tracking-tighter uppercase">
-              HARIMAU
-            </span>
+    <div className="min-h-screen bg-surface text-foreground relative flex flex-col selection:bg-primary selection:text-on-primary font-body">
+      {/* HUD Header */}
+      <header className="fixed top-0 left-0 w-full z-50 flex items-stretch h-16 border-b border-outline-variant/30 bg-surface/90 backdrop-blur-xl">
+        <div className="flex items-center px-6 bg-primary/10 border-r border-primary/30">
+          <Link href="/" className="flex items-center gap-3">
+             <span className="text-2xl font-black italic font-headline text-primary glow-text-primary tracking-tighter uppercase">HARIMAU</span>
           </Link>
-          <nav className="hidden md:flex space-x-8">
-            <Link
-              className="text-cyan-400/60 hover:text-yellow-400 font-headline tracking-tighter uppercase"
-              href="/"
-            >
-              HUNT
-            </Link>
-            <a
-              className="text-pink-500 border-b-4 border-pink-500 pb-2 font-headline tracking-tighter uppercase"
-              href="#"
-            >
-              INVESTIGATE
-            </a>
-            <a
-              className="text-cyan-400/60 hover:text-yellow-400 font-headline tracking-tighter uppercase"
-              href="#"
-            >
-              INTEL
-            </a>
-          </nav>
         </div>
-        <div className="flex items-center gap-6">
-          <div className="relative group hidden lg:block">
+        
+        <div className="flex-grow flex items-center px-8 gap-4 overflow-hidden">
+          <div className="text-[10px] font-label text-outline uppercase tracking-widest whitespace-nowrap">MISSION_ID:</div>
+          <div className="text-[10px] font-mono text-secondary truncate max-w-[200px]">{id}</div>
+          <div className="hidden md:block text-[10px] font-label text-outline uppercase tracking-widest ml-4">IOC:</div>
+          <div className="hidden md:block text-[10px] font-mono text-primary font-black">{job?.ioc}</div>
+        </div>
+
+        <div className="flex items-center px-6 gap-6 border-l border-outline-variant/30">
+          <div className="hidden lg:block relative">
             <select
-              className="relative bg-[#19191c] border-b-2 border-pink-500 text-pink-500 text-xs px-4 py-2 focus:ring-0 w-48 font-label cursor-pointer appearance-none"
+              className="bg-surface-container border-b-2 border-secondary text-secondary text-[10px] px-3 py-1 font-label uppercase outline-none cursor-pointer appearance-none pr-6"
               value={id}
               onChange={(e: ChangeEvent<HTMLSelectElement>) => {
                 if (e.target.value && e.target.value !== id)
@@ -615,118 +444,86 @@ export default function InvestigatePage() {
               }}
             >
               <option value={id}>
-                {recentJobs.length > 0 ? "Recent Jobs..." : "Loading jobs..."}
+                {recentJobs.length > 0 ? "RECORDS_HISTORY..." : "LOADING_RECORDS..."}
               </option>
               {recentJobs.map((j: any) => (
                 <option key={j.job_id} value={j.job_id}>
-                  {j.ioc} — {j.status}
+                  {j.ioc} // {j.status}
                 </option>
               ))}
             </select>
-            <span className="absolute right-2 top-2.5 text-pink-500 material-symbols-outlined text-sm pointer-events-none">
+            <span className="absolute right-2 top-1.5 text-secondary material-symbols-outlined text-[12px] pointer-events-none">
               arrow_drop_down
             </span>
           </div>
-
-          <div className="flex gap-4">
-            <span className="material-symbols-outlined text-cyan-400 hover:text-pink-500 cursor-pointer">
-              terminal
-            </span>
-            <span className="material-symbols-outlined text-cyan-400 hover:text-pink-500 cursor-pointer">
-              settings
-            </span>
-            <div className="w-10 h-10 border-2 border-pink-500 grayscale hover:grayscale-0 relative">
-              <Image
-                alt="Hunter Avatar"
-                className="object-cover"
-                fill
-                sizes="40px"
-                src="/avatar.jpeg"
-              />
-            </div>
+          <Link href="/" className="font-headline text-secondary/60 hover:text-primary transition-colors uppercase tracking-widest text-[10px]">Close_Mission</Link>
+          <div className="w-8 h-8 border border-primary grayscale relative overflow-hidden">
+            <Image src="/avatar.jpeg" alt="Hunter" fill className="object-cover" />
           </div>
         </div>
       </header>
 
-      {/* Main Content Area (Scrollable grid) */}
-      <main className="pt-24 px-6 pb-28 flex-grow overflow-y-auto">
-
-        {/* Running State — shown while investigation is in progress */}
-        {jobStatus === "running" && (
-          <div className="flex flex-col items-center justify-center min-h-[70vh] gap-8">
-            {/* IOC being investigated */}
-            <div className="text-center">
-              <p className="font-label text-xs text-cyan-400/60 uppercase mb-1">Investigating</p>
-              <h2 className="font-headline text-2xl font-black text-pink-500 uppercase tracking-tighter">
-                {job?.ioc ?? id}
-              </h2>
-            </div>
-
-            {/* Progress bar */}
-            <div className="w-full max-w-xl">
-              <div className="flex justify-between items-center mb-2">
-                <span className="font-label text-xs text-cyan-400/60 uppercase">Progress</span>
-                <span className="font-label text-xs text-pink-500">{progress}%</span>
+      <main className="pt-24 px-8 pb-12 flex-grow overflow-y-auto">
+        {jobStatus === "running" ? (
+          /* Tactical Loading State */
+          <div className="flex flex-col items-center justify-center h-[70vh] gap-12 max-w-2xl mx-auto">
+            <div className="w-full space-y-2">
+              <div className="flex justify-between font-label text-[10px] uppercase tracking-widest">
+                <span className="text-secondary">Decrypting_Neural_Link</span>
+                <span className="text-primary">{progress}%</span>
               </div>
-              <div className="w-full h-1 bg-[#19191c] border border-cyan-400/20">
-                <div
-                  className="h-full bg-pink-500 transition-all duration-500"
-                  style={{ width: `${progress}%` }}
-                />
+              <div className="w-full h-1 bg-surface-container-highest relative overflow-hidden">
+                <div className="absolute inset-0 bg-primary/20 animate-pulse"></div>
+                <div className="h-full bg-primary transition-all duration-500 shadow-[0_0_10px_var(--primary)]" style={{ width: `${progress}%` }}></div>
               </div>
             </div>
 
-            {/* Status message */}
-            <p className="font-label text-sm text-cyan-400 text-center max-w-xl">{statusMessage}</p>
+            <div className="bg-surface-container-low border border-outline-variant/30 p-8 w-full relative overflow-hidden glass-panel">
+               <div className="absolute top-0 right-0 p-2 font-mono text-[8px] text-outline/30">SYS_LOG_V2.5</div>
+               <div className="flex items-start gap-4 mb-6">
+                 <div className="w-2 h-12 bg-secondary animate-pulse"></div>
+                 <p className="font-headline text-xl font-black uppercase text-foreground tracking-tighter italic">{statusMessage}</p>
+               </div>
+               
+               <div className="space-y-2 max-h-48 overflow-y-auto scrollbar-hide">
+                 {activityLog.map((log, i) => (
+                   <div key={i} className="font-mono text-[10px] text-outline/60 flex gap-3">
+                     <span className="text-secondary/40">[{new Date().toLocaleTimeString()}]</span>
+                     <span>{log}</span>
+                   </div>
+                 ))}
+               </div>
+            </div>
 
-            {/* Agent activity log (last 10 entries) */}
-            {activityLog.length > 0 && (
-              <div className="w-full max-w-xl bg-[#19191c] border border-cyan-400/20 p-4 space-y-1 max-h-48 overflow-y-auto">
-                <p className="font-label text-[10px] text-cyan-400/40 uppercase mb-2">Agent Activity</p>
-                {activityLog.map((entry, i) => (
-                  <p key={i} className="font-mono text-[11px] text-[#adaaad]">{entry}</p>
-                ))}
-              </div>
-            )}
-
-            {/* Animated pulse indicator */}
-            <div className="flex gap-2">
-              {[0, 1, 2].map((i) => (
-                <div
-                  key={i}
-                  className="w-2 h-2 bg-pink-500 rounded-full animate-bounce"
-                  style={{ animationDelay: `${i * 0.15}s` }}
-                />
-              ))}
+            <div className="flex gap-4">
+               {[1,2,3].map(i => (
+                 <div key={i} className="w-12 h-1 bg-outline-variant/30 relative overflow-hidden">
+                    <div className="absolute inset-0 bg-secondary transition-all duration-1000 ease-in-out animate-shimmer" style={{ animationDelay: `${i * 0.3}s` }}></div>
+                 </div>
+               ))}
             </div>
           </div>
-        )}
-
-        {/* Results grid — shown once investigation is completed or failed */}
-        {jobStatus !== "running" && (
-          <div className="grid grid-cols-12 gap-6 auto-rows-[250px]">
+        ) : (
+          /* Tectonic Plates Layout */
+          <div className="grid grid-cols-12 gap-8 auto-rows-auto">
             {tiles.map((tile) => (
               <div
-                className={`${tile.size} bg-[#19191c] p-6 border-l-4 pulse-border cursor-pointer hover:bg-[#262529] transition-all flex flex-col justify-between h-full`}
                 key={tile.id}
-                onClick={() => setExpandedTile(tile.id)}
+                className={`${tile.size} bg-surface-container-low border-t-2 border-outline-variant/30 p-6 relative group hover:border-primary/50 transition-colors flex flex-col`}
+                style={{ height: tile.isGraph ? '600px' : 'auto', minHeight: '250px' }}
               >
-                <div className="flex justify-between items-start">
-                  <h3 className="font-headline text-xl font-black text-[#fffbfe] uppercase italic">
-                    {tile.title}
-                  </h3>
-                  <span className="text-cyan-400 material-symbols-outlined text-2xl">
-                    {tile.icon}
-                  </span>
+                <div className="flex justify-between items-start mb-6">
+                  <div className="flex flex-col">
+                    <span className="text-[8px] font-label text-outline uppercase tracking-[0.3em] mb-1">Sector_0{tile.id}</span>
+                    <h3 className="font-headline text-xl font-black text-foreground uppercase tracking-tighter italic group-hover:text-primary transition-colors">{tile.title}</h3>
+                  </div>
+                  <span className="material-symbols-outlined text-secondary text-xl opacity-30 group-hover:opacity-100 transition-opacity">{tile.icon}</span>
                 </div>
 
-                {/* Render Graph if it is the graph tile */}
                 {tile.isGraph ? (
-                  <div className="flex-grow w-full h-full min-h-[400px] mt-4 relative bg-[#0e0e10]/50 border border-cyan-400/20">
+                  <div className="flex-grow relative bg-surface-container-lowest/50 border border-outline-variant/20">
                     {loading ? (
-                      <div className="absolute inset-0 flex items-center justify-center text-cyan-400 font-label text-xs">
-                        LOADING_GRAPH_DATA...
-                      </div>
+                      <div className="absolute inset-0 flex items-center justify-center font-label text-[10px] text-outline uppercase tracking-widest">Awaiting_Neural_Map...</div>
                     ) : (
                       <ReactFlow
                         edges={edges}
@@ -736,62 +533,93 @@ export default function InvestigatePage() {
                         nodeTypes={nodeTypes}
                         onEdgesChange={onEdgesChange}
                         onNodesChange={onNodesChange}
-                        style={{ background: "#080b12" }}
                       >
-                        <Background color="#111828" gap={28} size={1} variant={BackgroundVariant.Dots} />
-                        <Controls style={{ background: "#0d1120", border: "1px solid #1a2540", boxShadow: "none" }} />
-                        <MiniMap
-                          nodeColor={(n: any) => n.data?.isMalicious ? "#dc2626" : n.data?.isRoot ? "#3b82f6" : "#141d2e"}
-                          maskColor="rgba(8,11,18,0.85)"
-                          style={{ background: "#080b12", border: "1px solid #1a2540" }}
+                        <Background color="var(--outline-variant)" gap={20} size={0.5} variant={BackgroundVariant.Lines} />
+                        <Controls className="!bg-surface-container-highest !border-outline-variant !shadow-none !rounded-none" />
+                        <MiniMap 
+                          className="!bg-surface-container-lowest !border-outline-variant !rounded-none" 
+                          maskColor="rgba(0,0,0,0.8)" 
+                          nodeColor={(n: any) => n.data?.isMalicious ? "var(--primary)" : n.data?.isRoot ? "var(--secondary)" : "var(--outline)"} 
                         />
                       </ReactFlow>
                     )}
                   </div>
                 ) : tile.isTriage && tile.content ? (
-                   <div className="flex-grow flex flex-col justify-center gap-5 mt-2">
-                      <div className="flex justify-between items-end border-b border-cyan-400/20 pb-3">
-                        <div>
-                          <p className="text-xs font-label text-cyan-400/60 uppercase mb-1">GTI Verdict</p>
-                          <p className={`text-3xl font-headline font-black italic tracking-tighter ${(tile.content as any).verdict.toUpperCase() === 'MALICIOUS' ? 'text-pink-500' : 'text-cyan-400'}`}>
-                            {(tile.content as any).verdict}
-                          </p>
+                   <div className="flex flex-col gap-6">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-surface-container-lowest p-4 border-l-2 border-primary">
+                           <div className="text-[9px] font-label text-outline uppercase mb-1">Risk_Level</div>
+                           <div className={`text-2xl font-headline font-black italic ${(tile.content as any).verdict === 'MALICIOUS' ? 'text-primary' : 'text-secondary'}`}>{(tile.content as any).verdict}</div>
                         </div>
-                        <div className="text-right">
-                          <p className="text-xs font-label text-cyan-400/60 uppercase mb-1">Threat Score</p>
-                          <p className="text-3xl font-headline font-black text-[#fffbfe]">
-                            {(tile.content as any).score}<span className="text-lg text-cyan-400/40">/100</span>
-                          </p>
+                        <div className="bg-surface-container-lowest p-4 border-l-2 border-secondary">
+                           <div className="text-[9px] font-label text-outline uppercase mb-1">GTI_Score</div>
+                           <div className="text-2xl font-headline font-black text-foreground">{(tile.content as any).score}<span className="text-xs text-outline ml-1">/100</span></div>
                         </div>
                       </div>
+                      <p className="text-xs text-outline/80 font-body leading-relaxed italic">"{(tile.content as any).summary}"</p>
                       
-                      <div className="flex justify-between items-center bg-[#0e0e10] p-4 rounded border border-cyan-400/10">
-                        <div>
-                          <p className="text-xs font-label text-cyan-400/80 uppercase">VT Detections</p>
-                          <p className="text-xl font-headline font-black text-cyan-400">
-                            {(tile.content as any).malicious}<span className="text-sm text-cyan-400/40"> / {(tile.content as any).total}</span>
-                          </p>
+                      <div className="mt-4 flex flex-col gap-2">
+                        <div className="flex justify-between text-[8px] font-label uppercase">
+                           <span className="text-outline">Detections_Ratio</span>
+                           <span className="text-secondary">{(tile.content as any).malicious}/{(tile.content as any).total}</span>
                         </div>
-                        <div className="w-32 h-2 bg-[#19191c] rounded-full overflow-hidden shadow-inner">
-                           <div 
-                             className={`h-full ${(tile.content as any).malicious > 0 ? 'bg-pink-500' : 'bg-green-400'}`} 
-                             style={{ width: `${Math.min(((tile.content as any).malicious / ((tile.content as any).total || 1)) * 100, 100)}%` }}
-                           />
+                        <div className="w-full h-1 bg-surface-container-highest">
+                           <div className="h-full bg-primary" style={{ width: `${Math.min(((tile.content as any).malicious / ((tile.content as any).total || 1)) * 100, 100)}%` }}></div>
                         </div>
                       </div>
-                      
-                      <p className="text-xs md:text-sm font-body text-gray-300 line-clamp-3 italic leading-relaxed">
-                        "{(tile.content as any).summary}"
-                      </p>
                    </div>
-                ) : (
-                  <p className="font-label text-xs text-cyan-400/60 mt-2">
-                    {tile.content as string}
-                  </p>
-                )}
+                ) : tile.isReports ? (
+                   <div className="flex flex-col gap-4 max-h-[400px] overflow-y-auto pr-2 scrollbar-hide">
+                      {job?.specialist_results ? Object.entries(job.specialist_results).map(([agent, result]: [string, any]) => (
+                        <button 
+                          key={agent}
+                          onClick={() => setExpandedTile(3)}
+                          className="w-full text-left bg-surface-container-lowest p-4 border-l-2 border-outline-variant hover:border-secondary transition-colors"
+                        >
+                           <div className="flex justify-between items-center mb-1">
+                             <span className="text-[10px] font-headline font-black text-foreground uppercase">{agent.replace('_', ' ')}</span>
+                             <span className={`text-[8px] font-label uppercase ${result.verdict === 'MALICIOUS' ? 'text-primary' : 'text-secondary'}`}>{result.verdict}</span>
+                           </div>
+                           <div className="text-[9px] text-outline truncate">{result.summary || "View detailed briefing..."}</div>
+                        </button>
+                      )) : <div className="text-[10px] text-outline/40 italic uppercase tracking-widest">Awaiting_Specialist_Inputs...</div>}
+                   </div>
+                ) : tile.isFinalReport ? (
+                   <div className="bg-surface-container-lowest p-8 border border-outline-variant/20 relative">
+                      <div className="absolute top-0 left-0 px-2 py-1 bg-primary text-on-primary text-[8px] font-black uppercase tracking-widest">Consolidated_Intel</div>
+                      <div className="max-h-[500px] overflow-y-auto pr-4 custom-scrollbar">
+                        <Typewriter text={job?.final_report || "Report generation in progress..."} speed={2} />
+                      </div>
+                   </div>
+                ) : tile.isTimeline ? (
+                   <div className="space-y-4 max-h-[350px] overflow-y-auto pr-2 scrollbar-hide">
+                      {job?.subtasks?.map((task: any, idx: number) => (
+                        <div key={idx} className="flex gap-4 items-start bg-surface-container-lowest p-3 border-l border-outline-variant">
+                           <div className="text-[8px] font-mono text-primary mt-1">{task.timestamp || "T+0s"}</div>
+                           <div className="flex flex-col gap-1">
+                             <div className="text-[9px] font-headline font-black text-foreground uppercase tracking-widest">{task.agent}</div>
+                             <div className="text-[10px] text-outline leading-tight">{task.task}</div>
+                           </div>
+                        </div>
+                      ))}
+                   </div>
+                ) : tile.isTransparency ? (
+                   <div className="bg-surface-container-lowest p-4 font-mono text-[9px] text-outline/60 space-y-2 max-h-[350px] overflow-y-auto custom-scrollbar">
+                      {job?.transparency_log?.map((event: any, idx: number) => (
+                        <div key={idx} className="border-b border-outline-variant/10 pb-2">
+                           <span className="text-secondary/40">[{event.timestamp}]</span> <span className="text-primary/60">{event.agent}</span>: {event.type === 'tool' ? `INVOKE_${event.tool}` : `THINK_${(event.thought || "").substring(0, 50)}...`}
+                        </div>
+                      ))}
+                   </div>
+                ) : null}
 
-                <div className="mt-auto text-[10px] font-label text-pink-500 text-right uppercase">
-                  Click to expand
+                <div className="mt-6 flex items-center justify-between">
+                   <div className="flex gap-1">
+                      <div className="w-1 h-1 bg-secondary/30"></div>
+                      <div className="w-1 h-1 bg-secondary/30"></div>
+                      <div className="w-4 h-1 bg-primary/30"></div>
+                   </div>
+                   <button onClick={() => setExpandedTile(tile.id)} className="text-[8px] font-label text-primary uppercase tracking-[0.2em] hover:text-secondary transition-colors">Expand_Sector</button>
                 </div>
               </div>
             ))}
@@ -799,215 +627,78 @@ export default function InvestigatePage() {
         )}
       </main>
 
-      {/* Overlay */}
+      {/* Fullscreen Modal Overlays */}
       {expandedTile !== null && (
-        <div
-          className="fixed inset-0 bg-[#0e0e10]/95 backdrop-blur-xl z-[100] flex items-center justify-center p-6"
-          onClick={() => setExpandedTile(null)}
-        >
-          <div
-            className="bg-[#19191c] border-2 border-pink-500 p-8 w-11/12 h-[90vh] overflow-y-auto relative"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              className="absolute top-4 right-4 text-cyan-400 hover:text-pink-500 material-symbols-outlined text-3xl"
-              onClick={() => setExpandedTile(null)}
-            >
-              close
-            </button>
-            <h2 className="font-headline text-4xl font-black text-pink-500 uppercase mb-6 italic">
-              {tiles.find((t) => t.id === expandedTile)?.title}
-            </h2>
-            <div className="font-body text-[#adaaad] text-sm space-y-4 h-full">
-              {/* If expanding graph, show it larger */}
-              {tiles.find((t) => t.id === expandedTile)?.isGraph ? (
-                <div className="w-full h-[70vh] bg-[#0e0e10]/50 border border-cyan-400/20">
-                  <ReactFlow
-                    edges={edges}
-                    fitView
-                    nodes={nodes}
-                    nodesConnectable={false}
-                    nodeTypes={nodeTypes}
-                    onEdgesChange={onEdgesChange}
-                    onNodesChange={onNodesChange}
-                    style={{ background: "#080b12" }}
-                  >
-                    <Background color="#111828" gap={28} size={1} variant={BackgroundVariant.Dots} />
-                    <Controls style={{ background: "#0d1120", border: "1px solid #1a2540", boxShadow: "none" }} />
-                    <MiniMap
-                      nodeColor={(n: any) => n.data?.isMalicious ? "#dc2626" : n.data?.isRoot ? "#3b82f6" : "#141d2e"}
-                      maskColor="rgba(8,11,18,0.85)"
-                      style={{ background: "#080b12", border: "1px solid #1a2540" }}
-                    />
-                  </ReactFlow>
-                </div>
-              ) : (
-                <>
-                  {expandedTile === 1 && (
-                    <div className="space-y-6">
-                      <section>
-                        <h3 className="text-2xl font-headline font-black text-pink-500 uppercase mb-4">
-                          Triage Report
-                        </h3>
-                        <div className="bg-[#0e0e10] p-6 rounded border border-cyan-400/20 shadow-lg">
-                           <MarkdownRenderer content={job?.rich_intel?.triage_analysis?.markdown_report || "No summary available."} />
+        <div className="fixed inset-0 z-[100] bg-surface/95 backdrop-blur-3xl flex items-center justify-center p-12" onClick={() => setExpandedTile(null)}>
+          <div className="bg-surface-container-low border-2 border-primary w-full max-w-6xl h-full relative overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="p-8 border-b border-outline-variant/30 flex justify-between items-center bg-surface-container">
+               <div className="flex flex-col">
+                 <span className="text-[10px] font-label text-outline uppercase tracking-[0.4em] mb-1">Detail_Inspection_Mode</span>
+                 <h2 className="font-headline text-3xl font-black text-primary uppercase tracking-tighter italic glow-text-primary">
+                    {tiles.find(t => t.id === expandedTile)?.title}
+                 </h2>
+               </div>
+               <button onClick={() => setExpandedTile(null)} className="material-symbols-outlined text-4xl text-secondary hover:text-primary transition-colors">close</button>
+            </div>
+            
+            <div className="flex-grow overflow-y-auto p-12 custom-scrollbar">
+               {expandedTile === 3 && (
+                 <div className="space-y-12">
+                   {job?.specialist_results ? Object.entries(job.specialist_results).map(([agent, result]: [string, any]) => (
+                     <div key={agent} className="bg-surface-container-lowest border border-outline-variant/20 p-8 relative">
+                        <div className="absolute top-0 right-0 px-3 py-1 bg-secondary text-surface text-[10px] font-black uppercase tracking-widest">{agent}</div>
+                        <div className="mb-6 flex items-center gap-4">
+                           <div className={`px-3 py-1 text-[10px] font-black uppercase ${result.verdict === 'MALICIOUS' ? 'bg-primary text-on-primary' : 'bg-secondary text-on-secondary'}`}>{result.verdict}</div>
                         </div>
-                      </section>
-                      <section>
-                        <h3 className="text-2xl font-headline font-black text-pink-500 uppercase mb-4 mt-8">
-                          Generated Tasks
-                        </h3>
-                        <ul className="space-y-4">
-                          {job?.subtasks?.map((task: any, idx: number) => (
-                            <li
-                              className="bg-[#19191c] p-5 border-l-4 border-cyan-400 shadow-md"
-                              key={idx}
-                            >
-                              <div className="flex justify-between items-center mb-2">
-                                <strong className="font-headline text-[#fffbfe] text-lg uppercase tracking-tighter">
-                                  {task.agent}
-                                </strong>
-                                <span
-                                  className={`text-sm font-label uppercase ${task.status === "completed" ? "text-green-400" : "text-yellow-400"}`}
-                                >
-                                  {task.status}
-                                </span>
-                              </div>
-                              <p className="text-sm text-gray-300 leading-relaxed">
-                                {task.task}
-                              </p>
-                            </li>
-                          ))}
-                        </ul>
-                      </section>
-                    </div>
-                  )}
-                  {expandedTile === 3 && (
-                    <div className="space-y-6">
-                      <h3 className="text-2xl font-headline font-black text-pink-500 uppercase mb-6">
-                        Specialist Reports
-                      </h3>
-                      {job?.specialist_results ? (
-                        Object.entries(job.specialist_results).map(
-                          ([agent, result]: [string, any]) => (
-                            <div
-                              key={agent}
-                              className="bg-[#19191c] p-8 border-l-4 border-cyan-400 shadow-xl mb-6"
-                            >
-                              <div className="flex justify-between items-center mb-6">
-                                <h4 className="font-headline text-xl md:text-2xl font-black text-[#fffbfe] uppercase tracking-tighter">
-                                  {agent.replace("_", " ").toUpperCase()}
-                                </h4>
-                                <span
-                                  className={`text-sm md:text-base font-label uppercase ${result.verdict?.toUpperCase() === "MALICIOUS" ? "text-pink-500" : result.verdict?.toUpperCase() === "SUSPICIOUS" ? "text-yellow-400" : "text-green-400"}`}
-                                >
-                                  {result.verdict || "N/A"}
-                                </span>
-                              </div>
-                              <div className="bg-[#0e0e10] p-6 md:p-8 rounded border border-cyan-400/20 shadow-inner overflow-x-auto">
-                                <MarkdownRenderer content={result.markdown_report || "No report content."} />
-                              </div>
-                            </div>
-                          ),
-                        )
-                      ) : (
-                        <p className="text-base text-gray-400 italic">
-                          No specialist reports available.
-                        </p>
-                      )}
-                    </div>
-                  )}
-                  {expandedTile === 4 && (
-                    <div className="space-y-4">
-                      <h3 className="text-2xl font-headline font-black text-pink-500 uppercase mb-6">
-                        Final Intelligence Report
-                      </h3>
-                      <div className="bg-[#19191c] p-6 md:p-8 border-l-4 border-cyan-400 shadow-2xl">
-                        <div className="bg-[#0e0e10] p-6 md:p-8 rounded border border-cyan-400/20 shadow-inner overflow-x-auto">
-                          <Typewriter text={job?.final_report || "No report available."} speed={5} />
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  {expandedTile === 5 && (
-                    <div className="space-y-4">
-                      <h3 className="text-xl font-headline font-black text-pink-500 uppercase mb-4">
-                        Investigation Timeline
-                      </h3>
-                      <div className="space-y-4">
+                        <MarkdownRenderer content={result.markdown_report || "MISSING_DATA"} />
+                     </div>
+                   )) : <div className="text-outline italic uppercase tracking-widest">Awaiting_Briefings...</div>}
+                 </div>
+               )}
+               
+               {expandedTile === 1 && (
+                  <div className="space-y-12">
+                     <div className="bg-surface-container-lowest border border-outline-variant/20 p-8">
+                        <h3 className="text-xl font-headline font-black text-secondary uppercase mb-6 tracking-tighter italic">Analytical_Triage_Summary</h3>
+                        <MarkdownRenderer content={job?.rich_intel?.triage_analysis?.markdown_report || "NO_SUMMARY"} />
+                     </div>
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                         {job?.subtasks?.map((task: any, idx: number) => (
-                          <div
-                            className="flex gap-4 items-center bg-[#19191c] p-4 border-l-2 border-cyan-400"
-                            key={idx}
-                          >
-                            <span className="text-pink-500 font-label text-xs">
-                              {task.timestamp || "N/A"}
-                            </span>
-                            <span className="bg-[#0e0e10] px-2 py-1 text-xs font-label text-cyan-400 uppercase">
-                              {task.agent}
-                            </span>
-                            <span className="text-xs text-[#fffbfe] flex-grow">
-                              {task.task}
-                            </span>
-                            <span
-                              className={`text-xs font-label uppercase ${task.status === "completed" ? "text-green-400" : "text-yellow-400"}`}
-                            >
-                              {task.status}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {expandedTile === 6 && (
-                    <div className="space-y-4">
-                      <h3 className="text-xl font-headline font-black text-pink-500 uppercase mb-4">
-                        Agent Transparency Log
-                      </h3>
-                      <div className="space-y-2">
-                        {job?.transparency_log?.map(
-                          (event: any, idx: number) => (
-                            <div
-                              className="bg-[#19191c] p-4 border-l-2 border-pink-500 text-xs"
-                              key={idx}
-                            >
-                              <div className="flex gap-2 items-center mb-1">
-                                <span className="text-cyan-400 font-label text-[10px]">
-                                  {event.timestamp}
-                                </span>
-                                <span className="bg-[#0e0e10] px-1.5 py-0.5 text-[10px] font-label text-pink-500 uppercase">
-                                  {event.agent}
-                                </span>
+                           <div key={idx} className="bg-surface-container p-6 border-l-4 border-primary shadow-xl">
+                              <div className="flex justify-between items-center mb-3">
+                                 <span className="text-xs font-headline font-black text-foreground uppercase">{task.agent}</span>
+                                 <span className="text-[10px] font-label text-secondary uppercase">{task.status}</span>
                               </div>
-                              <p className="text-[#adaaad]">
-                                {event.type === "tool"
-                                  ? `Used tool: ${event.tool}`
-                                  : `Thought: ${event.thought}`}
-                              </p>
-                            </div>
-                          ),
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
+                              <p className="text-xs text-outline leading-relaxed">{task.task}</p>
+                           </div>
+                        ))}
+                     </div>
+                  </div>
+               )}
+
+               {expandedTile === 4 && (
+                  <div className="max-w-4xl mx-auto bg-surface-container-lowest p-12 border border-outline-variant/30 shadow-[0_0_100px_rgba(255,124,245,0.1)]">
+                     <MarkdownRenderer content={job?.final_report || "GENERATING_REPORT..."} />
+                  </div>
+               )}
+               
+               {/* Default fallback for other tiles */}
+               {[2, 5, 6].includes(expandedTile) && (
+                  <div className="text-outline uppercase tracking-widest text-center mt-20 italic">Section_Display_Locked_To_Main_HUD</div>
+               )}
             </div>
           </div>
         </div>
       )}
 
-      {/* Background Grid Lines */}
-      <div className="fixed inset-0 pointer-events-none z-[-1] opacity-[0.03]">
-        <div
-          className="h-full w-full"
-          style={{
-            backgroundImage:
-              "linear-gradient(#00fbfb 1px, transparent 1px), linear-gradient(90deg, #00fbfb 1px, transparent 1px)",
-            backgroundSize: "100px 100px",
-          }}
-        ></div>
-      </div>
+      {/* Footer Meta */}
+      <footer className="fixed bottom-0 left-0 w-full h-8 border-t border-outline-variant/30 bg-surface/90 backdrop-blur-md z-40 flex items-center justify-between px-6 text-[8px] font-label text-outline uppercase tracking-[0.2em]">
+        <div>Harimau_System_Link: <span className="text-secondary">Connected</span></div>
+        <div className="flex gap-4">
+           <span>Lat: {progress}%_Sync</span>
+           <span className="text-primary font-black animate-pulse">Live_Feed</span>
+        </div>
+      </footer>
     </div>
   );
 }

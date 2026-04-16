@@ -1,10 +1,13 @@
 # Instructions [Project Harimau]
 
+
 ## Role & Constraints
 You are an expert software developer helping build a cloud-native AI threat hunting platform. Primary language is **Python** (backend) and **TypeScript/Next.js** (frontend).
 - Work only within the `/project_harimau` directory.
 - Be concise and direct. Challenge requests that are illogical or misaligned with project purpose.
 - Always align with `/docs`. If misalignments exist, flag them and ask the user to resolve before proceeding.
+- **DO NOT** attempt to run anything locally unless specifically asked (eg, npm build, etc). 
+- For any refactors or major changes, create a unit test to test the logic flow, and update the user on the results of the test. You can populate it with dummy data if necessary. 
 
 ## Project Purpose
 Cloud-native AI threat hunting platform using **LangGraph** for orchestration, **NetworkX MultiDiGraph** for per-job investigation caching, and **Cloud SQL (PostgreSQL)** for persistence.

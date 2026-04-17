@@ -74,7 +74,6 @@ const Typewriter = ({ text, speed = 1 }: { text: string; speed?: number }) => {
 const IP_REGEX = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/;
 const HASH_REGEX = /^[a-fA-F0-9]{32,64}$/;
 
-// Custom Node Component - Wiz Style (Circles)
 const CustomNode = ({ data, style }: any) => {
   let icon = "hub";
   const label = data.label || "";
@@ -339,14 +338,14 @@ export default function InvestigatePage() {
             await refetch();
             eventSource?.close();
           } else if (eventType === "tool_invocation") {
-            setActivityLog((prev) => [`🔧 ${agent}: EXECUTING_${data.tool}`, ...prev].slice(0, 20));
+            setActivityLog((prev) => [`[${new Date().toLocaleTimeString()}] 🔧 ${agent}: EXECUTING_${data.tool}`, ...prev].slice(0, 20));
           } else if (eventType === "agent_reasoning") {
-            setActivityLog((prev) => [`💭 ${agent}: ANALYZING_DATA`, ...prev].slice(0, 20));
+            setActivityLog((prev) => [`[${new Date().toLocaleTimeString()}] 💭 ${agent}: ANALYZING_DATA`, ...prev].slice(0, 20));
           } else if (eventType.includes("_started")) {
             setStatusMessage(`🤖 ${msg || agent}`);
           } else if (eventType.includes("_completed")) {
             setStatusMessage(`✅ ${msg || agent}`);
-            if (agent) setActivityLog((prev) => [`✅ ${agent}: SYNOPSIS_READY`, ...prev].slice(0, 20));
+            if (agent) setActivityLog((prev) => [`[${new Date().toLocaleTimeString()}] ✅ ${agent}: SYNOPSIS_READY`, ...prev].slice(0, 20));
           } else {
             if (msg) setStatusMessage(msg);
           }
@@ -537,13 +536,18 @@ export default function InvestigatePage() {
                  </div>
                  
                  <div className="space-y-2 max-h-48 overflow-y-auto scrollbar-hide">
-                   {activityLog.map((log, i) => (
-                     <div key={i} className="font-mono text-[10px] text-outline/60 flex gap-3">
-                       <span className="text-secondary/40">[{new Date().toLocaleTimeString()}]</span>
-                       <span>{log}</span>
-                     </div>
-                   ))}
-                 </div>
+                  {activityLog.map((log, i) => {
+                    const parts = log.split(']');
+                    const time = parts[0] + ']';
+                    const rest = parts.slice(1).join(']');
+                    return (
+                      <div key={i} className="font-mono text-[10px] text-outline/60 flex gap-3">
+                        <span className="text-secondary/40">{time}</span>
+                        <span>{rest}</span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           ) : (
@@ -641,12 +645,17 @@ export default function InvestigatePage() {
                   <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
                 </div>
                 <div className="flex-1 p-3 overflow-y-auto space-y-3 font-mono text-[11px] custom-scrollbar">
-                  {activityLog.map((log, idx) => (
-                    <div key={idx} className="flex gap-2 border-b border-outline-variant/10 pb-2">
-                      <span className="text-secondary/40">[{new Date().toLocaleTimeString()}]</span>
-                      <span className="text-slate-500">{log}</span>
-                    </div>
-                  ))}
+                    {activityLog.map((log, idx) => {
+                      const parts = log.split(']');
+                      const time = parts[0] + ']';
+                      const rest = parts.slice(1).join(']');
+                      return (
+                        <div key={idx} className="flex gap-2 border-b border-outline-variant/10 pb-2">
+                          <span className="text-secondary/40">{time}</span>
+                          <span className="text-slate-500">{rest}</span>
+                        </div>
+                      );
+                    })}
                   {activityLog.length === 0 && (
                     <div className="text-outline/30 italic">No activity recorded yet.</div>
                   )}

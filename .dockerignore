@@ -1,0 +1,21 @@
+# Ignore node_modules and build outputs
+node_modules/
+.next/
+app/node_modules/
+app/.next/
+out/
+
+# Ignore Git history and IDE configs
+.git/
+.idea/
+.vscode/
+.DS_Store
+
+# Ignore Python artifacts
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Ignore Git history and IDE configs
+test_*

@@ -74,7 +74,7 @@ const Typewriter = ({ text, speed = 1 }: { text: string; speed?: number }) => {
 const IP_REGEX = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/;
 const HASH_REGEX = /^[a-fA-F0-9]{32,64}$/;
 
-// Custom Node Component - Fractured Design (Sharp Edges)
+// Custom Node Component - Wiz Style (Circles)
 const CustomNode = ({ data, style }: any) => {
   let icon = "hub";
   const label = data.label || "";
@@ -94,24 +94,28 @@ const CustomNode = ({ data, style }: any) => {
   const iconSize = Math.max(14, nodeSize * 0.4);
 
   const color = isRoot ? "var(--secondary)" : isMalicious ? "var(--primary)" : "var(--outline)";
-  const bgColor = isRoot ? "rgba(0, 251, 251, 0.1)" : isMalicious ? "rgba(255, 124, 245, 0.1)" : "rgba(72, 71, 74, 0.1)";
-
+  
   return (
     <div className="relative group flex flex-col items-center">
       <Handle type="target" position={Position.Top} className="!opacity-0" style={{ left: "50%", top: "50%" }} />
       <Handle type="source" position={Position.Bottom} className="!opacity-0" style={{ left: "50%", top: "50%" }} />
 
+      {/* Alert Badge (Wiz style) */}
+      {isMalicious && (
+        <div className="absolute -top-2 -right-2 bg-error text-white p-0.5 rounded-full z-10 flex items-center justify-center" style={{ borderRadius: '50% !important', width: '16px', height: '16px' }}>
+          <span className="material-symbols-outlined text-[10px]">warning</span>
+        </div>
+      )}
+
       <div
-        className={`transition-all duration-300 ${isMalicious ? 'animate-pulse' : ''}`}
+        className={`transition-all duration-300 flex items-center justify-center`}
         style={{
           width: nodeSize,
           height: nodeSize,
-          background: bgColor,
+          background: "var(--surface-container-high)",
           border: `2px solid ${color}`,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
           boxShadow: `0 0 15px ${color}33`,
+          borderRadius: '50% !important', // Override global sharp edges
         }}
       >
         <span className="material-symbols-outlined" style={{ fontSize: iconSize, color: color }}>
@@ -119,15 +123,13 @@ const CustomNode = ({ data, style }: any) => {
         </span>
       </div>
 
-      <div className="mt-2 text-[9px] font-label uppercase tracking-widest text-outline whitespace-nowrap overflow-hidden text-ellipsis max-w-[100px]">
+      {/* Label Below (Wiz style) */}
+      <div className="mt-2 text-[9px] font-label uppercase tracking-widest text-outline whitespace-nowrap overflow-hidden text-ellipsis max-w-[100px] text-center">
         {label}
       </div>
-
-      {/* Simplified Tooltip */}
-      <div className="absolute bottom-full mb-2 hidden group-hover:block z-50 bg-surface-container-highest border border-outline-variant p-2 text-[8px] font-mono text-foreground min-w-[150px] shadow-2xl">
-        <div className="text-secondary mb-1 border-b border-outline-variant/30 pb-1">{label}</div>
-        <div className="text-outline/80 leading-tight">{title || "NO_METADATA"}</div>
-      </div>
+      
+      {/* Title in Tooltip or small text */}
+      <div className="text-[7px] text-outline-variant text-center max-w-[100px] truncate">{title}</div>
     </div>
   );
 };
@@ -170,6 +172,7 @@ export default function InvestigatePage() {
   const [statusMessage, setStatusMessage] = useState<string>("Initializing secure channel...");
   const [activityLog, setActivityLog] = useState<string[]>([]);
   const [recentJobs, setRecentJobs] = useState<any[]>([]);
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const simulationRef = useRef<any>(null);
 
   useEffect(() => {
@@ -417,23 +420,25 @@ export default function InvestigatePage() {
   ];
 
   return (
-    <div className="min-h-screen bg-surface text-foreground relative flex flex-col selection:bg-primary selection:text-on-primary font-body">
-      {/* HUD Header */}
-      <header className="fixed top-0 left-0 w-full z-50 flex items-stretch h-16 border-b border-outline-variant/30 bg-surface/90 backdrop-blur-xl">
-        <div className="flex items-center px-6 bg-primary/10 border-r border-primary/30">
-          <Link href="/" className="flex items-center gap-3">
-             <span className="text-2xl font-black italic font-headline text-primary glow-text-primary tracking-tighter uppercase">HARIMAU</span>
-          </Link>
+    <div className="bg-[#0e0e10] text-on-surface font-body overflow-hidden h-screen flex flex-col selection:bg-primary selection:text-on-primary">
+      {/* TopNavBar */}
+      <header className="fixed top-0 w-full z-50 bg-[#0e0e10]/80 backdrop-blur-xl border-b border-slate-800/50 shadow-2xl shadow-cyan-900/10 flex justify-between items-center px-6 h-16">
+        <div className="flex items-center gap-8">
+          <span className="text-xl font-bold tracking-widest text-[#00f7ff] font-headline uppercase">HARIMAU</span>
+          <nav className="hidden md:flex gap-6 font-headline text-sm uppercase tracking-widest">
+            <Link href="/" className="text-slate-400 hover:text-white transition-colors">HUNT</Link>
+            <Link href="#" className="text-[#00f7ff] border-b-2 border-[#00f7ff] pb-1">INVESTIGATIONS</Link>
+            <Link href="#" className="text-slate-400 hover:text-white transition-colors">INTEL</Link>
+          </nav>
         </div>
-        
         <div className="flex-grow flex items-center px-8 gap-4 overflow-hidden">
           <div className="text-[10px] font-label text-outline uppercase tracking-widest whitespace-nowrap">MISSION_ID:</div>
           <div className="text-[10px] font-mono text-secondary truncate max-w-[200px]">{id}</div>
           <div className="hidden md:block text-[10px] font-label text-outline uppercase tracking-widest ml-4">IOC:</div>
           <div className="hidden md:block text-[10px] font-mono text-primary font-black">{job?.ioc}</div>
         </div>
-
-        <div className="flex items-center px-6 gap-6 border-l border-outline-variant/30">
+        <div className="flex items-center gap-4">
+          {/* History Dropdown kept for functionality */}
           <div className="hidden lg:block relative">
             <select
               className="bg-surface-container border-b-2 border-secondary text-secondary text-[10px] px-3 py-1 font-label uppercase outline-none cursor-pointer appearance-none pr-6"
@@ -456,247 +461,228 @@ export default function InvestigatePage() {
               arrow_drop_down
             </span>
           </div>
-          <Link href="/" className="font-headline text-secondary/60 hover:text-primary transition-colors uppercase tracking-widest text-[10px]">Close_Mission</Link>
-          <div className="w-8 h-8 border border-primary grayscale relative overflow-hidden">
-            <Image src="/avatar.jpeg" alt="Hunter" fill className="object-cover" />
+          <button className="text-slate-400 hover:text-[#00f7ff] transition-colors">
+            <span className="material-symbols-outlined">settings_input_component</span>
+          </button>
+          <div className="w-8 h-8 border border-outline-variant bg-surface-container-high">
+            <div className="w-full h-full bg-secondary/20"></div>
           </div>
         </div>
       </header>
 
-      <main className="pt-24 px-8 pb-12 flex-grow overflow-y-auto">
-        {jobStatus === "running" ? (
-          /* Tactical Loading State */
-          <div className="flex flex-col items-center justify-center h-[70vh] gap-12 max-w-2xl mx-auto">
-            <div className="w-full space-y-2">
-              <div className="flex justify-between font-label text-[10px] uppercase tracking-widest">
-                <span className="text-secondary">Decrypting_Neural_Link</span>
-                <span className="text-primary">{progress}%</span>
-              </div>
-              <div className="w-full h-1 bg-surface-container-highest relative overflow-hidden">
-                <div className="absolute inset-0 bg-primary/20 animate-pulse"></div>
-                <div className="h-full bg-primary transition-all duration-500 shadow-[0_0_10px_var(--primary)]" style={{ width: `${progress}%` }}></div>
-              </div>
-            </div>
-
-            <div className="bg-surface-container-low border border-outline-variant/30 p-8 w-full relative overflow-hidden glass-panel">
-               <div className="absolute top-0 right-0 p-2 font-mono text-[8px] text-outline/30">SYS_LOG_V2.5</div>
-               <div className="flex items-start gap-4 mb-6">
-                 <div className="w-2 h-12 bg-secondary animate-pulse"></div>
-                 <p className="font-headline text-xl font-black uppercase text-foreground tracking-tighter italic">{statusMessage}</p>
-               </div>
-               
-               <div className="space-y-2 max-h-48 overflow-y-auto scrollbar-hide">
-                 {activityLog.map((log, i) => (
-                   <div key={i} className="font-mono text-[10px] text-outline/60 flex gap-3">
-                     <span className="text-secondary/40">[{new Date().toLocaleTimeString()}]</span>
-                     <span>{log}</span>
-                   </div>
-                 ))}
-               </div>
-            </div>
-
-            <div className="flex gap-4">
-               {[1,2,3].map(i => (
-                 <div key={i} className="w-12 h-1 bg-outline-variant/30 relative overflow-hidden">
-                    <div className="absolute inset-0 bg-secondary transition-all duration-1000 ease-in-out animate-shimmer" style={{ animationDelay: `${i * 0.3}s` }}></div>
-                 </div>
-               ))}
+      <div className="flex flex-1 pt-16 pb-8 overflow-hidden">
+        {/* SideNavBar */}
+        <aside className={`fixed left-0 top-16 h-full ${isCollapsed ? 'w-16' : 'w-64'} border-r border-slate-800 bg-[#16161a] flex flex-col py-4 z-40 transition-all duration-300`}>
+          <button onClick={() => setIsCollapsed(!isCollapsed)} className="absolute top-4 right-2 text-slate-500 hover:text-[#00f7ff] z-50">
+            <span className="material-symbols-outlined text-sm">
+              {isCollapsed ? 'chevron_right' : 'chevron_left'}
+            </span>
+          </button>
+          <div className="px-4 mb-8">
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-2 rounded-full bg-[#00f7ff] animate-pulse flex-shrink-0"></div>
+              {!isCollapsed && (
+                <div>
+                  <p className="font-headline text-sm uppercase font-semibold text-[#00f7ff]">HARIMAU</p>
+                  <p className="text-[10px] text-slate-500 uppercase tracking-widest">Active Session</p>
+                </div>
+              )}
             </div>
           </div>
-        ) : (
-          /* Tectonic Plates Layout */
-          <div className="grid grid-cols-12 gap-8 auto-rows-auto">
-            {tiles.map((tile) => (
-              <div
-                key={tile.id}
-                className={`${tile.size} bg-surface-container-low border-t-2 border-outline-variant/30 p-6 relative group hover:border-primary/50 transition-colors flex flex-col`}
-                style={{ height: tile.isGraph ? '600px' : 'auto', minHeight: '250px' }}
-              >
-                <div className="flex justify-between items-start mb-6">
-                  <div className="flex flex-col">
-                    <span className="text-[8px] font-label text-outline uppercase tracking-[0.3em] mb-1">Sector_0{tile.id}</span>
-                    <h3 className="font-headline text-xl font-black text-foreground uppercase tracking-tighter italic group-hover:text-primary transition-colors">{tile.title}</h3>
-                  </div>
-                  <span className="material-symbols-outlined text-secondary text-xl opacity-30 group-hover:opacity-100 transition-opacity">{tile.icon}</span>
+          <nav className="flex-1 space-y-1">
+            <a className="flex items-center gap-4 px-4 py-3 bg-cyan-500/10 text-[#00f7ff] border-r-2 border-[#00f7ff] font-headline text-sm uppercase font-semibold" href="#">
+              <span className="material-symbols-outlined">folder_open</span>
+              {!isCollapsed && <span>Investigation Cases</span>}
+            </a>
+            <a className="flex items-center gap-4 px-4 py-3 text-slate-500 hover:bg-white/5 hover:text-slate-300 font-headline text-sm uppercase font-semibold transition-all" href="#">
+              <span className="material-symbols-outlined">history_edu</span>
+              {!isCollapsed && <span>Archived Reports</span>}
+            </a>
+          </nav>
+          <div className="mt-auto border-t border-slate-800 pt-4 space-y-1 mb-20">
+            <div className="flex items-center gap-4 px-4 py-2 text-slate-600 font-headline text-[10px] uppercase">
+              <span className="material-symbols-outlined text-sm">sensors</span>
+              {!isCollapsed && <span>Agent Status: Optimal</span>}
+            </div>
+            <div className="flex items-center gap-4 px-4 py-2 text-slate-600 font-headline text-[10px] uppercase">
+              <span className="material-symbols-outlined text-sm">lan</span>
+              {!isCollapsed && <span>Network Health: Secure</span>}
+            </div>
+          </div>
+        </aside>
+
+        {/* Main Dashboard Canvas */}
+        <main className={`${isCollapsed ? 'ml-16' : 'ml-64'} flex-1 p-6 grid grid-cols-12 gap-4 overflow-y-auto h-full custom-scrollbar transition-all duration-300`}>
+          
+          {jobStatus === "running" ? (
+            /* Tactical Loading State inside main canvas */
+            <div className="col-span-12 flex flex-col items-center justify-center h-[70vh] gap-12 max-w-2xl mx-auto">
+              <div className="w-full space-y-2">
+                <div className="flex justify-between font-label text-[10px] uppercase tracking-widest">
+                  <span className="text-secondary">Decrypting_Neural_Link</span>
+                  <span className="text-primary">{progress}%</span>
                 </div>
-
-                {tile.isGraph ? (
-                  <div className="flex-grow relative bg-surface-container-lowest/50 border border-outline-variant/20">
-                    {loading ? (
-                      <div className="absolute inset-0 flex items-center justify-center font-label text-[10px] text-outline uppercase tracking-widest">Awaiting_Neural_Map...</div>
-                    ) : (
-                      <ReactFlow
-                        edges={edges}
-                        fitView
-                        nodes={nodes}
-                        nodesConnectable={false}
-                        nodeTypes={nodeTypes}
-                        onEdgesChange={onEdgesChange}
-                        onNodesChange={onNodesChange}
-                      >
-                        <Background color="var(--outline-variant)" gap={20} size={0.5} variant={BackgroundVariant.Lines} />
-                        <Controls className="!bg-surface-container-highest !border-outline-variant !shadow-none !rounded-none" />
-                        <MiniMap 
-                          className="!bg-surface-container-lowest !border-outline-variant !rounded-none" 
-                          maskColor="rgba(0,0,0,0.8)" 
-                          nodeColor={(n: any) => n.data?.isMalicious ? "var(--primary)" : n.data?.isRoot ? "var(--secondary)" : "var(--outline)"} 
-                        />
-                      </ReactFlow>
-                    )}
-                  </div>
-                ) : tile.isTriage && tile.content ? (
-                   <div className="flex flex-col gap-6">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="bg-surface-container-lowest p-4 border-l-2 border-primary">
-                           <div className="text-[9px] font-label text-outline uppercase mb-1">Risk_Level</div>
-                           <div className={`text-2xl font-headline font-black italic ${(tile.content as any).verdict === 'MALICIOUS' ? 'text-primary' : 'text-secondary'}`}>{(tile.content as any).verdict}</div>
-                        </div>
-                        <div className="bg-surface-container-lowest p-4 border-l-2 border-secondary">
-                           <div className="text-[9px] font-label text-outline uppercase mb-1">GTI_Score</div>
-                           <div className="text-2xl font-headline font-black text-foreground">{(tile.content as any).score}<span className="text-xs text-outline ml-1">/100</span></div>
-                        </div>
-                      </div>
-                      <p className="text-xs text-outline/80 font-body leading-relaxed italic">"{(tile.content as any).summary}"</p>
-                      
-                      <div className="mt-4 flex flex-col gap-2">
-                        <div className="flex justify-between text-[8px] font-label uppercase">
-                           <span className="text-outline">Detections_Ratio</span>
-                           <span className="text-secondary">{(tile.content as any).malicious}/{(tile.content as any).total}</span>
-                        </div>
-                        <div className="w-full h-1 bg-surface-container-highest">
-                           <div className="h-full bg-primary" style={{ width: `${Math.min(((tile.content as any).malicious / ((tile.content as any).total || 1)) * 100, 100)}%` }}></div>
-                        </div>
-                      </div>
-                   </div>
-                ) : tile.isReports ? (
-                   <div className="flex flex-col gap-4 max-h-[400px] overflow-y-auto pr-2 scrollbar-hide">
-                      {job?.specialist_results ? Object.entries(job.specialist_results).map(([agent, result]: [string, any]) => (
-                        <button 
-                          key={agent}
-                          onClick={() => setExpandedTile(3)}
-                          className="w-full text-left bg-surface-container-lowest p-4 border-l-2 border-outline-variant hover:border-secondary transition-colors"
-                        >
-                           <div className="flex justify-between items-center mb-1">
-                             <span className="text-[10px] font-headline font-black text-foreground uppercase">{agent.replace('_', ' ')}</span>
-                             <span className={`text-[8px] font-label uppercase ${result.verdict === 'MALICIOUS' ? 'text-primary' : 'text-secondary'}`}>{result.verdict}</span>
-                           </div>
-                           <div className="text-[9px] text-outline truncate">{result.summary || "View detailed briefing..."}</div>
-                        </button>
-                      )) : <div className="text-[10px] text-outline/40 italic uppercase tracking-widest">Awaiting_Specialist_Inputs...</div>}
-                   </div>
-                ) : tile.isFinalReport ? (
-                   <div className="bg-surface-container-lowest p-8 border border-outline-variant/20 relative">
-                      <div className="absolute top-0 left-0 px-2 py-1 bg-primary text-on-primary text-[8px] font-black uppercase tracking-widest">Consolidated_Intel</div>
-                      <div className="max-h-[500px] overflow-y-auto pr-4 custom-scrollbar">
-                        <Typewriter text={job?.final_report || "Report generation in progress..."} speed={2} />
-                      </div>
-                   </div>
-                ) : tile.isTimeline ? (
-                   <div className="space-y-4 max-h-[350px] overflow-y-auto pr-2 scrollbar-hide">
-                      {job?.subtasks?.map((task: any, idx: number) => (
-                        <div key={idx} className="flex gap-4 items-start bg-surface-container-lowest p-3 border-l border-outline-variant">
-                           <div className="text-[8px] font-mono text-primary mt-1">{task.timestamp || "T+0s"}</div>
-                           <div className="flex flex-col gap-1">
-                             <div className="text-[9px] font-headline font-black text-foreground uppercase tracking-widest">{task.agent}</div>
-                             <div className="text-[10px] text-outline leading-tight">{task.task}</div>
-                           </div>
-                        </div>
-                      ))}
-                   </div>
-                ) : tile.isTransparency ? (
-                   <div className="bg-surface-container-lowest p-4 font-mono text-[9px] text-outline/60 space-y-2 max-h-[350px] overflow-y-auto custom-scrollbar">
-                      {job?.transparency_log?.map((event: any, idx: number) => (
-                        <div key={idx} className="border-b border-outline-variant/10 pb-2">
-                           <span className="text-secondary/40">[{event.timestamp}]</span> <span className="text-primary/60">{event.agent}</span>: {event.type === 'tool' ? `INVOKE_${event.tool}` : `THINK_${(event.thought || "").substring(0, 50)}...`}
-                        </div>
-                      ))}
-                   </div>
-                ) : null}
-
-                <div className="mt-6 flex items-center justify-between">
-                   <div className="flex gap-1">
-                      <div className="w-1 h-1 bg-secondary/30"></div>
-                      <div className="w-1 h-1 bg-secondary/30"></div>
-                      <div className="w-4 h-1 bg-primary/30"></div>
-                   </div>
-                   <button onClick={() => setExpandedTile(tile.id)} className="text-[8px] font-label text-primary uppercase tracking-[0.2em] hover:text-secondary transition-colors">Expand_Sector</button>
+                <div className="w-full h-1 bg-surface-container-highest relative overflow-hidden">
+                  <div className="absolute inset-0 bg-primary/20 animate-pulse"></div>
+                  <div className="h-full bg-primary transition-all duration-500 shadow-[0_0_10px_var(--primary)]" style={{ width: `${progress}%` }}></div>
                 </div>
               </div>
-            ))}
-          </div>
-        )}
-      </main>
 
-      {/* Fullscreen Modal Overlays */}
-      {expandedTile !== null && (
-        <div className="fixed inset-0 z-[100] bg-surface/95 backdrop-blur-3xl flex items-center justify-center p-12" onClick={() => setExpandedTile(null)}>
-          <div className="bg-surface-container-low border-2 border-primary w-full max-w-6xl h-full relative overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="p-8 border-b border-outline-variant/30 flex justify-between items-center bg-surface-container">
-               <div className="flex flex-col">
-                 <span className="text-[10px] font-label text-outline uppercase tracking-[0.4em] mb-1">Detail_Inspection_Mode</span>
-                 <h2 className="font-headline text-3xl font-black text-primary uppercase tracking-tighter italic glow-text-primary">
-                    {tiles.find(t => t.id === expandedTile)?.title}
-                 </h2>
-               </div>
-               <button onClick={() => setExpandedTile(null)} className="material-symbols-outlined text-4xl text-secondary hover:text-primary transition-colors">close</button>
-            </div>
-            
-            <div className="flex-grow overflow-y-auto p-12 custom-scrollbar">
-               {expandedTile === 3 && (
-                 <div className="space-y-12">
-                   {job?.specialist_results ? Object.entries(job.specialist_results).map(([agent, result]: [string, any]) => (
-                     <div key={agent} className="bg-surface-container-lowest border border-outline-variant/20 p-8 relative">
-                        <div className="absolute top-0 right-0 px-3 py-1 bg-secondary text-surface text-[10px] font-black uppercase tracking-widest">{agent}</div>
-                        <div className="mb-6 flex items-center gap-4">
-                           <div className={`px-3 py-1 text-[10px] font-black uppercase ${result.verdict === 'MALICIOUS' ? 'bg-primary text-on-primary' : 'bg-secondary text-on-secondary'}`}>{result.verdict}</div>
-                        </div>
-                        <MarkdownRenderer content={result.markdown_report || "MISSING_DATA"} />
-                     </div>
-                   )) : <div className="text-outline italic uppercase tracking-widest">Awaiting_Briefings...</div>}
+              <div className="bg-surface-container-low border border-outline-variant/30 p-8 w-full relative overflow-hidden glass-panel">
+                 <div className="absolute top-0 right-0 p-2 font-mono text-[8px] text-outline/30">SYS_LOG_V2.5</div>
+                 <div className="flex items-start gap-4 mb-6">
+                   <div className="w-2 h-12 bg-secondary animate-pulse"></div>
+                   <p className="font-headline text-xl font-black uppercase text-foreground tracking-tighter italic">{statusMessage}</p>
                  </div>
-               )}
-               
-               {expandedTile === 1 && (
-                  <div className="space-y-12">
-                     <div className="bg-surface-container-lowest border border-outline-variant/20 p-8">
-                        <h3 className="text-xl font-headline font-black text-secondary uppercase mb-6 tracking-tighter italic">Analytical_Triage_Summary</h3>
-                        <MarkdownRenderer content={job?.rich_intel?.triage_analysis?.markdown_report || "NO_SUMMARY"} />
+                 
+                 <div className="space-y-2 max-h-48 overflow-y-auto scrollbar-hide">
+                   {activityLog.map((log, i) => (
+                     <div key={i} className="font-mono text-[10px] text-outline/60 flex gap-3">
+                       <span className="text-secondary/40">[{new Date().toLocaleTimeString()}]</span>
+                       <span>{log}</span>
                      </div>
-                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        {job?.subtasks?.map((task: any, idx: number) => (
-                           <div key={idx} className="bg-surface-container p-6 border-l-4 border-primary shadow-xl">
-                              <div className="flex justify-between items-center mb-3">
-                                 <span className="text-xs font-headline font-black text-foreground uppercase">{task.agent}</span>
-                                 <span className="text-[10px] font-label text-secondary uppercase">{task.status}</span>
-                              </div>
-                              <p className="text-xs text-outline leading-relaxed">{task.task}</p>
-                           </div>
-                        ))}
-                     </div>
-                  </div>
-               )}
-
-               {expandedTile === 4 && (
-                  <div className="max-w-4xl mx-auto bg-surface-container-lowest p-12 border border-outline-variant/30 shadow-[0_0_100px_rgba(255,124,245,0.1)]">
-                     <MarkdownRenderer content={job?.final_report || "GENERATING_REPORT..."} />
-                  </div>
-               )}
-               
-               {/* Default fallback for other tiles */}
-               {[2, 5, 6].includes(expandedTile) && (
-                  <div className="text-outline uppercase tracking-widest text-center mt-20 italic">Section_Display_Locked_To_Main_HUD</div>
-               )}
+                   ))}
+                 </div>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          ) : (
+            <>
+              {/* Triage Assessment Panel */}
+              <section className="col-span-12 lg:col-span-4 bg-[#16161a] border border-slate-800 p-6 flex flex-col justify-between relative overflow-hidden group">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-secondary/5 blur-3xl -mr-16 -mt-16 rounded-full group-hover:bg-secondary/10 transition-all"></div>
+                <div>
+                  <h3 className="font-label text-outline-variant uppercase mb-2 text-xs tracking-widest">Triage Verdict</h3>
+                  <div className="flex items-end gap-3 mb-4">
+                    <span className={`text-3xl font-headline font-black tracking-tighter uppercase ${job?.risk_level === 'MALICIOUS' ? 'text-primary' : 'text-secondary'}`}>{job?.risk_level || "UNKNOWN"}</span>
+                    <span className="bg-secondary/10 text-secondary border border-secondary/20 px-2 py-0.5 text-[10px] mb-2">CRITICAL</span>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center bg-surface-container-low p-2 border border-slate-800/50">
+                    <span className="text-xs text-slate-400">Threat Score</span>
+                    <span className="font-mono text-[#00f7ff]">{job?.gti_score || "0"}/100</span>
+                  </div>
+                  <p className="text-xs text-outline/80 font-body leading-relaxed italic">"{job?.rich_intel?.triage_summary || "No summary available."}"</p>
+                </div>
+              </section>
+
+              {/* Specialist Reports Hub */}
+              <section className="col-span-12 lg:col-span-8 flex gap-4">
+                {job?.specialist_results ? Object.entries(job.specialist_results).map(([agent, result]: [string, any]) => (
+                  <div key={agent} className="flex-1 bg-[#16161a] border border-slate-800 p-4 hover:border-[#00f7ff]/30 transition-all flex flex-col">
+                    <div className="flex justify-between items-start mb-4">
+                      <div className="flex items-center gap-2">
+                        <span className="material-symbols-outlined text-secondary">bug_report</span>
+                        <h4 className="font-headline text-sm font-semibold uppercase">{agent.replace('_', ' ')}</h4>
+                      </div>
+                    </div>
+                    <div className="flex-1 font-mono text-xs text-slate-400 leading-relaxed bg-[#0e0e10] p-3 border border-slate-800 overflow-y-auto max-h-[150px] custom-scrollbar">
+                      <p className="text-secondary/80 mb-2">// Verdict: {result.verdict}</p>
+                      <p>{result.summary || "View detailed briefing..."}</p>
+                    </div>
+                  </div>
+                )) : (
+                  <div className="flex-1 bg-[#16161a] border border-slate-800 p-4 flex items-center justify-center text-outline/40 italic uppercase tracking-widest text-xs">
+                    Awaiting Specialist Inputs...
+                  </div>
+                )}
+              </section>
+
+              {/* Network Graph Visualizer */}
+              <section className="col-span-12 lg:col-span-9 bg-[#16161a] border border-slate-800 relative min-h-[400px] overflow-hidden">
+                <div className="absolute inset-0 opacity-20 pointer-events-none" style={{ backgroundImage: "radial-gradient(#1e293b 1px, transparent 1px)", backgroundSize: "24px 24px" }}></div>
+                <div className="absolute top-4 left-4 z-10">
+                  <h3 className="font-label text-outline-variant uppercase text-xs tracking-widest">Link Analysis Graph</h3>
+                  <p className="text-[10px] text-slate-500">RELATIONSHIP MAPPING [v4.1]</p>
+                </div>
+                <div className="w-full h-full pt-12">
+                  {loading ? (
+                    <div className="absolute inset-0 flex items-center justify-center font-label text-[10px] text-outline uppercase tracking-widest">Awaiting_Neural_Map...</div>
+                  ) : (
+                    <ReactFlow
+                      edges={edges}
+                      fitView
+                      nodes={nodes}
+                      nodesConnectable={false}
+                      nodeTypes={nodeTypes}
+                      onEdgesChange={onEdgesChange}
+                      onNodesChange={onNodesChange}
+                    >
+                      <Background color="var(--outline-variant)" gap={20} size={0.5} variant={BackgroundVariant.Lines} />
+                      <Controls className="!bg-surface-container-highest !border-outline-variant !shadow-none !rounded-none" />
+                      <MiniMap 
+                        className="!bg-surface-container-lowest !border-outline-variant !rounded-none" 
+                        maskColor="rgba(0,0,0,0.8)" 
+                        nodeColor={(n: any) => n.data?.isMalicious ? "var(--primary)" : n.data?.isRoot ? "var(--secondary)" : "var(--outline)"} 
+                      />
+                    </ReactFlow>
+                  )}
+                </div>
+              </section>
+
+              {/* Agent Activity Log */}
+              <section className="col-span-12 lg:col-span-3 bg-[#0e0e10] border border-slate-800 overflow-hidden flex flex-col max-h-[400px]">
+                <div className="p-3 border-b border-slate-800 bg-[#16161a] flex items-center justify-between">
+                  <h3 className="font-label text-outline-variant uppercase text-xs tracking-widest">Agent Activity</h3>
+                  <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                </div>
+                <div className="flex-1 p-3 overflow-y-auto space-y-3 font-mono text-[11px] custom-scrollbar">
+                  {activityLog.map((log, idx) => (
+                    <div key={idx} className="flex gap-2 border-b border-outline-variant/10 pb-2">
+                      <span className="text-secondary/40">[{new Date().toLocaleTimeString()}]</span>
+                      <span className="text-slate-500">{log}</span>
+                    </div>
+                  ))}
+                  {activityLog.length === 0 && (
+                    <div className="text-outline/30 italic">No activity recorded yet.</div>
+                  )}
+                </div>
+              </section>
+
+              {/* Final Intelligence Report */}
+              <section className="col-span-12 lg:col-span-8 bg-[#16161a] border border-slate-800 flex flex-col">
+                <div className="p-6 border-b border-slate-800">
+                  <h2 className="font-headline text-xl text-[#00f7ff] mb-2 uppercase">Final Intelligence Executive Summary</h2>
+                  <p className="text-outline-variant text-xs italic">Case ID: {id} | Assigned: Multi-Agent Core</p>
+                </div>
+                <div className="p-6 overflow-y-auto max-h-[300px] custom-scrollbar">
+                  <h4 className="text-[#00f7ff] uppercase tracking-wider text-xs font-bold mb-4 font-headline">Findings</h4>
+                  <div className="text-on-surface text-sm leading-relaxed">
+                    <Typewriter text={job?.final_report || "Report generation in progress..."} speed={2} />
+                  </div>
+                </div>
+              </section>
+
+              {/* Investigation Timeline */}
+              <section className="col-span-12 lg:col-span-4 bg-[#16161a] border border-slate-800 p-6">
+                <h3 className="font-label text-outline-variant uppercase text-xs tracking-widest mb-6">Investigation Timeline</h3>
+                <div className="relative space-y-6 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-[1px] before:bg-slate-800 custom-scrollbar max-h-[300px] overflow-y-auto pl-2">
+                  {job?.subtasks?.map((task: any, idx: number) => (
+                    <div key={idx} className="relative pl-8">
+                      <div className={`absolute left-0 top-1 w-4 h-4 bg-slate-800 border border-slate-600 rounded-full z-10 flex items-center justify-center`}>
+                        <div className={`w-1.5 h-1.5 rounded-full ${task.status === 'completed' ? 'bg-secondary' : 'bg-outline'}`}></div>
+                      </div>
+                      <p className="text-xs font-mono text-[#00f7ff]">{task.timestamp || "T+0s"}</p>
+                      <p className="text-sm font-semibold font-headline uppercase">{task.agent}</p>
+                      <p className="text-xs text-slate-500">{task.task}</p>
+                    </div>
+                  ))}
+                  {(!job?.subtasks || job.subtasks.length === 0) && (
+                    <div className="text-outline/30 italic text-xs pl-6">No tasks recorded.</div>
+                  )}
+                </div>
+              </section>
+            </>
+          )}
+        </main>
+      </div>
 
       {/* Footer Meta */}
-      <footer className="fixed bottom-0 left-0 w-full h-8 border-t border-outline-variant/30 bg-surface/90 backdrop-blur-md z-40 flex items-center justify-between px-6 text-[8px] font-label text-outline uppercase tracking-[0.2em]">
-        <div>Harimau_System_Link: <span className="text-secondary">Connected</span></div>
+      <footer className="fixed bottom-0 left-64 right-0 h-8 border-t border-slate-800 bg-[#0e0e10] flex justify-between items-center px-4 font-mono text-[10px] tracking-tighter text-[#00f7ff] z-50">
+        <div>v2.4.1-stable | <span className="text-slate-600 ml-2">System Status: Nominal</span></div>
         <div className="flex gap-4">
-           <span>Lat: {progress}%_Sync</span>
-           <span className="text-primary font-black animate-pulse">Live_Feed</span>
+          <span className="hover:text-white cursor-default transition-colors">System Status</span>
+          <span className="hover:text-white cursor-default transition-colors">Active Agents: 14</span>
         </div>
       </footer>
     </div>

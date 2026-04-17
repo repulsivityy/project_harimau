@@ -65,6 +65,11 @@ body {
   border-radius: 0 !important;
 }
 
+/* Override for specific elements like dots */
+.force-rounded {
+  border-radius: 50% !important;
+}
+
 /* Neon Glow Effects */
 .glow-primary {
   box-shadow: 0 0 20px rgba(255, 124, 245, 0.4);
@@ -166,4 +171,61 @@ body {
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: var(--secondary);
+}
+
+/* Predator Input Field */
+.predator-input {
+  background-color: var(--surface-container-high);
+  border: none;
+  border-bottom: 2px solid var(--secondary);
+  color: var(--foreground);
+  padding: 0.5rem 1rem;
+  transition: all 0.3s ease;
+}
+
+.predator-input:focus {
+  outline: none;
+  box-shadow: inset 0 0 10px rgba(0, 251, 251, 0.1);
+  border-bottom-color: var(--primary);
+}
+
+/* Buttons */
+.btn-primary {
+  background: linear-gradient(45deg, var(--primary), var(--primary-container));
+  color: #000000; /* on-primary-fixed */
+  font-family: var(--font-space-grotesk);
+  font-weight: bold;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 15px rgba(255, 124, 245, 0.4);
+}
+
+.btn-tertiary {
+  background: transparent;
+  color: var(--secondary);
+  font-family: var(--font-space-grotesk);
+  border: 1px solid rgba(0, 251, 251, 0.15); /* Ghost Border */
+  padding: 0.75rem 1.5rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-tertiary:hover {
+  background: rgba(0, 251, 251, 0.05);
+  border-color: var(--secondary);
+}
+
+/* Ambient Glows (Alternative to shadows) */
+.ambient-glow-primary {
+  box-shadow: 0 0 40px 10px rgba(255, 124, 245, 0.08);
+}
+
+.ambient-glow-secondary {
+  box-shadow: 0 0 40px 10px rgba(0, 251, 251, 0.08);
 }

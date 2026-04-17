@@ -549,7 +549,7 @@ export default function InvestigatePage() {
           ) : (
             <>
               {/* Triage Assessment Panel */}
-              <section className="col-span-12 lg:col-span-4 bg-[#16161a] border border-slate-800 p-6 flex flex-col justify-between relative overflow-hidden group">
+                <section className="col-span-12 lg:col-span-4 bg-[#16161a] border border-slate-800 p-6ß flex flex-col justify-between relative overflow-hidden group">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-secondary/5 blur-3xl -mr-16 -mt-16 rounded-full group-hover:bg-secondary/10 transition-all"></div>
                 <div>
                   <div className="flex justify-between items-start">

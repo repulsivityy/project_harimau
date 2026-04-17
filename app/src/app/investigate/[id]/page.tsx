@@ -173,6 +173,7 @@ export default function InvestigatePage() {
   const [activityLog, setActivityLog] = useState<string[]>([]);
   const [recentJobs, setRecentJobs] = useState<any[]>([]);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [modalContent, setModalContent] = useState<{ title: string; content: string } | null>(null);
   const simulationRef = useRef<any>(null);
 
   useEffect(() => {
@@ -551,7 +552,12 @@ export default function InvestigatePage() {
               <section className="col-span-12 lg:col-span-4 bg-[#16161a] border border-slate-800 p-6 flex flex-col justify-between relative overflow-hidden group">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-secondary/5 blur-3xl -mr-16 -mt-16 rounded-full group-hover:bg-secondary/10 transition-all"></div>
                 <div>
-                  <h3 className="font-label text-outline-variant uppercase mb-2 text-xs tracking-widest">Triage Verdict</h3>
+                  <div className="flex justify-between items-start">
+                    <h3 className="font-label text-outline-variant uppercase mb-2 text-xs tracking-widest">Triage Verdict</h3>
+                    <button onClick={() => setModalContent({ title: "Triage Verdict", content: job?.rich_intel?.triage_summary || "No summary available." })} className="text-slate-500 hover:text-[#00f7ff]">
+                      <span className="material-symbols-outlined text-sm">fullscreen</span>
+                    </button>
+                  </div>
                   <div className="flex items-end gap-3 mb-4">
                     <span className={`text-3xl font-headline font-black tracking-tighter uppercase ${job?.risk_level === 'MALICIOUS' ? 'text-primary' : 'text-secondary'}`}>{job?.risk_level || "UNKNOWN"}</span>
                     <span className="bg-secondary/10 text-secondary border border-secondary/20 px-2 py-0.5 text-[10px] mb-2">CRITICAL</span>
@@ -575,6 +581,9 @@ export default function InvestigatePage() {
                         <span className="material-symbols-outlined text-secondary">bug_report</span>
                         <h4 className="font-headline text-sm font-semibold uppercase">{agent.replace('_', ' ')}</h4>
                       </div>
+                      <button onClick={() => setModalContent({ title: agent.replace('_', ' '), content: result.summary })} className="text-slate-500 hover:text-[#00f7ff]">
+                        <span className="material-symbols-outlined text-sm">fullscreen</span>
+                      </button>
                     </div>
                     <div className="flex-1 font-mono text-xs text-slate-400 leading-relaxed bg-[#0e0e10] p-3 border border-slate-800 overflow-y-auto max-h-[150px] custom-scrollbar">
                       <p className="text-secondary/80 mb-2">// Verdict: {result.verdict}</p>
@@ -591,11 +600,16 @@ export default function InvestigatePage() {
               {/* Network Graph Visualizer */}
               <section className="col-span-12 lg:col-span-9 bg-[#16161a] border border-slate-800 relative min-h-[400px] overflow-hidden">
                 <div className="absolute inset-0 opacity-20 pointer-events-none" style={{ backgroundImage: "radial-gradient(#1e293b 1px, transparent 1px)", backgroundSize: "24px 24px" }}></div>
-                <div className="absolute top-4 left-4 z-10">
-                  <h3 className="font-label text-outline-variant uppercase text-xs tracking-widest">Link Analysis Graph</h3>
-                  <p className="text-[10px] text-slate-500">RELATIONSHIP MAPPING [v4.1]</p>
+                <div className="absolute top-4 left-4 right-4 z-10 flex justify-between items-start">
+                  <div>
+                    <h3 className="font-label text-outline-variant uppercase text-xs tracking-widest">Link Analysis Graph</h3>
+                    <p className="text-[10px] text-slate-500">RELATIONSHIP MAPPING [v4.1]</p>
+                  </div>
+                  <button onClick={() => setModalContent({ title: "Link Analysis Graph", content: "" })} className="text-slate-500 hover:text-[#00f7ff]">
+                    <span className="material-symbols-outlined text-sm">fullscreen</span>
+                  </button>
                 </div>
-                <div className="w-full h-full pt-12">
+                <div className="w-full h-full pt-16">
                   {loading ? (
                     <div className="absolute inset-0 flex items-center justify-center font-label text-[10px] text-outline uppercase tracking-widest">Awaiting_Neural_Map...</div>
                   ) : (
@@ -641,9 +655,14 @@ export default function InvestigatePage() {
 
               {/* Final Intelligence Report */}
               <section className="col-span-12 lg:col-span-8 bg-[#16161a] border border-slate-800 flex flex-col">
-                <div className="p-6 border-b border-slate-800">
-                  <h2 className="font-headline text-xl text-[#00f7ff] mb-2 uppercase">Final Intelligence Executive Summary</h2>
-                  <p className="text-outline-variant text-xs italic">Case ID: {id} | Assigned: Multi-Agent Core</p>
+                <div className="flex justify-between items-start p-6 border-b border-slate-800">
+                  <div>
+                    <h2 className="font-headline text-xl text-[#00f7ff] mb-2 uppercase">Final Intelligence Executive Summary</h2>
+                    <p className="text-outline-variant text-xs italic">Case ID: {id} | Assigned: Multi-Agent Core</p>
+                  </div>
+                  <button onClick={() => setModalContent({ title: "Final Intelligence Executive Summary", content: job?.final_report })} className="text-slate-500 hover:text-[#00f7ff]">
+                    <span className="material-symbols-outlined text-sm">fullscreen</span>
+                  </button>
                 </div>
                 <div className="p-6 overflow-y-auto max-h-[300px] custom-scrollbar">
                   <h4 className="text-[#00f7ff] uppercase tracking-wider text-xs font-bold mb-4 font-headline">Findings</h4>
@@ -675,6 +694,45 @@ export default function InvestigatePage() {
             </>
           )}
         </main>
+
+        {/* Modal */}
+        {modalContent && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-6">
+            <div className="bg-[#16161a] border border-slate-800 w-full max-w-6xl max-h-[90vh] flex flex-col glass-panel">
+              <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+                <h3 className="font-headline text-xl font-bold uppercase text-[#00f7ff]">{modalContent.title}</h3>
+                <button onClick={() => setModalContent(null)} className="text-slate-500 hover:text-[#00f7ff]">
+                  <span className="material-symbols-outlined">close</span>
+                </button>
+              </div>
+              <div className="p-6 overflow-y-auto custom-scrollbar text-on-surface text-sm leading-relaxed flex-1">
+                {modalContent.title === 'Link Analysis Graph' ? (
+                  <div className="w-full h-[70vh]">
+                    <ReactFlow
+                      edges={edges}
+                      fitView
+                      nodes={nodes}
+                      nodesConnectable={false}
+                      nodeTypes={nodeTypes}
+                      onEdgesChange={onEdgesChange}
+                      onNodesChange={onNodesChange}
+                    >
+                      <Background color="var(--outline-variant)" gap={20} size={0.5} variant={BackgroundVariant.Lines} />
+                      <Controls className="!bg-surface-container-highest !border-outline-variant !shadow-none !rounded-none" />
+                      <MiniMap 
+                        className="!bg-surface-container-lowest !border-outline-variant !rounded-none" 
+                        maskColor="rgba(0,0,0,0.8)" 
+                        nodeColor={(n: any) => n.data?.isMalicious ? "var(--primary)" : n.data?.isRoot ? "var(--secondary)" : "var(--outline)"} 
+                      />
+                    </ReactFlow>
+                  </div>
+                ) : (
+                  <MarkdownRenderer content={modalContent.content} />
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Footer Meta */}

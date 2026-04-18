@@ -553,12 +553,15 @@ export default function InvestigatePage() {
           ) : (
             <>
               {/* Triage Assessment Panel */}
-                <section className="col-span-12 lg:col-span-4 bg-[#16161a] border border-slate-800 p-6ß flex flex-col justify-between relative overflow-hidden group">
-                <div className="absolute top-0 right-0 w-32 h-32 bg-secondary/5 blur-3xl -mr-16 -mt-16 rounded-full group-hover:bg-secondary/10 transition-all"></div>
+                <section className="col-span-12 lg:col-span-4 bg-[#16161a] border border-slate-800 p-6 flex flex-col justify-between relative overflow-hidden group">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-secondary/5 blur-3xl -mr-16 -mt-16 rounded-full group-hover:bg-secondary/10 transition-all pointer-events-none"></div>
                 <div>
                   <div className="flex justify-between items-start">
                     <h3 className="font-label text-outline-variant uppercase mb-2 text-xs tracking-widest">Triage Verdict</h3>
-                    <button onClick={() => setModalContent({ title: "Triage Verdict", content: job?.rich_intel?.triage_summary || "No summary available." })} className="text-slate-500 hover:text-[#00f7ff]">
+                    <button onClick={() => setModalContent({ 
+                      title: "Triage Verdict", 
+                      content: `### GTI Verdict\n**${job?.risk_level || "UNKNOWN"}**\n\n### GTI Score\n**${job?.gti_score || "0"}/100**\n\n### VT Detections\n**${job?.rich_intel?.malicious_stats !== undefined ? `${job.rich_intel.malicious_stats}/${job.rich_intel.total_stats}` : "N/A"}**\n\n### GTI Analysis\n${job?.rich_intel?.triage_summary || "No summary available."}` 
+                    })} className="text-slate-500 hover:text-[#00f7ff] cursor-pointer">
                       <span className="material-symbols-outlined text-sm">fullscreen</span>
                     </button>
                   </div>
@@ -568,11 +571,22 @@ export default function InvestigatePage() {
                   </div>
                 </div>
                 <div className="space-y-3">
-                  <div className="flex justify-between items-center bg-surface-container-low p-2 border border-slate-800/50">
-                    <span className="text-xs text-slate-400">Threat Score</span>
-                    <span className="font-mono text-[#00f7ff]">{job?.gti_score || "0"}/100</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-surface-container-low p-2 border border-slate-800/50 flex flex-col">
+                      <span className="text-[10px] text-slate-500 uppercase">GTI Score</span>
+                      <span className="font-mono text-[#00f7ff] font-bold">{job?.gti_score || "0"}/100</span>
+                    </div>
+                    <div className="bg-surface-container-low p-2 border border-slate-800/50 flex flex-col">
+                      <span className="text-[10px] text-slate-500 uppercase">VT Detections</span>
+                      <span className="font-mono text-secondary font-bold">
+                        {job?.rich_intel?.malicious_stats !== undefined ? `${job.rich_intel.malicious_stats}/${job.rich_intel.total_stats}` : "N/A"}
+                      </span>
+                    </div>
                   </div>
-                  <p className="text-xs text-outline/80 font-body leading-relaxed italic">"{job?.rich_intel?.triage_summary || "No summary available."}"</p>
+                  <div className="bg-surface-container-low p-2 border border-slate-800/50 flex flex-col">
+                    <span className="text-[10px] text-slate-500 uppercase mb-1">GTI Analysis</span>
+                    <p className="text-xs text-outline/80 font-body leading-relaxed italic">"{job?.rich_intel?.triage_summary || "No summary available."}"</p>
+                  </div>
                 </div>
               </section>
 
@@ -585,7 +599,7 @@ export default function InvestigatePage() {
                         <span className="material-symbols-outlined text-secondary">bug_report</span>
                         <h4 className="font-headline text-sm font-semibold uppercase">{agent.replace('_', ' ')}</h4>
                       </div>
-                      <button onClick={() => setModalContent({ title: agent.replace('_', ' '), content: result.summary })} className="text-slate-500 hover:text-[#00f7ff]">
+                      <button onClick={() => setModalContent({ title: agent.replace('_', ' '), content: result.summary })} className="text-slate-500 hover:text-[#00f7ff] cursor-pointer">
                         <span className="material-symbols-outlined text-sm">fullscreen</span>
                       </button>
                     </div>
@@ -609,7 +623,7 @@ export default function InvestigatePage() {
                     <h3 className="font-label text-outline-variant uppercase text-xs tracking-widest">Link Analysis Graph</h3>
                     <p className="text-[10px] text-slate-500">RELATIONSHIP MAPPING [v4.1]</p>
                   </div>
-                  <button onClick={() => setModalContent({ title: "Link Analysis Graph", content: "" })} className="text-slate-500 hover:text-[#00f7ff]">
+                  <button onClick={() => setModalContent({ title: "Link Analysis Graph", content: "" })} className="text-slate-500 hover:text-[#00f7ff] cursor-pointer">
                     <span className="material-symbols-outlined text-sm">fullscreen</span>
                   </button>
                 </div>
@@ -669,7 +683,7 @@ export default function InvestigatePage() {
                     <h2 className="font-headline text-xl text-[#00f7ff] mb-2 uppercase">Final Intelligence Executive Summary</h2>
                     <p className="text-outline-variant text-xs italic">Case ID: {id} | Assigned: Multi-Agent Core</p>
                   </div>
-                  <button onClick={() => setModalContent({ title: "Final Intelligence Executive Summary", content: job?.final_report })} className="text-slate-500 hover:text-[#00f7ff]">
+                  <button onClick={() => setModalContent({ title: "Final Intelligence Executive Summary", content: job?.final_report })} className="text-slate-500 hover:text-[#00f7ff] cursor-pointer">
                     <span className="material-symbols-outlined text-sm">fullscreen</span>
                   </button>
                 </div>
@@ -707,7 +721,7 @@ export default function InvestigatePage() {
         {/* Modal */}
         {modalContent && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-6">
-            <div className="bg-[#16161a] border border-slate-800 w-full max-w-6xl max-h-[90vh] flex flex-col glass-panel">
+            <div className="bg-[#16161a] border border-slate-800 w-[90vw] h-[85vh] flex flex-col glass-panel">
               <div className="p-6 border-b border-slate-800 flex justify-between items-center">
                 <h3 className="font-headline text-xl font-bold uppercase text-[#00f7ff]">{modalContent.title}</h3>
                 <button onClick={() => setModalContent(null)} className="text-slate-500 hover:text-[#00f7ff]">

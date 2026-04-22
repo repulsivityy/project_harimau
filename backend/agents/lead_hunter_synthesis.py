@@ -385,10 +385,17 @@ async def generate_final_report_llm(state: AgentState, llm) -> str:
         # [CRITICAL FIX] ChatVertexAI sometimes returns a list of blocks instead of a string.
         # This breaks postgres `asyncpg` which expects a string for the final_report column.
         if isinstance(response.content, list):
-            final_text = "".join([
-                block.get("text", "") if isinstance(block, dict) else str(block)
-                for block in response.content
-            ])
+            parts = []
+            for block in response.content:
+                if isinstance(block, dict):
+                    text = block.get("text", "")
+                    if isinstance(text, (dict, list)):
+                        parts.append(json.dumps(text))
+                    else:
+                        parts.append(str(text))
+                else:
+                    parts.append(str(block))
+            final_text = "".join(parts)
             return final_text
             
         return str(response.content)

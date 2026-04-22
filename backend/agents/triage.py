@@ -453,10 +453,17 @@ Perform comprehensive first-level triage analysis now.
     # Parse response
     try:
         if isinstance(response.content, list):
-            final_text = "".join([
-                block.get("text", "") if isinstance(block, dict) else str(block)
-                for block in response.content
-            ])
+            parts = []
+            for block in response.content:
+                if isinstance(block, dict):
+                    text = block.get("text", "")
+                    if isinstance(text, (dict, list)):
+                        parts.append(json.dumps(text))
+                    else:
+                        parts.append(str(text))
+                else:
+                    parts.append(str(block))
+            final_text = "".join(parts)
         else:
             final_text = str(response.content)
         

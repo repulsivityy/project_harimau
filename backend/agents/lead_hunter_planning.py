@@ -160,10 +160,17 @@ Please plan the next steps.
         
         # [CRITICAL FIX] ChatVertexAI/ChatGoogleGenerativeAI sometimes returns a list of blocks
         if isinstance(response.content, list):
-            content = "".join([
-                block.get("text", "") if isinstance(block, dict) else str(block)
-                for block in response.content
-            ])
+            parts = []
+            for block in response.content:
+                if isinstance(block, dict):
+                    text = block.get("text", "")
+                    if isinstance(text, (dict, list)):
+                        parts.append(json.dumps(text))
+                    else:
+                        parts.append(str(text))
+                else:
+                    parts.append(str(block))
+            content = "".join(parts)
         else:
             content = str(response.content)
             

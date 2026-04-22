@@ -48,6 +48,7 @@ LangGraph with `MAX_DEPTH` recursion control and **Cloud SQL `AsyncPostgresSaver
 
 ## Agent Strategy
 - **Tiered Models**: Gemini 2.5 Flash (Triage) vs Gemini 2.5 Pro (Specialists + Lead Hunter).
+> In progress to migrate to Gemini 3 using Gemini Libraries
 - **Division of Labor**:
   - **Triage**: Breadth-first — 11 critical relationships, minimal enrichment, token-optimized.
   - **Specialists**: Depth-first — full enrichment from cache, targeted pivots.

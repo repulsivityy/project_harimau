@@ -760,10 +760,9 @@ export default function InvestigatePage() {
 
       {/* Footer Meta */}
       <footer className="fixed bottom-0 left-64 right-0 h-8 border-t border-slate-800 bg-[#0e0e10] flex justify-between items-center px-4 font-mono text-[10px] tracking-tighter text-[#00f7ff] z-50">
-        <div>v2.4.1-stable | <span className="text-slate-600 ml-2">System Status: Nominal</span></div>
+        <div>v2.5.1-stable | <span className="text-slate-600 ml-2">System Status: Normal</span></div>
         <div className="flex gap-4">
-          <span className="hover:text-white cursor-default transition-colors">System Status</span>
-          <span className="hover:text-white cursor-default transition-colors">Active Agents: 14</span>
+          <span className="hover:text-white cursor-default transition-colors">Active Agents: 5</span>
         </div>
       </footer>
     </div>

@@ -356,6 +356,9 @@ async def generate_final_report_llm(state: AgentState, llm) -> str:
     1. Gathers context (Triage + Specialist Reports).
     2. Prompts the LLM to write the final markdown report.
     """
+    job_id = state.get("job_id")
+    logger.info("lead_hunter_synthesis_start", job_id=job_id)
+
     triage_context = _build_triage_context(state)
     specialist_context = _build_specialist_context(state)
     graph_summary = _build_graph_summary(state)
@@ -396,9 +399,11 @@ async def generate_final_report_llm(state: AgentState, llm) -> str:
                 else:
                     parts.append(str(block))
             final_text = "".join(parts)
+            logger.info("lead_hunter_synthesis_complete", job_id=job_id)
             return final_text
-            
+
+        logger.info("lead_hunter_synthesis_complete", job_id=job_id)
         return str(response.content)
     except Exception as e:
-        logger.error("lead_hunter_synthesis_error", error=str(e))
+        logger.error("lead_hunter_synthesis_error", job_id=job_id, error=str(e))
         return f"# Analysis Error\n\nFailed to generate final report. Error: {str(e)}"

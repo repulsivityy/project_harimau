@@ -17,7 +17,17 @@ async function proxy(request: NextRequest, path: string): Promise<NextResponse> 
     init.body = await request.arrayBuffer();
   }
 
-  const upstream = await fetch(url, init);
+  let upstream: Response;
+  try {
+    upstream = await fetch(url, init);
+  } catch (err) {
+    console.error(`[proxy] fetch failed: ${request.method} ${url}`, err);
+    return new NextResponse("Bad Gateway", { status: 502 });
+  }
+
+  if (!upstream.ok) {
+    console.error(`[proxy] upstream error: ${request.method} ${url} → ${upstream.status}`);
+  }
 
   return new NextResponse(upstream.body, {
     status: upstream.status,

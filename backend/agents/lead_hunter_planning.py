@@ -102,6 +102,10 @@ async def run_planning_phase(state: AgentState, llm, cache: InvestigationCache, 
     2. Uses pre-filtered uninvestigated actionable nodes from the caller.
     3. Prompts the LLM to generate new subtasks.
     """
+    job_id = state.get("job_id")
+    iteration = state.get("iteration", 0)
+    logger.info("lead_hunter_planning_start", job_id=job_id, iteration=iteration, actionable_node_count=len(actionable_nodes))
+
     triage_data = state.get("metadata", {}).get("rich_intel", {})
     specialist_data = state.get("specialist_results", {})
 
@@ -180,7 +184,10 @@ Please plan the next steps.
         elif "```" in content:
             content = content.split("```")[1].strip()
             
-        return json.loads(content)
+        result = json.loads(content)
+        task_count = len(result.get("subtasks", []))
+        logger.info("lead_hunter_planning_complete", job_id=job_id, iteration=iteration, task_count=task_count)
+        return result
     except Exception as e:
-        logger.error("lead_hunter_planning_error", error=str(e))
+        logger.error("lead_hunter_planning_error", job_id=job_id, iteration=iteration, error=str(e))
         return {"subtasks": []}

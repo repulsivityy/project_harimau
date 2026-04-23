@@ -11,6 +11,9 @@ attributes from GTI API, enabling:
 import networkx as nx
 from typing import Dict, List, Any, Optional
 import json
+from backend.utils.logger import get_logger
+
+logger = get_logger("graph_cache")
 
 
 class InvestigationCache:
@@ -47,21 +50,19 @@ class InvestigationCache:
         if entity_id in self.graph:
             # Entity exists - merge attributes instead of overwriting
             existing_data = self.graph.nodes[entity_id]
-            
+
             # Deep merge: preserve existing data, add new fields
             for key, value in attributes.items():
                 if key not in existing_data:
-                    # New attribute - add it
                     existing_data[key] = value
                 elif isinstance(value, dict) and isinstance(existing_data[key], dict):
-                    # Both are dicts - merge them
                     existing_data[key].update(value)
                 elif isinstance(value, list) and isinstance(existing_data[key], list):
-                    # Both are lists - extend (avoid duplicates)
                     for item in value:
                         if item not in existing_data[key]:
                             existing_data[key].append(item)
                 # If types mismatch or simple value, keep existing (first-write wins)
+            logger.debug("entity_merged", entity_id=entity_id, entity_type=entity_type)
         else:
             # New entity - add it
             self.graph.add_node(
@@ -69,6 +70,7 @@ class InvestigationCache:
                 entity_type=entity_type,
                 **attributes
             )
+            logger.debug("entity_added", entity_id=entity_id, entity_type=entity_type)
     
     def add_relationship(self, source_id: str, target_id: str, rel_type: str, 
                         metadata: Optional[Dict[str, Any]] = None):
@@ -84,8 +86,9 @@ class InvestigationCache:
         edge_data = {"relationship": rel_type}
         if metadata:
             edge_data.update(metadata)
-        
+
         self.graph.add_edge(source_id, target_id, **edge_data)
+        logger.debug("relationship_added", source=source_id, target=target_id, rel_type=rel_type)
     
     def get_entity_minimal(self, entity_id: str, fields: List[str]) -> Dict[str, Any]:
         """
@@ -228,13 +231,14 @@ class InvestigationCache:
         """
         if entity_id not in self.graph:
             return
-            
+
         node = self.graph.nodes[entity_id]
         analyzed_by = set(node.get("analyzed_by", []))
         analyzed_by.add(agent)
-        
+
         # Update node attribute (convert back to list for JSON serialization)
         self.graph.nodes[entity_id]["analyzed_by"] = list(analyzed_by)
+        logger.info("entity_marked_investigated", entity_id=entity_id, agent=agent)
         
     def get_uninvestigated_nodes(self, agent_filter: Optional[str] = None) -> List[Dict[str, Any]]:
         """

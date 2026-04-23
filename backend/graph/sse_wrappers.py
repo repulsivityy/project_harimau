@@ -26,6 +26,7 @@ def with_sse_events(node_name: str):
             max_iterations = state.get("max_iterations", 1)
 
             # Emit: Node started
+            logger.info("node_started", node=node_name, job_id=job_id, iteration=iteration)
             await sse_manager.emit_event(job_id, f"{node_name}_started", {
                 "agent": node_name,
                 "iteration": iteration,
@@ -42,6 +43,7 @@ def with_sse_events(node_name: str):
                     result = await loop.run_in_executor(None, func, state)
 
                 # Emit: Node completed
+                logger.info("node_completed", node=node_name, job_id=job_id, iteration=iteration)
                 await sse_manager.emit_event(job_id, f"{node_name}_completed", {
                     "agent": node_name,
                     "iteration": iteration,
@@ -53,6 +55,7 @@ def with_sse_events(node_name: str):
 
             except Exception as exc:
                 # Emit: Node failed (so the frontend knows something went wrong)
+                logger.error("node_failed", node=node_name, job_id=job_id, iteration=iteration, error=str(exc))
                 await sse_manager.emit_event(job_id, f"{node_name}_failed", {
                     "agent": node_name,
                     "iteration": iteration,

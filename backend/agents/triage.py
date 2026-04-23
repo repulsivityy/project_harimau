@@ -318,11 +318,11 @@ def generate_markdown_report_locally(analysis: dict, ioc: str, ioc_type: str, tr
         context = analysis.get("threat_context", {})
         md += "### Threat Context\n"
         if context.get("campaigns"):
-            md += f"*   **Campaigns:** {', '.join(context['campaigns'])}\n"
+            md += f"*   **Campaigns:** {', '.join(str(c) for c in context['campaigns'])}\n"
         if context.get("threat_actors"):
-            md += f"*   **Threat Actors:** {', '.join(context['threat_actors'])}\n"
+            md += f"*   **Threat Actors:** {', '.join(str(c) for c in context['threat_actors'])}\n"
         if context.get("malware_families"):
-            md += f"*   **Malware Families:** {', '.join(context['malware_families'])}\n"
+            md += f"*   **Malware Families:** {', '.join(str(c) for c in context['malware_families'])}\n"
         
         techniques = context.get("attack_techniques", [])
         if techniques:

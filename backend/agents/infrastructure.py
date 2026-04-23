@@ -533,7 +533,11 @@ Seamlessly rewrite and update your PREVIOUS REPORT's findings to incorporate the
                     text_parts = []
                     for block in final_content:
                         if isinstance(block, dict):
-                            text_parts.append(block.get("text", ""))
+                            text = block.get("text", "")
+                            if isinstance(text, (dict, list)):
+                                text_parts.append(json.dumps(text))
+                            else:
+                                text_parts.append(str(text))
                         elif isinstance(block, str):
                             text_parts.append(block)
                         else:

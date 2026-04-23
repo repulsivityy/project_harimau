@@ -127,7 +127,7 @@ async def run_planning_phase(state: AgentState, llm, cache: InvestigationCache, 
         # Already-analyzed targets — do not re-task these
         analyzed = res.get("analyzed_targets", [])
         if analyzed:
-            ids = [t.get("value") or t if isinstance(t, dict) else str(t) for t in analyzed[:10]]
+            ids = [str(t.get("indicator") or t.get("value") or t) if isinstance(t, dict) else str(t) for t in analyzed[:10]]
             ids = [i for i in ids if i]
             if ids:
                 context_str += f"Already analyzed (do NOT re-task): {', '.join(ids)}\n"

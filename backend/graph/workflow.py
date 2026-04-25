@@ -80,7 +80,8 @@ def gate_node(state: AgentState) -> AgentState:
     iteration = state.get("iteration", 0)
     subtasks = state.get("subtasks", [])
     logger.info("gate_node_routing", iteration=iteration, subtask_count=len(subtasks))
-    return state
+    # Return empty dict — gate modifies nothing, so no reducers (including merge_graphs) are triggered.
+    return {}
 
 def route_from_gate(state: AgentState):
     """

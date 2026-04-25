@@ -496,6 +496,15 @@ Seamlessly rewrite and update your PREVIOUS REPORT's findings to incorporate the
                     for tc, result_txt in zip(response.tool_calls, results):
                         messages.append(ToolMessage(content=result_txt, tool_call_id=tc["id"]))
                         logger.info("infra_tool_response", iteration=iteration, tool=tc["name"], response_length=len(result_txt))
+
+                    # Cap context window: retain system prompt + initial task + last 10 messages.
+                    # Prevents token growth from accumulating all prior tool call history.
+                    # Start the tail at the first AIMessage to avoid orphaned ToolMessages
+                    # whose parent AIMessage was sliced off (which the API rejects).
+                    if len(messages) > 12:
+                        tail = messages[-10:]
+                        first_ai = next((i for i, m in enumerate(tail) if isinstance(m, AIMessage)), len(tail))
+                        messages = messages[:2] + tail[first_ai:]
                 else:
                     logger.info("infra_agent_no_tools", iteration=iteration, has_content=bool(response.content))
                     final_content = response.content

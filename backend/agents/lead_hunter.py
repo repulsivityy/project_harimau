@@ -96,10 +96,11 @@ async def lead_hunter_node(state: AgentState):
                     logger.info("lead_hunter_early_exit", reason="convergence", entities=list(new_entity_ids))
                 else:
                     logger.info("lead_hunter_new_tasks", count=len(new_subtasks))
-                    state["subtasks"] = new_subtasks
-                    state["iteration"] = current_iteration + 1
-                    state["tasked_entities"] = list(new_entity_ids)
-                    return state
+                    return {
+                        "subtasks": new_subtasks,
+                        "iteration": current_iteration + 1,
+                        "tasked_entities": list(new_entity_ids),
+                    }
 
             logger.info("lead_hunter_no_new_tasks", reason="empty_subtasks_or_converged")
 
@@ -107,9 +108,10 @@ async def lead_hunter_node(state: AgentState):
     logger.info("lead_hunter_mode_synthesis")
 
     final_report = await generate_final_report_llm(state, llm_pro)
-    state["final_report"] = final_report
 
     # [CRITICAL] CLEAR SUBTASKS TO STOP INFINITE LOOP
-    state["subtasks"] = []
-
-    return state
+    # Return only changed fields — investigation_graph is untouched so merge_graphs is not triggered.
+    return {
+        "final_report": final_report,
+        "subtasks": [],
+    }

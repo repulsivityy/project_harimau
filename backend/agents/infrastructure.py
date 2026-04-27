@@ -185,7 +185,11 @@ async def infrastructure_node(state: AgentState):
         is_url = "http" in ioc
         
         if is_ip or is_domain or is_url:
-            targets.append({"type": "root", "value": ioc})
+            root_entity = cache.get_entity_full(ioc)
+            if root_entity and "infrastructure" in root_entity.get("analyzed_by", []):
+                logger.info("infra_root_already_investigated", value=ioc)
+            else:
+                targets.append({"type": "root", "value": ioc})
             
         # 2. Check Subtasks (with Regex Fallback)
         for task in state.get("subtasks", []):
@@ -231,13 +235,17 @@ async def infrastructure_node(state: AgentState):
             # IPs
             ips = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", combined_text)
             for ip in ips:
-                 targets.append({"type": "safety_net", "value": ip, "context": "Found in Triage Summary"})
+                e = cache.get_entity_full(ip)
+                if not (e and "infrastructure" in e.get("analyzed_by", [])):
+                    targets.append({"type": "safety_net", "value": ip, "context": "Found in Triage Summary"})
 
             # Domains (stricter filter for safety net to avoid noise)
             domains = re.findall(r"\b([a-zA-Z0-9-]+\.[a-zA-Z]{2,})\b", combined_text)
             for d in domains:
                 if d.lower() not in [ioc.lower(), "google.com", "virustotal.com", "example.com"]:
-                     targets.append({"type": "safety_net", "value": d, "context": "Found in Triage Summary"})
+                    e = cache.get_entity_full(d)
+                    if not (e and "infrastructure" in e.get("analyzed_by", [])):
+                        targets.append({"type": "safety_net", "value": d, "context": "Found in Triage Summary"})
 
         # Deduplicate
         unique_targets = []

@@ -165,7 +165,7 @@ def _build_triage_context(state: AgentState) -> str:
 
 
 def _build_specialist_context(state: AgentState) -> str:
-    """Build a concise specialist-summary block for final synthesis."""
+    """Build full specialist context for final synthesis — report + key structured fields."""
     specialist_data = state.get("specialist_results", {})
     if not specialist_data:
         return "No specialist findings available."
@@ -176,12 +176,19 @@ def _build_specialist_context(state: AgentState) -> str:
         sections.append(f"Verdict: {res.get('verdict', 'Unknown')}")
         sections.append(f"Summary: {res.get('summary', 'No summary')}")
 
+        # Include full markdown report — this is the specialist's complete analysis
         markdown_report = res.get("markdown_report")
         if markdown_report:
-            sections.append("Report Excerpt:")
-            sections.append(markdown_report[:2000])
+            sections.append("Full Report:")
+            sections.append(markdown_report)
 
-        sections.append(f"Structured Findings: {json.dumps(res, indent=1)}")
+        # Append only the compact structured fields (not markdown_report — already above)
+        structured = {
+            k: v for k, v in res.items()
+            if k not in ("markdown_report", "summary", "verdict") and v not in (None, [], {}, "")
+        }
+        if structured:
+            sections.append(f"Structured Data: {json.dumps(structured, indent=1)}")
 
     return "\n".join(sections)
 

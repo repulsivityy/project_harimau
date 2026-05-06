@@ -2,6 +2,80 @@
 
 This document outlines the classes, functions, and dependencies for each Python file in the `project_harimau` codebase.
 
+## Semantic Knowledge Graph
+
+This section provides a detailed semantic graph of the codebase relationships, focusing on roles and data flow.
+
+### Mermaid Diagram
+
+```mermaid
+graph TD
+    subgraph Frontend [App / Next.js]
+        app_main["app/main.py"] --> api_client["app/api_client.py"]
+        app_main --> comp_tracker["app/components/investigation_tracker.py"]
+        app_main --> comp_tabs["app/components/results_tabs.py"]
+        app_main --> comp_sidebar["app/components/sidebar.py"]
+        
+        api_client -->|HTTP API| b_main["backend/main.py"]
+    end
+
+    subgraph Backend [FastAPI / LangGraph]
+        b_main --> workflow["backend/graph/workflow.py"]
+        
+        workflow --> state["backend/graph/state.py"]
+        workflow --> sse_wrap["backend/graph/sse_wrappers.py"]
+        
+        workflow --> triage["backend/agents/triage.py"]
+        workflow --> malware["backend/agents/malware.py"]
+        workflow --> infra["backend/agents/infrastructure.py"]
+        workflow --> lead_hunter["backend/agents/lead_hunter.py"]
+        
+        triage --> graph_cache["backend/utils/graph_cache.py"]
+        malware --> graph_cache
+        infra --> graph_cache
+        lead_hunter --> graph_cache
+        
+        infra --> mcp_client["backend/mcp/client.py"]
+        malware --> mcp_client
+        
+        triage --> gti_tool["backend/tools/gti.py"]
+        malware --> gti_tool
+        
+        triage --> webrisk_tool["backend/tools/webrisk.py"]
+        infra --> webrisk_tool
+        
+        b_main --> db[(Cloud SQL)]
+        workflow --> db
+    end
+
+    subgraph MCP Servers
+        mcp_client -->|stdio| gti_server["backend/mcp/gti/server.py"]
+        mcp_client -->|stdio| shodan_server["backend/mcp/shodan/server.py"]
+    end
+```
+
+### Detailed Node Descriptions
+
+*   **`app/main.py`**: Streamlit/Next.js entry point for the UI. Renders components and uses `api_client` to talk to backend.
+*   **`app/api_client.py`**: Wrapper for API calls to the backend.
+*   **`backend/main.py`**: FastAPI entry point. Handles HTTP requests, database operations (Cloud SQL), and initiates the LangGraph workflow.
+*   **`backend/graph/workflow.py`**: Defines the LangGraph state machine, adding nodes for each agent and edges for transitions.
+*   **`backend/graph/state.py`**: Defines the `AgentState` dictionary used to pass data between nodes in the graph.
+*   **`backend/agents/triage.py`**: Triage Agent. Performs breadth-first search of IOCs, populates the graph cache, and assigns subtasks to specialists.
+*   **`backend/agents/malware.py`**: Malware Specialist Agent. Performs deep dive into file artifacts, attribution, and behavior.
+*   **`backend/agents/infrastructure.py`**: Infrastructure Specialist Agent. Pivots on domains/IPs to map adversary infrastructure.
+*   **`backend/agents/lead_hunter.py`**: Lead Hunter Agent. Synthesizes findings from all agents and graph cache to produce final report.
+*   **`backend/utils/graph_cache.py`**: Implements the `InvestigationCache` using NetworkX `MultiDiGraph`. Crucial for token optimization (Dual-Layer Data Model).
+*   **`backend/mcp/client.py`**: Manages sessions with embedded MCP servers (GTI and Shodan).
+
+### Key Relationships (Edges)
+
+*   **Frontend -> Backend**: `api_client.py` makes REST API calls to `backend/main.py` (e.g., `/api/investigate`, `/api/investigations/{id}`).
+*   **Orchestration**: `workflow.py` orchestrates the execution flow between `triage`, `malware`, `infra`, and `lead_hunter` based on the state.
+*   **Data Sharing**: All agents read from and write to `graph_cache.py` to share detailed intel without blowing up the LLM token context in `AgentState`.
+*   **Tool Access**: Agents use `mcp_client.py` to invoke tools exposed by the embedded MCP servers.
+
+
 ## `app/api_client.py`
 **Imports:**
 - `os`
@@ -230,11 +304,15 @@ This document outlines the classes, functions, and dependencies for each Python 
 
 **Top-level Functions:**
 - `_run_investigation_background()`
+- `bulk_cancel_jobs()`
+- `cancel_investigation()`
 - `debug_investigation()`
+- `delete_jobs()`
 - `diagnostic_pipeline()`
 - `get_all_investigations()`
 - `get_investigation()`
 - `get_investigation_graph()`
+- `get_investigation_history()`
 - `get_job()`
 - `get_test_iocs()`
 - `health_check()`

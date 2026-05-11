@@ -38,6 +38,7 @@ def format_graph_from_cache(job_id: str, job: dict) -> dict:
 
     nodes = []
     edges = []
+    included_node_ids = set()
     edge_registry: set = set()
 
     for node_id, data in cache.graph.nodes(data=True):
@@ -122,6 +123,23 @@ def format_graph_from_cache(job_id: str, job: dict) -> dict:
             or (threat_score and isinstance(threat_score, (int, float)) and threat_score >= 70)
         )
 
+        # ── Relevance Filter ───────────────────────────────────────────────
+        specialist_results = job.get("specialist_results", {})
+        lead_report = job.get("lead_hunter_report", "")
+        full_report_text = f"{specialist_results} {lead_report}".lower()
+
+        # 1. Root IOC
+        # 2. Evaluated by specialist and flagged (specialist_ctx)
+        # 3. Malicious
+        # 4. Specialist or Lead Hunter flags it as relevant (mentioned in reports)
+        is_relevant = (
+            is_root or 
+            bool(specialist_ctx) or 
+            is_malicious or 
+            (str(node_id).lower() in full_report_text)
+        )
+
+        included_node_ids.add(node_id)
         nodes.append({
             "id":          node_id,
             "label":       label,
@@ -130,10 +148,15 @@ def format_graph_from_cache(job_id: str, job: dict) -> dict:
             "title":       tooltip,
             "isRoot":      is_root,
             "isMalicious": is_malicious,
+            "inReport":    is_relevant,
         })
 
     # ── Edges ──────────────────────────────────────────────────────────────
     for source, target, edata in cache.graph.edges(data=True):
+        # Include all edges for nodes we are keeping
+        if source not in included_node_ids or target not in included_node_ids:
+            continue
+            
         rel = edata.get("relationship", "")
         key = (source, target, rel)
         if key not in edge_registry:
@@ -180,7 +203,8 @@ def format_investigation_graph(job_id: str, job: dict) -> dict:
             "color": "#FF4B4B",  # Red for IOC
             "size": 35,
             "title": f"IOC: {ioc}\nType: {ioc_type}",
-            "isRoot": True
+            "isRoot": True,
+            "inReport": True
         }
     ]
     edges = []
@@ -261,13 +285,53 @@ def format_investigation_graph(job_id: str, job: dict) -> dict:
         return ent_id  # Default: show full ID
 
     # Process Relationships with clustering and source awareness
+    
+    # We will need the specialist reports to filter nodes in the fallback graph
+    specialist_results = job.get("specialist_results", {})
+    lead_report = job.get("lead_hunter_report", "")
+    full_report_text = f"{specialist_results} {lead_report}".lower()
+
     for rel_type, entities in filtered_relationships.items():
         logger.info("graph_processing_relationship", 
                    rel_type=rel_type, 
                    entity_count=len(entities))
         
+        # Filter entities to only show relevant ones
+        relevant_entities = []
+        for entity in entities:
+            ent_id = entity.get("id", "")
+            ent_type = entity.get("type", "unknown")
+            attrs = entity.get("attributes", {})
+            m_count = attrs.get("malicious_count") or entity.get("malicious_count")
+            verdict = attrs.get("verdict") or entity.get("verdict")
+            score = attrs.get("threat_score") or entity.get("threat_score")
+            specialist_ctx = attrs.get("malware_context") or entity.get("malware_context") or \
+                           attrs.get("infra_context") or entity.get("infra_context")
+            is_malicious = bool(
+                (m_count and m_count > 0) or 
+                (verdict and isinstance(verdict, str) and "malicious" in verdict.lower()) or 
+                (score and isinstance(score, (int, float)) and score >= 70)
+            )
+            
+            # 1. Root IOC (Handled automatically since root is added separately)
+            # 2. Evaluated by specialist and flagged (specialist_ctx)
+            # 3. Malicious
+            # 4. Specialist or Lead Hunter flags it as relevant (mentioned in reports)
+            is_relevant = (
+                bool(specialist_ctx) or 
+                is_malicious or 
+                (ent_id and str(ent_id).lower() in full_report_text)
+            )
+            
+            # Annotate entity with relevance
+            entity["inReport"] = is_relevant
+            relevant_entities.append(entity)
+
+        if not relevant_entities:
+            continue
+            
         # Add entities (limit to 15 to prevent graph overload)
-        display_entities = entities[:15]
+        display_entities = relevant_entities[:15]
         
         # Group entities by source to allow accurate clustering
         sources = {}
@@ -291,7 +355,8 @@ def format_investigation_graph(job_id: str, job: dict) -> dict:
                         "color": "#2C3E50",
                         "size": 25,
                         "shape": "box",
-                        "title": f"{group_label}\n{len(s_entities)} entities from {s_id}"
+                        "title": f"{group_label}\n{len(s_entities)} entities from {s_id}",
+                        "inReport": any(e.get("inReport", False) for e in s_entities)
                     })
                     node_registry.add(group_id)
                     
@@ -386,7 +451,8 @@ def format_investigation_graph(job_id: str, job: dict) -> dict:
                         "color": color,
                         "size": 20,
                         "title": tooltip_text,
-                        "isMalicious": is_malicious
+                        "isMalicious": is_malicious,
+                        "inReport": entity.get("inReport", False)
                     })
                     node_registry.add(ent_id)
 
@@ -402,8 +468,8 @@ def format_investigation_graph(job_id: str, job: dict) -> dict:
                     edge_registry.add(edge_key)
         
         # If truncated, add "+X more" indicator node
-        if len(entities) > 15:
-            remaining = len(entities) - 15
+        if len(relevant_entities) > 15:
+            remaining = len(relevant_entities) - 15
             overflow_id = f"overflow_{rel_type}"
             
             nodes.append({
@@ -412,7 +478,8 @@ def format_investigation_graph(job_id: str, job: dict) -> dict:
                 "color": "#BDC3C7",  # Light grey
                 "size": 15,
                 "shape": "box",
-                "title": f"{remaining} additional {rel_type} entities not shown"
+                "title": f"{remaining} additional {rel_type} entities not shown",
+                "inReport": False
             })
             
             edges.append({

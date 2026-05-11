@@ -284,7 +284,8 @@ def generate_markdown_report_locally(analysis: dict, ioc: str, ioc_type: str, tr
         # 1. Detection Summary (GTI + VT)
         md += "### Detection Summary\n"
         verdict = analysis.get('verdict', triage_data.get('verdict') if triage_data else 'Unknown')
-        score = analysis.get('threat_score', triage_data.get('threat_score') if triage_data else 'N/A')
+        score = analysis.get('threat_score', triage_data.get('threat_score') if triage_data else None)
+        score_str = f"`{score}/100`" if score is not None else "`Unknown`"
         
         # Color-coded verdict (emoji-based for markdown)
         v_emoji = "✅"
@@ -292,7 +293,7 @@ def generate_markdown_report_locally(analysis: dict, ioc: str, ioc_type: str, tr
         elif verdict.lower() == "suspicious": v_emoji = "🟠"
         
         md += f"*   **GTI Verdict:** {v_emoji} **{verdict}**\n"
-        md += f"*   **Threat Score:** `{score}/100`\n"
+        md += f"*   **Threat Score:** {score_str}\n"
         
         if triage_data and triage_data.get("total_stats"):
             m = triage_data.get("malicious_stats", 0)
@@ -595,7 +596,7 @@ async def triage_node(state: AgentState):
         # Initialize metadata
         if "metadata" not in state: state["metadata"] = {} # Safety check
         state["metadata"]["risk_level"] = "Assessing..." 
-        state["metadata"]["gti_score"] = triage_data["threat_score"] or "N/A"
+        state["metadata"]["gti_score"] = triage_data.get("threat_score")
         state["metadata"]["rich_intel"] = triage_data
         
         # ========================================

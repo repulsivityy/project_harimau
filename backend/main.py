@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
                     ioc                 VARCHAR(255) NOT NULL,
                     ioc_type            VARCHAR(50),
                     risk_level          VARCHAR(50),
-                    gti_score           VARCHAR(50),
+                    gti_score           INTEGER,
                     created_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
                     completed_at        TIMESTAMPTZ,
                     final_report        TEXT,
@@ -153,6 +153,13 @@ async def save_job(job_id: str, data: dict):
                 raw_graph = data.get("investigation_graph")
                 graph_json = json.dumps(raw_graph) if raw_graph is not None else None
 
+                # Safely parse GTI score as integer, fallback to None (NULL in DB)
+                raw_score = data.get("gti_score")
+                try:
+                    gti_score_int = int(raw_score) if raw_score not in [None, "N/A", ""] else None
+                except (ValueError, TypeError):
+                    gti_score_int = None
+
                 await conn.execute("""
                     INSERT INTO investigations (
                         job_id, status, ioc, ioc_type, risk_level, gti_score, final_report, metadata, investigation_graph
@@ -172,7 +179,7 @@ async def save_job(job_id: str, data: dict):
                 data.get("ioc"),
                 data.get("ioc_type"),
                 data.get("risk_level"),
-                str(data.get("gti_score", "N/A")),
+                gti_score_int,
                 data.get("final_report"),
                 json.dumps(metadata),
                 graph_json,
@@ -404,7 +411,7 @@ async def _run_investigation_background(job_id: str, ioc: str, max_iterations: i
             "subtasks": initial_subtasks,  # Use preserved subtasks instead of cleared ones
             "final_report": final_state.get("final_report", "No report generated."),
             "risk_level": final_state.get("metadata", {}).get("risk_level", "Unknown"),
-            "gti_score": final_state.get("metadata", {}).get("gti_score", "N/A"),
+            "gti_score": final_state.get("metadata", {}).get("gti_score"),
             "rich_intel": final_state.get("metadata", {}).get("rich_intel", {}),
             "specialist_results": specialist_results,
             "metadata": final_state.get("metadata", {}),

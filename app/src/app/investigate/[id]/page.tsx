@@ -376,7 +376,7 @@ export default function InvestigatePage() {
       isTriage: true,
       content: job ? {
             verdict: job.risk_level || "UNKNOWN",
-            score: job.gti_score || "0",
+            score: job.gti_score !== null && job.gti_score !== undefined ? job.gti_score : "Unknown",
             malicious: job.rich_intel?.malicious_stats || 0,
             total: job.rich_intel?.total_stats || 0,
             summary: job.rich_intel?.triage_summary || ""
@@ -560,7 +560,7 @@ export default function InvestigatePage() {
                     <h3 className="font-label text-outline-variant uppercase mb-2 text-xs tracking-widest">Triage Verdict</h3>
                     <button onClick={() => setModalContent({ 
                       title: "Triage Verdict", 
-                      content: `### GTI Verdict\n**${job?.risk_level || "UNKNOWN"}**\n\n### GTI Score\n**${job?.gti_score || "0"}/100**\n\n### VT Detections\n**${job?.rich_intel?.malicious_stats !== undefined ? `${job.rich_intel.malicious_stats}/${job.rich_intel.total_stats}` : "N/A"}**\n\n### GTI Analysis\n${job?.rich_intel?.triage_summary || "No summary available."}` 
+                      content: `### GTI Verdict\n**${job?.risk_level || "UNKNOWN"}**\n\n### GTI Score\n**${job?.gti_score !== null && job?.gti_score !== undefined ? job.gti_score + "/100" : "Unknown"}**\n\n### VT Detections\n**${job?.rich_intel?.malicious_stats !== undefined ? `${job.rich_intel.malicious_stats}/${job.rich_intel.total_stats}` : "N/A"}**\n\n### GTI Analysis\n${job?.rich_intel?.triage_summary || "No summary available."}` 
                     })} className="text-slate-500 hover:text-[#00f7ff] cursor-pointer">
                       <span className="material-symbols-outlined text-sm">fullscreen</span>
                     </button>
@@ -574,7 +574,7 @@ export default function InvestigatePage() {
                   <div className="grid grid-cols-2 gap-2">
                     <div className="bg-surface-container-low p-2 border border-slate-800/50 flex flex-col">
                       <span className="text-[10px] text-slate-500 uppercase">GTI Score</span>
-                      <span className="font-mono text-[#00f7ff] font-bold">{job?.gti_score || "0"}/100</span>
+                      <span className="font-mono text-[#00f7ff] font-bold">{job?.gti_score !== null && job?.gti_score !== undefined ? job.gti_score + "/100" : "Unknown"}</span>
                     </div>
                     <div className="bg-surface-container-low p-2 border border-slate-800/50 flex flex-col">
                       <span className="text-[10px] text-slate-500 uppercase">VT Detections</span>

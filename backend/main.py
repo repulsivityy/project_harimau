@@ -608,7 +608,6 @@ async def debug_investigation(job_id: str):
         "graph_node_count_estimate": 1 + len(job.get("subtasks", [])) + sum(len(entities[:5]) for entities in relationships.values() if isinstance(entities, list))
     }
 
-'''
 
 @app.get("/api/investigations/{job_id}/graph")
 async def get_investigation_graph(job_id: str):

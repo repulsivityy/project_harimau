@@ -1,6 +1,6 @@
 # Agent Implementation Reference
 
-*Supplement to [architecture.md](./architecture.md) - Last updated: 2026-02-07*
+*Supplement to [architecture.md](./architecture.md) - Last updated: 2026-05-11*
 
 This document provides implementation-level details for the Harimau specialist agents.
 
@@ -50,35 +50,38 @@ async with mcp_manager.get_session("gti") as session:
 
 ### Phase 3: Agent Loop (10 Iterations)
 ```python
+    from backend.utils.agent_utils import (
+        FINAL_ITERATION_PROMPT, run_tools_parallel, cap_context_window
+    )
+
     llm = ChatVertexAI(model="gemini-2.5-flash", temperature=0)
     llm_with_tools = llm.bind_tools([tool1, tool2, ...])
 
-    # Injecting the previous report ensures report accumulation across loops
-    previous_report = state.get("specialist_results", {}).get("agent", {}).get("markdown_report", "New report")
-
     messages = [
-        SystemMessage(content=PROMPT), 
-        HumanMessage(content=f"Previous Report: {previous_report}\n\nTask: {task}")
+        SystemMessage(content=PROMPT),
+        HumanMessage(content=f"Task: {task}")
     ]
     final_content = None
     max_iterations = malware_iterations  # or infra_iterations = 10
 
     for iteration in range(max_iterations):
+        messages = cap_context_window(messages)  # prevent unbounded growth
+
         if iteration == max_iterations - 1:
-            messages.append(HumanMessage(
-                content="Final iteration. Provide comprehensive JSON structure."
-            ))
-        
-        response = await llm.ainvoke(messages)
+            messages.append(HumanMessage(content=FINAL_ITERATION_PROMPT))
+
+        response = await llm_with_tools.ainvoke(messages)
         messages.append(response)
-        
+
         if response.tool_calls:
-            for tc in response.tool_calls:
-                tool_result = await tools[tc["name"]].ainvoke(tc["args"])
-                messages.append(ToolMessage(content=tool_result, tool_call_id=tc["id"]))
+            # All tool calls in this turn run concurrently with a 20s per-tool timeout
+            results = await run_tools_parallel(tool_dispatch, response.tool_calls, "agent_name", logger)
+            for tc, result in zip(response.tool_calls, results):
+                messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
         else:
             final_content = response.content
-            if final_content: break
+            if final_content:
+                break
 ```
 
 ### Phase 4: Fallback Content Capture
@@ -93,7 +96,9 @@ async with mcp_manager.get_session("gti") as session:
 
 ### Phase 5: JSON Parsing (Flexible)
 ```python
-    result = parse_json_flexible(final_content)
+    from backend.utils.agent_utils import parse_llm_json
+
+    raw_text, result = parse_llm_json(final_content)
 ```
 
 ### Phase 6: Report Generation
@@ -124,45 +129,40 @@ async with mcp_manager.get_session("gti") as session:
 
 ## JSON Parsing Implementation
 
-### Dual-Format Handler
+### `parse_llm_json` (`backend/utils/agent_utils.py`)
 
-Handles both `{...}` objects and `[{...}]` arrays:
+Handles Gemini/Vertex content that may arrive as a plain string or a list of content blocks. Strips markdown fences, detects array vs object format, and returns `(raw_text, parsed_dict)`. For arrays it returns the first element.
 
 ```python
-def parse_json_flexible(content: str) -> dict:
-    # Remove markdown wrapping
-    clean = content
-    if "```json" in clean:
-        clean = clean.split("```json")[-1].split("```")[0].strip()
-    elif "```" in clean:
-        clean = clean.split("```")[1].strip() if clean.count("```") >= 2 else clean
-    
-    # Detect structure type
-    array_start = clean.find("[")
-    object_start = clean.find("{")
-    
-    if array_start != -1 and (object_start == -1 or array_start < object_start):
-        # JSON Array: [{...}, {...}]
-        end_idx = clean.rfind("]")
-        if end_idx != -1:
-            clean = clean[array_start:end_idx+1]
-            parsed = json.loads(clean)
-            if isinstance(parsed, list) and len(parsed) > 0:
-                return parsed[0]  # Take first element
-            raise ValueError("Empty or invalid array")
-        raise ValueError("No closing bracket found")
-    
-    elif object_start != -1:
-        # JSON Object: {...}
-        end_idx = clean.rfind("}")
-        if end_idx != -1:
-            clean = clean[object_start:end_idx+1]
-            return json.loads(clean)
-        raise ValueError("No closing brace found")
-    
-    else:
-        raise ValueError(f"No JSON structure found. Content: {content[:100]}")
+from backend.utils.agent_utils import parse_llm_json
+
+raw_text, result = parse_llm_json(response.content)
+# result is always a dict; raw_text is the original string for error context
 ```
+
+Key behaviours:
+- Accepts `str` or `list[dict]` (Vertex content block format)
+- Strips ` ```json ` and bare ` ``` ` fences
+- For `[{...}]` arrays, extracts first element
+- Raises `ValueError` with a 100-char content preview if no JSON is found
+
+---
+
+## Shared Agent Utilities (`backend/utils/agent_utils.py`)
+
+All four functions below are imported by both specialist agents. Do not duplicate them locally.
+
+| Function | Purpose |
+|---|---|
+| `FINAL_ITERATION_PROMPT` | Standard string appended on the last iteration to force JSON output |
+| `parse_llm_json(content)` | Normalise Vertex content, strip fences, return `(raw_text, dict)` |
+| `run_tools_parallel(tool_dispatch, tool_calls, agent_name, logger, timeout=20.0)` | `asyncio.gather` with per-tool timeout; `agent_name` scopes log keys |
+| `cap_context_window(messages, system_count=2, tail_size=10)` | Keep first N + last N messages; trim tail to start on AIMessage |
+| `push_to_rich_intel(relationships_data, rel_name, entity_type, value, source_id, attributes)` | Deduplicating append — skips if same `id` + `source_id` already present |
+
+### `cap_context_window` — why it trims to AIMessage
+
+The LangGraph / Vertex API rejects a `ToolMessage` that has no preceding `AIMessage` in the same context slice. When slicing the tail, the function advances past any leading `ToolMessage`s so the window always opens on an `AIMessage`.
 
 ---
 
@@ -324,7 +324,7 @@ Before deployment:
 
 ---
 
-## Malware Specialist Tools (Feb 2026)
+## Malware Specialist Tools
 
 The Malware agent has access to 5 GTI tools via MCP:
 
@@ -443,6 +443,32 @@ llm.bind_tools([
     get_url_report, get_entities_related_to_an_url,
     get_webrisk_report
 ])
+```
+
+---
+
+## Specialist Output Schema Conventions
+
+### `threat_score`
+Both Malware and Infrastructure agents include `threat_score` in their output. It is read **directly** from `gti_assessment.threat_score.value` in the GTI tool response — no combining, weighting, or derivation. It reflects the GTI verdict on the primary IOC being investigated.
+
+### `summary` — narrative prose
+The `summary` field in each specialist's JSON output is a **5-paragraph narrative** covering: overall assessment, technical findings, threat actor context, infrastructure or malware behaviour, and recommended actions. This gives the synthesis agent (`lead_hunter_synthesis.py`) rich raw material for the final report.
+
+### Cross-agent collaboration via `related_indicators`
+- **Infrastructure → Malware**: File hashes discovered in `communicating_files` / `downloaded_files` during infrastructure analysis **must** be placed in `related_indicators` with a `File:` prefix. The Lead Hunter planning agent will assign these to the Malware specialist in the next iteration.
+- **Malware → Infrastructure**: Network indicators (IPs, domains) found during malware analysis must be placed in `network_indicators` / `related_indicators` so the Infrastructure agent can pivot on them.
+
+### Example output fields (both agents)
+```json
+{
+  "verdict": "MALICIOUS",
+  "threat_score": 90,
+  "summary": "Five-paragraph narrative ...",
+  "network_indicators": [...],
+  "related_indicators": ["File:abc123...", "IP:1.2.3.4"],
+  ...
+}
 ```
 
 ---

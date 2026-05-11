@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Shared Agent Utilities** (`backend/utils/agent_utils.py`): Extracted common agent logic into a shared module — `parse_llm_json()`, `run_tools_parallel()`, `cap_context_window()`, and `push_to_rich_intel()`. Both specialist agents now import from this module, removing ~80 lines of duplicated code each.
+- **threat_score field**: Both Malware and Infrastructure specialist agents now output a `threat_score` field read directly from `gti_assessment.threat_score.value` in the GTI tool response. No derivation or combination — direct passthrough.
+- **Cross-agent collaboration instruction**: Infrastructure agent prompt now explicitly instructs the LLM to place file hashes found in `communicating_files` / `downloaded_files` into `related_indicators` with a `File:` prefix, so the Malware agent can pick them up in subsequent iterations.
+- **Narrative summary field**: Both specialist agents now produce a 5-paragraph narrative in the `summary` field of their JSON output, giving the synthesis agent richer source material.
+- **Context window cap**: `cap_context_window()` prevents unbounded message growth in the agent loop by keeping only the first 2 system messages and the last 10 messages (trimmed to start on an AIMessage to avoid orphaned ToolMessages).
+- **Parallel tool execution with timeout**: `run_tools_parallel()` runs all LLM tool calls concurrently via `asyncio.gather` with a per-tool 20-second timeout.
+
 ### Fixed
+- **Malware agent stale tool name**: `get_file_behavior_summary(hash)` → `get_file_behavior(hash)` to match actual MCP tool name.
+- **Bare `except: pass` blocks**: Replaced silent exception suppression in both specialist agents with `except Exception as e: logger.warning(...)`.
+- **Frontend build — `@types/d3-graphviz` version**: Package only publishes up to `2.6.10`; updated `app/package.json` from `^5.0.0` to `^2.6.10`.
+- **Frontend build — graphviz `width`/`height` type error**: Options type requires `number`, not `string`; removed both fields (redundant with `fit: true`).
 - **Database Schema**: Reverted `gti_score` column type from `VARCHAR(50)` back to `INTEGER` to enforce strict typing.
 - **Data Integrity**: Removed aggressive `"N/A"` string coercion for missing threat scores. Missing scores now safely persist as `NULL` in the database.
 - **Frontend Resilience**: Updated the tactical dashboard and modals to gracefully render "Unknown" when encountering `null` or missing threat scores.

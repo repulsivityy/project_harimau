@@ -13,7 +13,11 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args: ['build', '-t', 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/harimau/frontend:latest', '-f', 'app/Dockerfile', '.']
 
-  # 3. Fetch Backend URL for Frontend
+  # 3. Push Frontend Image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/harimau/frontend:latest']
+
+  # 4. Fetch Backend URL for Frontend
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:
@@ -23,7 +27,7 @@ steps:
         echo "$$BACKEND_URL" > /workspace/backend_url.txt
         echo "Fetched Backend URL: $$BACKEND_URL"
 
-  # 4. Deploy Frontend to Cloud Run (BACKEND_URL set as runtime env var — read by API route proxy)
+  # 5. Deploy Frontend to Cloud Run (BACKEND_URL set as runtime env var — read by API route proxy)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:

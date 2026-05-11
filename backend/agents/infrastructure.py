@@ -57,6 +57,11 @@ Analyze the provided network indicator (Domain, IP, or URL) to assess its malici
 - `shodan_dns_lookup`: Resolve hostnames to IPs via Shodan DNS. Useful when pivoting from a domain to confirm its current resolution.
 - `shodan_reverse_dns_lookup`: Resolve IPs to hostnames via Shodan. Use this to discover what domains are co-hosted on a suspicious IP.
 
+**`threat_score`:** Read `gti_assessment.threat_score.value` directly from the GTI tool response and use that value as-is.
+
+**Collaboration with Malware Agent:**
+Any file hashes discovered via `communicating_files` or `downloaded_files` relationships MUST be included in `related_indicators` with the prefix `File:` (e.g., `"File: <hash>"`). The Malware Agent reads these on the next iteration to expand its analysis. Include all discovered hashes regardless of verdict — undetected files may be staging tools or living-off-the-land binaries.
+
 **Example Output (JSON):**
 {
     "verdict": "Malicious|Suspicious|Benign",

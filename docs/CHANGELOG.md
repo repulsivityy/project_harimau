@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Parallel tool execution with timeout**: `run_tools_parallel()` runs all LLM tool calls concurrently via `asyncio.gather` with a per-tool 20-second timeout.
 
 ### Fixed
+- **Cloud Build Deployment Race Condition**: Fixed an issue in `cloudbuild-backend.yaml` and `cloudbuild-frontend.yaml` where `gcloud run deploy` was executing before the newly built container image was pushed to Artifact Registry, causing deployments to fail with stale image errors. Added explicit `docker push` steps.
 - **Malware agent stale tool name**: `get_file_behavior_summary(hash)` → `get_file_behavior(hash)` to match actual MCP tool name.
 - **Bare `except: pass` blocks**: Replaced silent exception suppression in both specialist agents with `except Exception as e: logger.warning(...)`.
 - **Frontend build — `@types/d3-graphviz` version**: Package only publishes up to `2.6.10`; updated `app/package.json` from `^5.0.0` to `^2.6.10`.

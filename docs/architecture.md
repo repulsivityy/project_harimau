@@ -188,8 +188,8 @@ To support selective and automated deployments, the application uses **Google Cl
   - `terraform/infra/`: Stateful resources (Cloud SQL, Artifact Registry, Secret Manager).
   - `terraform/app/`: Application services (Cloud Run). Must be applied before first CI/CD run to set the Cloud SQL annotation.
 * **Automated Triggers**:
-    - **Backend Trigger**: Listens for changes in `backend/**`. Runs `cloudbuild-backend.yaml` — builds the FastAPI container and deploys with `--add-cloudsql-instances` to preserve Cloud SQL Auth Proxy access.
-    - **Frontend Trigger**: Listens for changes in `app/**`. Runs `cloudbuild-frontend.yaml` — builds the Next.js container, fetches the backend Cloud Run URL, then deploys with `--set-env-vars BACKEND_URL=...` as a runtime env var.
+    - **Backend Trigger**: Listens for changes in `backend/**`. Runs `cloudbuild-backend.yaml` — builds the FastAPI container, explicitly pushes to Artifact Registry, and deploys with `--add-cloudsql-instances` to preserve Cloud SQL Auth Proxy access.
+    - **Frontend Trigger**: Listens for changes in `app/**`. Runs `cloudbuild-frontend.yaml` — builds the Next.js container, explicitly pushes to Artifact Registry, fetches the backend Cloud Run URL, then deploys with `--set-env-vars BACKEND_URL=...` as a runtime env var.
 
 **Why BACKEND_URL is a runtime env var, not a build arg**: The frontend uses a catch-all App Router API route (`src/app/api/[...path]/route.ts`) that reads `process.env.BACKEND_URL` at request time — not during `next build`. This means the correct backend URL is always used without needing to rebuild the image when the backend URL changes. The old `next.config.ts` rewrites approach baked the URL at build time, which caused the proxy to permanently point to `http://localhost:8080`.
 

@@ -268,12 +268,12 @@ export default function InvestigatePage() {
               const simEdges = graphData.edges.map((e) => ({ source: e.source, target: e.target }));
               const simNodeMap = new Map<string, any>(simNodes.map((n) => [n.id, n]));
 
-              const simulation = forceSimulation(simNodes)
-                .force("link", forceLink(simEdges).id((d: any) => d.id).distance(180).strength(0.1))
-                .force("charge", forceManyBody().strength(-800).distanceMax(600))
-                .force("collide", forceCollide().radius((d: any) => d.radius + 20).strength(0.9))
-                .force("x", forceX(0).strength(0.05))
-                .force("y", forceY(0).strength(0.05))
+              const simulation = d3.forceSimulation(simNodes)
+                .force("link", d3.forceLink(simEdges).id((d: any) => d.id).distance(180).strength(0.1))
+                .force("charge", d3.forceManyBody().strength(-800).distanceMax(600))
+                .force("collide", d3.forceCollide().radius((d: any) => d.radius + 20).strength(0.9))
+                .force("x", d3.forceX(0).strength(0.05))
+                .force("y", d3.forceY(0).strength(0.05))
                 .alphaDecay(0.02)
                 .velocityDecay(0.4);
 

@@ -25,8 +25,6 @@ const GraphvizRenderer = ({ dot }: { dot: string }) => {
         
         graphviz(containerRef.current)
           .options({
-            width: "100%",
-            height: "100%",
             fit: true,
             zoom: true,
           })

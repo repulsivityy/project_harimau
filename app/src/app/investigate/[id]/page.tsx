@@ -6,7 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState, useRef, ChangeEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import { Background, BackgroundVariant, Controls, MiniMap, ReactFlow, useNodesState, useEdgesState, Handle, Position, MarkerType } from "@xyflow/react";
-import { forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY } from "d3-force";
+import dagre from "dagre";
 import "@xyflow/react/dist/style.css";
 
 // Custom Markdown Renderer for high readability - Adjusted for new design

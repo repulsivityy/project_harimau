@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Database Schema**: Reverted `gti_score` column type from `VARCHAR(50)` back to `INTEGER` to enforce strict typing.
+- **Data Integrity**: Removed aggressive `"N/A"` string coercion for missing threat scores. Missing scores now safely persist as `NULL` in the database.
+- **Frontend Resilience**: Updated the tactical dashboard and modals to gracefully render "Unknown" when encountering `null` or missing threat scores.
+
 ## [0.5.0] - 2026-04-09
 
 ### Added

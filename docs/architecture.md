@@ -1,4 +1,4 @@
-# System Architecture: Project Harimau V2
+# System Architecture: Project Harimau
 
 ## 1. High-Level Design
 
@@ -34,13 +34,13 @@ graph TD
 * **Role**: Pure presentation layer.
 * **Architecture**: App Router with server/client components.
   - `src/app/page.tsx`: Main landing page with centered search box and investigation controls.
-  - `src/app/investigate/[id]/page.tsx`: Dynamic route for rendering investigation results (graph, timeline, reports).
+  - `src/app/investigate/[id]/page.tsx`: Dynamic route for rendering a **Tiled Tactical Dashboard** (graph, timeline, specialist dossiers, and transparency log).
   - `src/app/globals.css`: Global styles including Tailwind directives.
 * **Authentication**: Google IAP / IAM (via Cloud Run).
 * **Logic**:
   - Submits jobs to Backend (`POST /api/investigate`).
   - Fetches data from Backend via catch-all API route proxy (`src/app/api/[...path]/route.ts`) — reads `BACKEND_URL` at request time from Cloud Run env var.
-  - Visualizes graph with rich tooltips!
+  - Visualizes graph with **ReactFlow** and **d3-force** simulation.
 
 ### 2.2 Backend (`/backend`)
 * **Technology**: FastAPI + LangGraph.
@@ -160,26 +160,17 @@ Future: FalkorDB (Phase 7 - Planned):
 ### 2.6 Graph Visualization Enhancement
 
 **Display Requirements** (User-Facing):
-1. Full URLs (not truncated)
-2. File names (not just hashes)
-3. Rich tooltips with:
-   - Threat score
-   - "X vendors detected as malicious"
-   - File metadata (name, type, size)
-   - URL categories
+1. **Interactive Layout**: Uses `d3-force` simulation for organic, non-overlapping node placement.
+2. **Contextual Icons**: Nodes display unique icons by type (Router for IP, Link for URL, Fingerprint for Hash).
+3. **Malicious Halos**: Malicious nodes are highlighted with red borders and warning badges.
+4. **Rich Metadata**: Tooltips and labels provide:
+   - Threat score and verdict.
+   - Vendor detection ratios.
+   - File metadata (filename, type, size).
+   - Relationship labels on edges.
 
 **Implementation**:
-```python
-# backend/main.py - Graph endpoint
-tooltip_text = f"""
-Threat Score: {entity['threat_score']}
-{entity['malicious_count']} vendors detected as malicious
-Filename: {entity['meaningful_name']}
-Type: {entity['file_type']}
-Size: {entity['size'] / 1024 / 1024:.2f} MB
-Verdict: {entity['verdict']}
-""".strip()
-```
+The frontend maps the `investigation_graph` JSONB from the backend into ReactFlow nodes and edges. It utilizes a `CustomNode` component to render the tactical aesthetic, including specialized icons for root IOCs and specialist findings.
 
 ### 2.7 Observability & Transparency
 * **Structured Logging**: JSON logs → Google Cloud Logging.
@@ -325,9 +316,9 @@ This ensures that updating an agent (backend) does not trigger a needless rebuil
 
 ### 4.3 Specialist Handoff & Visualization
 1. **Dynamic Routing**: Triage identifies specialists (e.g., `malware_specialist`) based on IOC properties.
-2. **Specialist Results Tab**: A dedicated tab in the UI renders individual markdown reports for each specialist.
-3. **Graph Integration**: Specialist findings (Dropped Files, C2 IPs) appear as new nodes in the graph with unique 🚩 specialist tooltips.
-4. **Centering Logic**: The graph is explicitly forced to re-center when specialized findings are added.
+2. **Specialist Dossiers Tile**: A dedicated tile in the dashboard renders individual markdown reports for each specialist.
+3. **Graph Integration**: Specialist findings (Dropped Files, C2 IPs) appear as new nodes in the graph with unique icons and context.
+4. **Transparency**: The "Agent Transparency" tile provides a live feed of tool calls and internal reasoning logs.
 
 ### 4.4 Async Background Processing (Feb 2026)
 

@@ -1,4 +1,4 @@
-# Product Requirements Document (PRD): Project Harimau V2
+# Product Requirements Document (PRD): Project Harimau
 
 > **Vision:** A scalable AI-powered threat intelligence analysis platform that analyzes IOCs from Google Threat Intelligence using multi-agent collaboration and knowledge graph reasoning.
 
@@ -69,7 +69,7 @@ The Lead Hunter must produce a **comprehensive threat intelligence analysis**, n
 
 ### 3.4 Artifact Persistence (Report & Graph)
 *   **Storage**: Cloud SQL (PostgreSQL).
-*   **Report & Graph**: Backend saves investigation metadata, reports, and generated graph relationships natively into a PostgreSQL database `investigations` table as JSONB.
+*   **Report & Graph**: Backend saves investigation metadata (including `gti_score` as a strictly typed INTEGER, handling missing data via NULL), reports, and generated graph relationships natively into a PostgreSQL database `investigations` table as JSONB.
 *   **State Recovery**: LangGraph checkpoints are persisted directly to PostgreSQL using `AsyncPostgresSaver` allowing history tracking and potential resumption.
 *   **Status**: Implemented. An in-memory `JOBS` dict is only retained as an emergency fallback if the database connection fails on startup.
 

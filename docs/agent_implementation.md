@@ -326,7 +326,7 @@ Before deployment:
 
 ## Malware Specialist Tools (Feb 2026)
 
-The Malware agent has access to 4 GTI tools via MCP:
+The Malware agent has access to 5 GTI tools via MCP:
 
 1. **get_file_behavior** - Fetches sandbox behavior summary
    ```python
@@ -358,12 +358,20 @@ The Malware agent has access to 4 GTI tools via MCP:
    ```python
    @tool
    async def get_file_report(file_hash: str):
-       res = await session.call_tool("get_file_report", arguments={"file_hash": file_hash})
+       res = await session.call_tool("get_file_report", arguments={"hash": file_hash})
+   ```
+
+5. **get_network_activity** - Contacted domains, IPs, and URLs
+   ```python
+   @tool
+   async def get_network_activity(file_hash: str):
+       # Fetches: contacted_domains, contacted_ips, contacted_urls
+       # Updates graph cache natively
    ```
 
 **Tool Binding:**
 ```python
-llm.bind_tools([get_file_behavior, get_dropped_files, get_attribution, get_file_report])
+llm.bind_tools([get_file_behavior, get_dropped_files, get_attribution, get_file_report, get_network_activity])
 ```
 
 ---

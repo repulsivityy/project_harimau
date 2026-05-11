@@ -11,6 +11,13 @@ from backend.mcp.client import mcp_manager
 from backend.utils.logger import get_logger
 from backend.utils.graph_cache import InvestigationCache
 from backend.utils.transparency import emit_tool_call, emit_reasoning
+from backend.utils.agent_utils import (
+    FINAL_ITERATION_PROMPT,
+    parse_llm_json,
+    run_tools_parallel,
+    cap_context_window,
+    push_to_rich_intel,
+)
 import backend.tools.webrisk as webrisk
 
 ## Global Variables
@@ -58,31 +65,28 @@ Analyze the provided network indicator (Domain, IP, or URL) to assess its malici
     "asn_or_registrar": "NameCheap / AS12345 Cloudflare",
     "associated_campaigns": ["Campaign X", "APT29"],
     "pivot_findings": [
-        "Resolved to 1.2.3.4 (also hosts malicious.com)",
-        "Subdomain admin.evil.com used for C2",
-        "Hosted file hash 9f8a... (Ransomware)"
+        "Resolved to <OBSERVED_IP> (also hosts <OBSERVED_DOMAIN>)",
+        "Subdomain <OBSERVED_SUBDOMAIN> used for C2",
+        "Hosted file hash <OBSERVED_HASH> (<malware family>)"
     ],
-    "related_indicators": ["IP: 1.2.3.4", "Domain: malicious.com", "File: 9f8a..."],
+    "related_indicators": ["IP: <OBSERVED_IP>", "Domain: <OBSERVED_DOMAIN>", "File: <OBSERVED_HASH>"],
     "analyzed_targets": [
         {
-            "indicator": "malicious.com",
+            "indicator": "<OBSERVED_DOMAIN_OR_IP>",
             "type": "domain",
             "verdict": "Malicious",
-            "behavior": "Resolves to bad IPs",
-            "notes": "Primary C2 domain"
+            "behavior": "<observed behavior from tools>",
+            "notes": "<context from triage or tool output>"
         }
     ],
-    "summary": "Detailed technical summary of the infrastructure and its role in the attack..."
+    "summary": "3-5 paragraph analyst narrative. Paragraph 1: what this infrastructure is, its overall verdict, and its role in the threat. Paragraph 2: what pivoting revealed — resolutions, co-hosted domains, communicating files, and what those connections imply. Paragraph 3: hosting and registration patterns — ASN, registrar, nameservers, geolocation — and what they suggest about the operator. Paragraph 4: attribution context — links to known campaigns, threat actors, or infrastructure clusters, with confidence level. Paragraph 5 (if warranted): recommended hunting pivots and what defenders should monitor. Write in clear, professional prose — no bullet points in this field."
 }
 
-**CRITICAL OUTPUT INSTRUCTIONS:**
-- You MUST ALWAYS return valid JSON in the exact format shown above.
-- Do NOT include markdown formatting, code blocks, or explanatory text.
-- **GROUND YOUR ANALYSIS.** You MUST base your entire analysis, verdicts, and indicators strictly on the provided triage context and the explicit outputs from your tools. Do NOT invent, assume, output outside prior knowledge, or hallucinate IOCs. Only include actual observed tool results.
-- **DO NOT HALLUCINATE IOCs.** Only include indicators (hashes, IPs, domains, URLs) that were explicitly found in the triage summary or returned by your tools. Do NOT copy dummy values like `malicious.com`, `1.2.3.4`, or `9f8a...` from the example output. If no indicators are found, use empty lists `[]`.
-- **IF TOOLS FAIL OR ERROR:** Still return JSON! Use "Unknown", empty arrays [], or "N/A" for fields you couldn't populate.
-- **NEVER provide narrative explanations instead of JSON.** If you encountered errors, mention them in the "summary" field.
-- When you're done analyzing, respond with ONLY the JSON object - nothing else.
+**OUTPUT INSTRUCTIONS:**
+- Return ONLY a valid JSON object in the exact format above — no markdown fences, no preamble, no explanatory text.
+- **GROUND YOUR ANALYSIS.** Every verdict, indicator, and claim must come strictly from the triage context or your tool outputs. Do NOT invent IOCs or infer beyond observed evidence.
+- **DO NOT HALLUCINATE IOCs.** The example values above are structural placeholders — never use them. Only include indicators explicitly returned by your tools. If none were found, use `[]`.
+- **IF TOOLS FAIL:** Still return JSON. Use `"Unknown"`, `[]`, or `"N/A"` for unpopulated fields; note errors in the `summary` field.
 
 **Example when tools fail:**
 {
@@ -452,7 +456,7 @@ You have been tasked to investigate these new uninvestigated nodes based on the 
 {context if context else "Perform comprehensive infrastructure analysis on the new targets."}
 
 **CRITICAL REPORTING INSTRUCTION:**
-Seamlessly rewrite and update your PREVIOUS REPORT's findings to incorporate the new intelligence gathered from these new targets. Build a cohesive, singular intelligence picture.
+Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields below. Your output must be a single valid JSON object that merges prior and new intelligence into one cohesive picture.
                 """)
             ]
             
@@ -466,53 +470,29 @@ Seamlessly rewrite and update your PREVIOUS REPORT's findings to incorporate the
                 
                 if iteration == max_iterations - 1:
                     logger.info("infra_agent_final_iteration", iteration=iteration)
-                    messages.append(HumanMessage(content="This is the FINAL iteration. You MUST stop using tools now.\n\nBased on all the information you've gathered, provide your comprehensive analysis in valid JSON format.\n\nReturn ONLY the JSON structure as specified in the system prompt.\n\nIf you don't have enough information, provide your best analysis based on what you've gathered so far."))
+                    messages.append(HumanMessage(content=FINAL_ITERATION_PROMPT))
                     response = await base_llm.ainvoke(messages)
                 else:
                     response = await llm.ainvoke(messages)
-                
+
                 messages.append(response)
-                
+
                 if response.tool_calls:
                     job_id = state.get("job_id")
                     logger.info("infra_agent_tool_calls", iteration=iteration, num_tools=len(response.tool_calls), tools=[tc["name"] for tc in response.tool_calls])
 
-                    # Emit transparency events before dispatching
                     for tc in response.tool_calls:
                         logger.info("infra_invoking_tool", iteration=iteration, tool=tc["name"], args=tc["args"])
                         if job_id:
                             await emit_tool_call(job_id, "infrastructure", tc["name"], tc["args"])
 
-                    # Execute all tool calls in parallel
-                    async def _run_infra_tool(tc):
-                        fn = tool_dispatch.get(tc["name"])
-                        if fn is None:
-                            logger.warning("infra_unknown_tool", tool=tc["name"])
-                            return f"Error: Tool {tc['name']} not found"
-                        try:
-                            # 20s timeout prevents MCP/Network deadlock
-                            return await asyncio.wait_for(fn.ainvoke(tc["args"]), timeout=20.0)
-                        except asyncio.TimeoutError:
-                            logger.error("infra_tool_timeout", tool=tc["name"])
-                            return f"Error: Tool {tc['name']} timed out after 20 seconds."
-                        except Exception as e:
-                            logger.error("infra_tool_error", tool=tc["name"], error=str(e))
-                            return f"Error: Tool {tc['name']} failed - {str(e)}"
-
-                    results = await asyncio.gather(*[_run_infra_tool(tc) for tc in response.tool_calls])
+                    results = await run_tools_parallel(tool_dispatch, response.tool_calls, "infrastructure", logger)
 
                     for tc, result_txt in zip(response.tool_calls, results):
                         messages.append(ToolMessage(content=result_txt, tool_call_id=tc["id"]))
                         logger.info("infra_tool_response", iteration=iteration, tool=tc["name"], response_length=len(result_txt))
 
-                    # Cap context window: retain system prompt + initial task + last 10 messages.
-                    # Prevents token growth from accumulating all prior tool call history.
-                    # Start the tail at the first AIMessage to avoid orphaned ToolMessages
-                    # whose parent AIMessage was sliced off (which the API rejects).
-                    if len(messages) > 12:
-                        tail = messages[-10:]
-                        first_ai = next((i for i, m in enumerate(tail) if isinstance(m, AIMessage)), len(tail))
-                        messages = messages[:2] + tail[first_ai:]
+                    messages = cap_context_window(messages)
                 else:
                     logger.info("infra_agent_no_tools", iteration=iteration, has_content=bool(response.content))
                     final_content = response.content
@@ -544,64 +524,7 @@ Seamlessly rewrite and update your PREVIOUS REPORT's findings to incorporate the
 
             # --- Parsing & Reporting ---
             try:
-                # Handle potential list of content blocks (Gemini/Vertex)
-                if isinstance(final_content, list):
-                    # Extract text from list of dicts or strings
-                    text_parts = []
-                    for block in final_content:
-                        if isinstance(block, dict):
-                            text = block.get("text", "")
-                            if isinstance(text, (dict, list)):
-                                text_parts.append(json.dumps(text))
-                            else:
-                                text_parts.append(str(text))
-                        elif isinstance(block, str):
-                            text_parts.append(block)
-                        else:
-                            text_parts.append(str(block))
-                    final_text = "".join(text_parts).strip()
-                else:
-                    final_text = str(final_content or "").strip()
-
-                if not final_text:
-                    raise ValueError("LLM returned empty content.")
-
-                # Clean markdown
-                clean_content = final_text
-                if "```json" in clean_content:
-                    clean_content = clean_content.split("```json")[-1].split("```")[0].strip()
-                elif "```" in clean_content:
-                    clean_content = clean_content.split("```")[1].strip() if clean_content.count("```") >= 2 else clean_content
-                
-                # Try to detect if it's an array or object
-                array_start = clean_content.find("[")
-                object_start = clean_content.find("{")
-                
-                # Determine if we have an array or object (whichever comes first)
-                if array_start != -1 and (object_start == -1 or array_start < object_start):
-                    # It's a JSON array
-                    end_idx = clean_content.rfind("]")
-                    if end_idx != -1:
-                        clean_content = clean_content[array_start:end_idx+1]
-                        # Parse array and take first element
-                        parsed = json.loads(clean_content)
-                        if isinstance(parsed, list) and len(parsed) > 0:
-                            result = parsed[0]
-                        else:
-                            raise ValueError(f"JSON array is empty or invalid")
-                    else:
-                        raise ValueError(f"No closing bracket found for JSON array")
-                elif object_start != -1:
-                    # It's a JSON object
-                    end_idx = clean_content.rfind("}")
-                    if end_idx != -1:
-                        clean_content = clean_content[object_start:end_idx+1]
-                        result = json.loads(clean_content)
-                    else:
-                        raise ValueError(f"No closing brace found for JSON object")
-                else:
-                    # No JSON structure found
-                    raise ValueError(f"No JSON structure found in LLM output. Content starts with: {final_text[:100]}")
+                final_text, result = parse_llm_json(final_content)
 
                 
                 # --- Code-enforced accumulation ---
@@ -730,59 +653,23 @@ Seamlessly rewrite and update your PREVIOUS REPORT's findings to incorporate the
                 
                 relationships_data = state["metadata"]["rich_intel"]["relationships"]
                 
-                def push_to_rich_intel(rel_name, entity_type, value, source_id, attributes={}):
-                    if rel_name not in relationships_data:
-                        relationships_data[rel_name] = []
-                    
-                    # Avoid duplicates
-                    exists = any(
-                        e.get("id") == value and e.get("source_id") == source_id 
-                        for e in relationships_data[rel_name]
-                    )
-                    if not exists:
-                        relationships_data[rel_name].append({
-                            "id": value,
-                            "type": entity_type,
-                            "source_id": source_id,
-                            "attributes": attributes
-                        })
-                
                 # Sync related indicators from infrastructure analysis
+                primary_target = unique_targets[0]["value"] if unique_targets else ioc
                 for indicator in result.get("related_indicators", []):
                     try:
-                        # Parse "IP: 1.2.3.4" or "Domain: evil.com"
                         parts = indicator.split(":", 1)
                         if len(parts) == 2:
                             ind_type_raw = parts[0].strip().lower()
                             ind_value = parts[1].strip()
-                            
                             entity_type = "unknown"
-                            if "ip" in ind_type_raw: 
-                                entity_type = "ip_address"
-                            elif "domain" in ind_type_raw: 
-                                entity_type = "domain"
-                            elif "url" in ind_type_raw:
-                                entity_type = "url"
-                            elif "file" in ind_type_raw:
-                                entity_type = "file"
-                            
+                            if "ip" in ind_type_raw: entity_type = "ip_address"
+                            elif "domain" in ind_type_raw: entity_type = "domain"
+                            elif "url" in ind_type_raw: entity_type = "url"
+                            elif "file" in ind_type_raw: entity_type = "file"
                             if entity_type != "unknown":
-                                # Get primary target for source_id
-                                primary_target = unique_targets[0]["value"] if unique_targets else ioc
-                                
-                                # Infrastructure relationships
-                                push_to_rich_intel(
-                                    "related_infrastructure", 
-                                    entity_type, 
-                                    ind_value, 
-                                    primary_target,
-                                    {"infra_context": "related_indicator"}
-                                )
-                    except (KeyError, ValueError, IndexError, TypeError) as e:
-                        logger.warning("infra_indicator_parse_failed", 
-                                     indicator=ind.get("id", "unknown") if isinstance(ind, dict) else str(ind)[:50],
-                                     error=str(e))
-                        pass
+                                push_to_rich_intel(relationships_data, "related_infrastructure", entity_type, ind_value, primary_target, {"infra_context": "related_indicator"})
+                    except Exception as e:
+                        logger.warning("infra_indicator_parse_failed", indicator=str(indicator)[:50], error=str(e))
                 
                 # [RACE CONDITION FIX] Do not update final_report here.
                 # Lead Hunter will assemble it to avoid race conditions.

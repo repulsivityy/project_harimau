@@ -10,12 +10,14 @@
   },
   "dependencies": {
     "@xyflow/react": "^12.10.2",
-    "d3-force": "^3.0.0",
     "next": "16.2.2",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-markdown": "^9.0.1",
-    "dagre": "^0.8.5"
+    "dagre": "^0.8.5",
+    "@hpcc-js/wasm": "^2.20.0",
+    "d3-graphviz": "^5.6.0",
+    "d3": "^7.9.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

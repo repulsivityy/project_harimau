@@ -7,7 +7,38 @@ import { useEffect, useState, useRef, ChangeEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import { Background, BackgroundVariant, Controls, MiniMap, ReactFlow, useNodesState, useEdgesState, Handle, Position, MarkerType } from "@xyflow/react";
 import dagre from "dagre";
+
+import * as d3 from "d3";
+import { graphviz } from "d3-graphviz";
 import "@xyflow/react/dist/style.css";
+
+
+// Robust Graphviz Renderer using d3-graphviz
+const GraphvizRenderer = ({ dot }: { dot: string }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (containerRef.current && dot) {
+      try {
+        // Clean up previous rendering
+        d3.select(containerRef.current).selectAll("*").remove();
+        
+        graphviz(containerRef.current)
+          .options({
+            width: "100%",
+            height: "100%",
+            fit: true,
+            zoom: true,
+          })
+          .renderDot(dot);
+      } catch (err) {
+        console.error("Graphviz rendering failed:", err);
+      }
+    }
+  }, [dot]);
+
+  return <div ref={containerRef} className="w-full h-full min-h-[300px] flex items-center justify-center bg-surface-container-lowest" />;
+};
 
 // Custom Markdown Renderer for high readability - Adjusted for new design
 const MarkdownRenderer = ({ content }: { content: string }) => (
@@ -31,6 +62,17 @@ const MarkdownRenderer = ({ content }: { content: string }) => (
       code(props) {
         const { children, className, node, ...rest } = props;
         const match = /language-(\w+)/.exec(className || '');
+        
+        if (match && match[1] === 'dot') {
+          const dotString = String(children).replace(/\n$/, '');
+          return (
+            <div className="w-full overflow-hidden bg-surface-container-lowest border border-outline-variant/30 my-6 rounded-md shadow-inner group relative">
+              <div className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity bg-surface-container-highest/80 px-2 py-1 rounded text-[10px] font-label text-primary border border-primary/20">ATTACK_FLOW_VISUALIZATION</div>
+              <GraphvizRenderer dot={dotString} />
+            </div>
+          );
+        }
+
         const isInline = !match && !className;
         return isInline ? (
           <code className="bg-surface-container-highest text-primary px-1.5 py-0.5 text-xs font-mono" {...rest}>

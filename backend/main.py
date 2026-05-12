@@ -57,6 +57,17 @@ async def lifespan(app: FastAPI):
                 CREATE INDEX IF NOT EXISTS idx_investigations_status ON investigations(status);
                 -- Idempotent: add column to existing tables that predate this migration
                 ALTER TABLE investigations ADD COLUMN IF NOT EXISTS investigation_graph JSONB;
+
+                -- Migration for gti_score from varchar to integer
+                DO $$
+                BEGIN
+                    BEGIN
+                        ALTER TABLE investigations ALTER COLUMN gti_score TYPE INTEGER USING NULLIF(gti_score, 'N/A')::INTEGER;
+                    EXCEPTION
+                        WHEN OTHERS THEN
+                            NULL;
+                    END;
+                END $$;
             """)
         return pool
 

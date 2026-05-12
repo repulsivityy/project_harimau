@@ -61,12 +61,24 @@ async def lifespan(app: FastAPI):
                 -- Migration for gti_score from varchar to integer
                 DO $$
                 BEGIN
-                    BEGIN
-                        ALTER TABLE investigations ALTER COLUMN gti_score TYPE INTEGER USING NULLIF(gti_score, 'N/A')::INTEGER;
-                    EXCEPTION
-                        WHEN OTHERS THEN
-                            NULL;
-                    END;
+                    -- Only attempt migration if column is still character varying or text
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name = 'investigations' 
+                          AND column_name = 'gti_score' 
+                          AND data_type IN ('character varying', 'text')
+                    ) THEN
+                        BEGIN
+                            ALTER TABLE investigations 
+                            ALTER COLUMN gti_score TYPE INTEGER 
+                            USING NULLIF(NULLIF(TRIM(gti_score::text), 'N/A'), '')::INTEGER;
+                            
+                            RAISE NOTICE 'Successfully migrated gti_score to INTEGER';
+                        EXCEPTION
+                            WHEN OTHERS THEN
+                                RAISE WARNING 'gti_score migration failed: %', SQLERRM;
+                        END;
+                    END IF;
                 END $$;
             """)
         return pool

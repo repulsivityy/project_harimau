@@ -47,12 +47,15 @@ LangGraph with `MAX_DEPTH` recursion control and **Cloud SQL `AsyncPostgresSaver
 ---
 
 ## Agent Strategy
-- **Tiered Models**: Gemini 2.5 Flash (Triage) vs Gemini 2.5 Pro (Specialists + Lead Hunter).
-> In progress to migrate to Gemini 3 using Gemini Libraries
+- **Tiered Models**: Gemini 3 Flash (Triage) vs Gemini 3.1 Pro (Specialists + Lead Hunter).
 - **Division of Labor**:
-  - **Triage**: Breadth-first — 11 critical relationships, minimal enrichment, token-optimized.
-  - **Specialists**: Depth-first — full enrichment from cache, targeted pivots.
-  - **Lead Hunter**: Gap analysis, synthesis, and iterative re-tasking.
+  - **Triage**: Breadth-first analysis — fetches 11 critical relationships, performs threat assessment and narrative reporting. No longer generates subtasks; routing is handled deterministically by a Python function based on analysis results.
+  - **Lead Hunter**: The sole planning agent — consumes triage analysis and specialist findings to identify intelligence gaps and prioritize next-iteration leads. Also performs final synthesis.
+  - **Specialists**: Depth-first — full enrichment from cache, targeted pivots. Now "Iteration-Aware": prompts include context about previous findings to ensure cumulative reporting.
+- **Triage Signal Filtering**:
+  - To minimize noise and token waste, triage only passes "High-Signal" entities to the LLM and subtask generator.
+  - **Thresholds**: Entity must have a GTI verdict of `Malicious` or `Suspicious`, OR have `malicious_vendor_count > 3`.
+  - **Exemptions**: Attribution relationships (associations, campaigns, actors) always bypass filtering to preserve context.
 - **Config-Driven**: Agent parameters (`agents.yaml`) planned for Phase 7. Currently hardcoded per agent.
 - **Tool Registry**: Dynamic loading via `mcp_registry.json`.
 

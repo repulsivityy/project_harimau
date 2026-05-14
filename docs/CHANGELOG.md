@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-05-14
+
+### Added
+- **Gemini 3 Migration**: Standardized all agents on the official `ChatGoogleGenerativeAI` SDK using Gemini 3 Flash (Triage) and Gemini 3.1 Pro (Specialists/Synthesis).
+- **Deterministic Subtask Routing**: Replaced LLM-driven subtask generation in triage with a robust Python function that maps filtered indicators to appropriate specialist agents.
+- **Triage Signal Filtering**: Implemented strict entity filtering in the triage phase (verdict-based or vendor count > 3) to minimize noise and optimize token usage in downstream analysis.
+- **Iteration-Aware Specialist Prompts**: Updated Malware and Infrastructure agent prompts to include iteration context, enabling cumulative analysis across multiple hunt rounds.
+- **Graphviz Edge Grounding**: Added machine-readable edge tuples to the final synthesis context, ensuring the LLM-generated Graphviz diagrams are grounded in actual relationship data from the NetworkX cache.
+- **Confidence Calibration**: Added explicit scoring criteria to the triage prompt to improve the accuracy of the `confidence` field.
+
+### Changed
+- **Triage Refactor**: Decoupled triage analysis from task planning. Triage now focuses solely on threat assessment and narrative reporting.
+- **Lead Hunter Planning**: Centralized all iterative investigation planning into the Lead Hunter agent.
+- **Synthesis Context Optimization**: Removed redundant structured JSON dumps from the synthesis prompt to prioritize the narrative reports and graph structure.
+
+### Fixed
+- **Synthesis Diagram Hallucinations**: Fixed an issue where the synthesis LLM would invent relationships not present in the actual investigation data.
+- **Triage Metadata Bloat**: Removed stale `subtasks` field from the `triage_analysis` metadata store.
+
 ### Added
 - **Shared Agent Utilities** (`backend/utils/agent_utils.py`): Extracted common agent logic into a shared module — `parse_llm_json()`, `run_tools_parallel()`, `cap_context_window()`, and `push_to_rich_intel()`. Both specialist agents now import from this module, removing ~80 lines of duplicated code each.
 - **threat_score field**: Both Malware and Infrastructure specialist agents now output a `threat_score` field read directly from `gti_assessment.threat_score.value` in the GTI tool response. No derivation or combination — direct passthrough.

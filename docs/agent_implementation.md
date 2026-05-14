@@ -13,12 +13,12 @@ Both Malware and Infrastructure specialists follow this proven pattern:
 ### Phase 1: Initialization
 ```python
 async def specialist_node(state: AgentState):
-    cache = state.get("investigation_graph")
-    subtask = next((t for t in state.get("subtasks", []) 
-                   if t.get("agent") == "specialist_name"), None)
-    
-    # Extract target or use regex fallback
-    target = subtask.get("entity_id") or extract_from_task_text(subtask["task"])
+    # Target identification is now deterministic:
+    # Triage/Planning agents provide a clean 'entity_id' in the subtask.
+    target = subtask.get("entity_id")
+    if not target:
+        # Emergency fallback to regex if subtask schema is corrupted
+        target = extract_from_task_text(subtask.get("task", ""))
 ```
 
 ### Phase 2: Tool Definition (Deterministic Graph Update)
@@ -50,15 +50,14 @@ async with mcp_manager.get_session("gti") as session:
 
 ### Phase 3: Agent Loop (10 Iterations)
 ```python
-    from backend.utils.agent_utils import (
-        FINAL_ITERATION_PROMPT, run_tools_parallel, cap_context_window
-    )
-
-    llm = ChatVertexAI(model="gemini-2.5-flash", temperature=0)
+    llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", temperature=0)
     llm_with_tools = llm.bind_tools([tool1, tool2, ...])
 
+    # Iteration Context: informs LLM of its cumulative role in a multi-round hunt
+    iteration_context = "**Iteration Context:** You may be called multiple times..."
+
     messages = [
-        SystemMessage(content=PROMPT),
+        SystemMessage(content=PROMPT + "\n\n" + iteration_context),
         HumanMessage(content=f"Task: {task}")
     ]
     final_content = None
@@ -276,7 +275,7 @@ infra_iterations = 10  # LLM analysis loop iterations
 unique_targets_limit = 10  # Maximum entities to investigate per iteration
 
 # LLM Settings
-MODEL = "gemini-2.5-flash"
+MODEL = "gemini-3-flash-preview"
 TEMPERATURE = 0  # Deterministic analysis
 
 # Error Display
@@ -524,13 +523,13 @@ else:
     state["subtasks"] = []  # clear to stop the loop
 ```
 
-### Planning Phase (`lead_hunter_planning.py`)
-
-Runs when `iteration < 3`. Responsibilities:
+Runs when `iteration < max_iterations`. Responsibilities:
 1. Gathers triage context + specialist summaries.
 2. Queries NetworkX graph for all uninvestigated `file/ip/domain/url` nodes (up to 50).
 3. Prompts the LLM to generate new `subtasks` JSON for the next round.
 4. Returns `{"subtasks": [...]}` or `{"subtasks": []}` if no leads remain (triggers early synthesis).
+
+> **Note**: For the *initial* round (Iteration 0), subtasks are generated deterministically by `triage.py` to ensure immediate high-signal specialist fan-out. Lead Hunter takes over planning for all subsequent rounds.
 
 ### Synthesis Phase (`lead_hunter_synthesis.py`)
 

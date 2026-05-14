@@ -16,6 +16,7 @@ import "@xyflow/react/dist/style.css";
 // Robust Graphviz Renderer using d3-graphviz
 const GraphvizRenderer = ({ dot }: { dot: string }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [renderError, setRenderError] = useState<string | null>(null);
 
   useEffect(() => {
     if (containerRef.current && dot) {
@@ -29,11 +30,22 @@ const GraphvizRenderer = ({ dot }: { dot: string }) => {
             zoom: true,
           })
           .renderDot(dot);
+        setRenderError(null);
       } catch (err) {
         console.error("Graphviz rendering failed:", err);
+        setRenderError("Attack flow diagram could not be rendered.");
       }
     }
   }, [dot]);
+
+  if (renderError) {
+    return (
+      <div className="w-full h-full min-h-[300px] flex flex-col items-center justify-center bg-surface-container-lowest gap-2">
+        <span className="material-symbols-outlined text-2xl text-primary/40">error_outline</span>
+        <span className="text-outline/50 italic text-sm">{renderError}</span>
+      </div>
+    );
+  }
 
   return <div ref={containerRef} className="w-full h-full min-h-[300px] flex items-center justify-center bg-surface-container-lowest" />;
 };
@@ -162,13 +174,10 @@ const CustomNode = ({ data, style }: any) => {
         </span>
       </div>
 
-      {/* Label Below (Wiz style) */}
-      <div className="mt-2 text-[9px] font-label uppercase tracking-widest text-outline whitespace-nowrap overflow-hidden text-ellipsis max-w-[100px] text-center">
+      {/* Label Below */}
+      <div className="mt-2 text-[10px] font-label uppercase tracking-widest text-outline whitespace-nowrap overflow-hidden text-ellipsis max-w-[160px] text-center">
         {label}
       </div>
-      
-      {/* Title in Tooltip or small text */}
-      <div className="text-[7px] text-outline-variant text-center max-w-[100px] truncate">{title}</div>
     </div>
   );
 };
@@ -179,10 +188,15 @@ interface BackendNode {
   id: string;
   label: string;
   color: string;
+  entityType: string;
   size: number;
   title?: string;
   isRoot?: boolean;
   isMalicious?: boolean;
+  inReport?: boolean;
+  threatScore?: number | null;
+  verdict?: string | null;
+  vendorDetections?: string | null;
 }
 
 interface BackendEdge {
@@ -194,6 +208,36 @@ interface BackendEdge {
 interface GraphData {
   nodes: BackendNode[];
   edges: BackendEdge[];
+}
+
+// Smart label: show human-readable name based on entity type
+function getSmartLabel(node: BackendNode): string {
+  const { label, entityType, id } = node;
+  if (node.isRoot) return label; // Root keeps its formatted label
+
+  switch (entityType) {
+    case "file": {
+      // If label contains a filename in parens like "hash\n(filename.exe)", extract it
+      const parenMatch = label.match(/\(([^)]+)\)/);
+      if (parenMatch) return parenMatch[1];
+      // Otherwise show truncated hash
+      return id.length > 16 ? `${id.slice(0, 8)}...${id.slice(-6)}` : id;
+    }
+    case "url": {
+      try {
+        const url = new URL(label.startsWith("http") ? label : `https://${label}`);
+        const path = url.pathname.length > 20 ? url.pathname.slice(0, 18) + "..." : url.pathname;
+        return `${url.hostname}${path !== "/" ? path : ""}`;
+      } catch {
+        return label.length > 40 ? label.slice(0, 38) + "..." : label;
+      }
+    }
+    case "domain":
+    case "ip_address":
+      return label; // Usually short enough
+    default:
+      return label.length > 30 ? label.slice(0, 28) + "..." : label;
+  }
 }
 
 export default function InvestigatePage() {
@@ -214,6 +258,17 @@ export default function InvestigatePage() {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [modalContent, setModalContent] = useState<{ title: string; content: string } | null>(null);
   const simulationRef = useRef<any>(null);
+
+  // Graph filtering
+  const [graphFilters, setGraphFilters] = useState({
+    reportOnly: true,
+    maliciousOnly: false,
+    types: { file: true, domain: true, ip_address: true, url: true } as Record<string, boolean>,
+  });
+  const rawGraphRef = useRef<GraphData | null>(null);
+
+  // Node detail panel
+  const [selectedNode, setSelectedNode] = useState<BackendNode | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -241,77 +296,89 @@ export default function InvestigatePage() {
 
         if (graphRes.ok) {
           const graphData: GraphData = await graphRes.json();
+          rawGraphRef.current = graphData;
+
           if (graphData.nodes?.length > 0) {
             if (simulationRef.current) {
               simulationRef.current.stop();
               simulationRef.current = null;
             }
 
-            setNodes((currentNodes) => {
-              const existingPositions = new Map(currentNodes.map((n) => [n.id, n.position]));
+            // Apply filters
+            const visibleNodes = graphData.nodes.filter((n) => {
+              if (n.isRoot) return true; // Root always visible
+              if (graphFilters.reportOnly && !n.inReport) return false;
+              if (graphFilters.maliciousOnly && !n.isMalicious) return false;
+              if (!graphFilters.types[n.entityType]) return false;
+              return true;
+            });
+            const visibleIds = new Set(visibleNodes.map((n) => n.id));
+            const visibleEdges = graphData.edges.filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target));
 
-              const simNodes: any[] = graphData.nodes.map((n) => {
-                const pos = existingPositions.get(n.id);
-                const isRoot = n.isRoot === true;
-                return {
-                  id: n.id,
-                  x: pos?.x ?? (Math.random() - 0.5) * 500,
-                  y: pos?.y ?? (Math.random() - 0.5) * 500,
-                  radius: n.size,
-                  fx: isRoot ? 0 : undefined,
-                  fy: isRoot ? 0 : undefined,
-                };
-              });
+            // Build simulation nodes OUTSIDE setNodes (3.5 fix)
+            const existingPositions = new Map(nodes.map((n: any) => [n.id, n.position]));
+            const simNodes: any[] = visibleNodes.map((n) => {
+              const pos = existingPositions.get(n.id);
+              const isRoot = n.isRoot === true;
+              return {
+                id: n.id,
+                x: pos?.x ?? (Math.random() - 0.5) * 500,
+                y: pos?.y ?? (Math.random() - 0.5) * 500,
+                radius: n.size,
+                fx: isRoot ? 0 : undefined,
+                fy: isRoot ? 0 : undefined,
+              };
+            });
+            const simEdgeData = visibleEdges.map((e) => ({ source: e.source, target: e.target }));
+            const simNodeMap = new Map<string, any>(simNodes.map((n) => [n.id, n]));
 
-              const simEdges = graphData.edges.map((e) => ({ source: e.source, target: e.target }));
-              const simNodeMap = new Map<string, any>(simNodes.map((n) => [n.id, n]));
+            // Create simulation OUTSIDE state updater
+            const simulation = d3.forceSimulation(simNodes)
+              .force("link", d3.forceLink(simEdgeData).id((d: any) => d.id).distance(180).strength(0.1))
+              .force("charge", d3.forceManyBody().strength(-800).distanceMax(600))
+              .force("collide", d3.forceCollide().radius((d: any) => d.radius + 20).strength(0.9))
+              .force("x", d3.forceX(0).strength(0.05))
+              .force("y", d3.forceY(0).strength(0.05))
+              .alphaDecay(0.02)
+              .velocityDecay(0.4);
 
-              const simulation = d3.forceSimulation(simNodes)
-                .force("link", d3.forceLink(simEdges).id((d: any) => d.id).distance(180).strength(0.1))
-                .force("charge", d3.forceManyBody().strength(-800).distanceMax(600))
-                .force("collide", d3.forceCollide().radius((d: any) => d.radius + 20).strength(0.9))
-                .force("x", d3.forceX(0).strength(0.05))
-                .force("y", d3.forceY(0).strength(0.05))
-                .alphaDecay(0.02)
-                .velocityDecay(0.4);
+            // Pre-warm simulation
+            simulation.stop();
+            for (let i = 0; i < 120; i++) simulation.tick();
 
-              simulation.stop();
-              for (let i = 0; i < 120; i++) simulation.tick();
+            // Set initial node positions (pure state update, no side-effects)
+            setNodes(visibleNodes.map((n) => {
+              const sim = simNodeMap.get(n.id)!;
+              return {
+                id: n.id,
+                type: "custom",
+                position: { x: sim.x, y: sim.y },
+                data: { label: getSmartLabel(n), title: n.title, isRoot: n.isRoot, isMalicious: n.isMalicious, accent: n.color },
+                style: {
+                  background: "transparent",
+                  border: "none",
+                  padding: 0,
+                  width: n.size * 2,
+                  height: n.size * 2,
+                  overflow: "visible",
+                },
+              };
+            }));
 
-              simulation.restart();
-              simulation.on("tick", () => {
-                setNodes((nds) =>
-                  nds.map((node) => {
-                    const sim = simNodeMap.get(node.id);
-                    if (!sim) return node;
-                    return { ...node, position: { x: sim.x ?? 0, y: sim.y ?? 0 } };
-                  })
-                );
-              });
-
-              simulationRef.current = simulation;
-
-              return graphData.nodes.map((n) => {
-                const sim = simNodeMap.get(n.id)!;
-                const isRoot = n.isRoot === true;
-                return {
-                  id: n.id,
-                  type: "custom",
-                  position: { x: sim.x, y: sim.y },
-                  data: { label: n.label, title: n.title, isRoot, isMalicious: n.isMalicious, accent: n.color },
-                  style: {
-                    background: "transparent",
-                    border: "none",
-                    padding: 0,
-                    width: n.size * 2,
-                    height: n.size * 2,
-                    overflow: "visible",
-                  },
-                };
-              });
+            // Restart with tick handler (outside setNodes)
+            simulationRef.current = simulation;
+            simulation.restart();
+            simulation.on("tick", () => {
+              setNodes((nds) =>
+                nds.map((node) => {
+                  const sim = simNodeMap.get(node.id);
+                  if (!sim) return node;
+                  return { ...node, position: { x: sim.x ?? 0, y: sim.y ?? 0 } };
+                })
+              );
             });
 
-            const calculatedEdges = graphData.edges.map((edge, index) => ({
+            const calculatedEdges = visibleEdges.map((edge, index) => ({
               id: `e-${index}`,
               source: edge.source,
               target: edge.target,
@@ -406,6 +473,87 @@ export default function InvestigatePage() {
       simulationRef.current?.stop();
     };
   }, [id]);
+
+  // Re-apply filters when graphFilters change (frontend-only re-filter)
+  useEffect(() => {
+    const graphData = rawGraphRef.current;
+    if (!graphData || graphData.nodes.length === 0) return;
+
+    if (simulationRef.current) {
+      simulationRef.current.stop();
+      simulationRef.current = null;
+    }
+
+    const visibleNodes = graphData.nodes.filter((n) => {
+      if (n.isRoot) return true;
+      if (graphFilters.reportOnly && !n.inReport) return false;
+      if (graphFilters.maliciousOnly && !n.isMalicious) return false;
+      if (!graphFilters.types[n.entityType]) return false;
+      return true;
+    });
+    const visibleIds = new Set(visibleNodes.map((n) => n.id));
+    const visibleEdges = graphData.edges.filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target));
+
+    const simNodes: any[] = visibleNodes.map((n) => ({
+      id: n.id,
+      x: (Math.random() - 0.5) * 500,
+      y: (Math.random() - 0.5) * 500,
+      radius: n.size,
+      fx: n.isRoot ? 0 : undefined,
+      fy: n.isRoot ? 0 : undefined,
+    }));
+    const simEdgeData = visibleEdges.map((e) => ({ source: e.source, target: e.target }));
+    const simNodeMap = new Map<string, any>(simNodes.map((n) => [n.id, n]));
+
+    const simulation = d3.forceSimulation(simNodes)
+      .force("link", d3.forceLink(simEdgeData).id((d: any) => d.id).distance(180).strength(0.1))
+      .force("charge", d3.forceManyBody().strength(-800).distanceMax(600))
+      .force("collide", d3.forceCollide().radius((d: any) => d.radius + 20).strength(0.9))
+      .force("x", d3.forceX(0).strength(0.05))
+      .force("y", d3.forceY(0).strength(0.05))
+      .alphaDecay(0.02)
+      .velocityDecay(0.4);
+
+    simulation.stop();
+    for (let i = 0; i < 120; i++) simulation.tick();
+
+    setNodes(visibleNodes.map((n) => {
+      const sim = simNodeMap.get(n.id)!;
+      return {
+        id: n.id,
+        type: "custom",
+        position: { x: sim.x, y: sim.y },
+        data: { label: getSmartLabel(n), title: n.title, isRoot: n.isRoot, isMalicious: n.isMalicious, accent: n.color },
+        style: { background: "transparent", border: "none", padding: 0, width: n.size * 2, height: n.size * 2, overflow: "visible" },
+      };
+    }));
+
+    simulationRef.current = simulation;
+    simulation.restart();
+    simulation.on("tick", () => {
+      setNodes((nds) =>
+        nds.map((node) => {
+          const sim = simNodeMap.get(node.id);
+          if (!sim) return node;
+          return { ...node, position: { x: sim.x ?? 0, y: sim.y ?? 0 } };
+        })
+      );
+    });
+
+    const calculatedEdges = visibleEdges.map((edge, index) => ({
+      id: `e-${index}`,
+      source: edge.source,
+      target: edge.target,
+      label: edge.label,
+      type: "straight",
+      style: { stroke: "rgba(0, 251, 251, 0.2)", strokeWidth: 1 },
+      labelStyle: { fill: "rgba(255, 124, 245, 0.6)", fontSize: "8px", fontFamily: "var(--font-space-grotesk)", textTransform: "uppercase" },
+      labelBgStyle: { fill: "var(--surface-container-lowest)", fillOpacity: 0.8 },
+      labelBgPadding: [2, 4] as [number, number],
+      markerEnd: { type: MarkerType.ArrowClosed, width: 8, height: 8, color: "rgba(0, 251, 251, 0.4)" },
+    }));
+    setEdges(calculatedEdges);
+  }, [graphFilters]);
 
   const tiles = [
     {
@@ -661,11 +809,50 @@ export default function InvestigatePage() {
                 <div className="absolute top-4 left-4 right-4 z-10 flex justify-between items-start">
                   <div>
                     <h3 className="font-label text-outline-variant uppercase text-xs tracking-widest">Link Analysis Graph</h3>
-                    <p className="text-[10px] text-slate-500">RELATIONSHIP MAPPING [v4.1]</p>
+                    <p className="text-[10px] text-slate-500">RELATIONSHIP MAPPING [v4.2]</p>
                   </div>
-                  <button onClick={() => setModalContent({ title: "Link Analysis Graph", content: "" })} className="text-slate-500 hover:text-[#00f7ff] cursor-pointer">
-                    <span className="material-symbols-outlined text-sm">fullscreen</span>
-                  </button>
+                  <div className="flex items-center gap-3">
+                    {/* Filter Controls */}
+                    <div className="flex items-center gap-2 bg-[#0e0e10]/80 backdrop-blur-sm border border-slate-800 px-3 py-1.5 text-[10px] font-label uppercase tracking-widest">
+                      <label className="flex items-center gap-1 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={graphFilters.reportOnly}
+                          onChange={(e) => setGraphFilters((f) => ({ ...f, reportOnly: e.target.checked }))}
+                          className="accent-[#00f7ff] w-3 h-3"
+                        />
+                        <span className="text-outline hover:text-foreground transition-colors">Relevant</span>
+                      </label>
+                      <span className="text-slate-700">|</span>
+                      <label className="flex items-center gap-1 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={graphFilters.maliciousOnly}
+                          onChange={(e) => setGraphFilters((f) => ({ ...f, maliciousOnly: e.target.checked }))}
+                          className="accent-[#FF4B4B] w-3 h-3"
+                        />
+                        <span className="text-outline hover:text-foreground transition-colors">Malicious</span>
+                      </label>
+                      <span className="text-slate-700">|</span>
+                      {Object.entries({ file: "🔒", domain: "🌐", ip_address: "📡", url: "🔗" }).map(([type, icon]) => (
+                        <label key={type} className="flex items-center gap-0.5 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={graphFilters.types[type] ?? true}
+                            onChange={(e) => setGraphFilters((f) => ({
+                              ...f,
+                              types: { ...f.types, [type]: e.target.checked },
+                            }))}
+                            className="accent-[#00f7ff] w-3 h-3"
+                          />
+                          <span title={type.replace("_", " ")}>{icon}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <button onClick={() => setModalContent({ title: "Link Analysis Graph", content: "" })} className="text-slate-500 hover:text-[#00f7ff] cursor-pointer">
+                      <span className="material-symbols-outlined text-sm">fullscreen</span>
+                    </button>
+                  </div>
                 </div>
                 <div className="w-full h-full pt-16">
                   {loading ? (
@@ -676,9 +863,14 @@ export default function InvestigatePage() {
                       fitView
                       nodes={nodes}
                       nodesConnectable={false}
+                      nodeOrigin={[0.5, 0.5]}
                       nodeTypes={nodeTypes}
                       onEdgesChange={onEdgesChange}
                       onNodesChange={onNodesChange}
+                      onNodeClick={(_event, node) => {
+                        const raw = rawGraphRef.current?.nodes.find((n) => n.id === node.id);
+                        if (raw) setSelectedNode(raw);
+                      }}
                     >
                       <Background color="var(--outline-variant)" gap={20} size={0.5} variant={BackgroundVariant.Lines} />
                       <Controls className="!bg-surface-container-highest !border-outline-variant !shadow-none !rounded-none" />
@@ -690,6 +882,93 @@ export default function InvestigatePage() {
                     </ReactFlow>
                   )}
                 </div>
+
+                {/* Node Detail Panel (slide-in) */}
+                {selectedNode && (
+                  <div className="absolute top-0 right-0 h-full w-[320px] bg-[#16161a]/95 backdrop-blur-md border-l border-slate-800 z-20 flex flex-col animate-slide-in-right">
+                    <div className="p-4 border-b border-slate-800 flex justify-between items-center">
+                      <h4 className="font-headline text-sm font-bold uppercase text-[#00f7ff] truncate">
+                        {selectedNode.entityType?.replace("_", " ") || "Entity"} Details
+                      </h4>
+                      <button onClick={() => setSelectedNode(null)} className="text-slate-500 hover:text-[#00f7ff]">
+                        <span className="material-symbols-outlined text-sm">close</span>
+                      </button>
+                    </div>
+                    <div className="flex-1 p-4 overflow-y-auto custom-scrollbar space-y-4">
+                      {/* Entity ID */}
+                      <div>
+                        <span className="text-[10px] text-slate-500 uppercase block mb-1">Entity ID</span>
+                        <div className="flex items-center gap-2">
+                          <code className="text-xs text-secondary font-mono break-all flex-1 bg-[#0e0e10] p-2 border border-slate-800">
+                            {selectedNode.id}
+                          </code>
+                          <button
+                            onClick={() => navigator.clipboard.writeText(selectedNode.id)}
+                            className="text-slate-500 hover:text-[#00f7ff] flex-shrink-0"
+                            title="Copy to clipboard"
+                          >
+                            <span className="material-symbols-outlined text-sm">content_copy</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Verdict & Score */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="bg-[#0e0e10] p-2 border border-slate-800">
+                          <span className="text-[10px] text-slate-500 uppercase block">Verdict</span>
+                          <span className={`font-mono text-sm font-bold ${
+                            selectedNode.verdict?.toLowerCase().includes("malicious") ? "text-primary" :
+                            selectedNode.verdict?.toLowerCase().includes("suspicious") ? "text-amber-400" :
+                            "text-secondary"
+                          }`}>
+                            {selectedNode.verdict || "N/A"}
+                          </span>
+                        </div>
+                        <div className="bg-[#0e0e10] p-2 border border-slate-800">
+                          <span className="text-[10px] text-slate-500 uppercase block">Threat Score</span>
+                          <span className={`font-mono text-sm font-bold ${
+                            (selectedNode.threatScore ?? 0) >= 70 ? "text-primary" :
+                            (selectedNode.threatScore ?? 0) >= 40 ? "text-amber-400" :
+                            "text-secondary"
+                          }`}>
+                            {selectedNode.threatScore ?? "N/A"}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Vendor Detections */}
+                      {selectedNode.vendorDetections && (
+                        <div className="bg-[#0e0e10] p-2 border border-slate-800">
+                          <span className="text-[10px] text-slate-500 uppercase block">Vendor Detections</span>
+                          <span className="font-mono text-sm text-primary font-bold">{selectedNode.vendorDetections}</span>
+                        </div>
+                      )}
+
+                      {/* Tooltip Details */}
+                      {selectedNode.title && (
+                        <div>
+                          <span className="text-[10px] text-slate-500 uppercase block mb-1">Analysis Details</span>
+                          <div className="bg-[#0e0e10] p-3 border border-slate-800 text-xs text-outline/80 font-mono whitespace-pre-wrap leading-relaxed">
+                            {selectedNode.title}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Flags */}
+                      <div className="flex flex-wrap gap-2">
+                        {selectedNode.isMalicious && (
+                          <span className="bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 text-[10px] font-label uppercase">Malicious</span>
+                        )}
+                        {selectedNode.isRoot && (
+                          <span className="bg-secondary/10 text-secondary border border-secondary/20 px-2 py-0.5 text-[10px] font-label uppercase">Root IOC</span>
+                        )}
+                        {selectedNode.inReport && (
+                          <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-label uppercase">In Report</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </section>
 
               {/* Agent Activity Log */}

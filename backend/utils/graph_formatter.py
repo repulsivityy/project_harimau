@@ -29,11 +29,11 @@ def format_graph_from_cache(job_id: str, job: dict) -> dict:
                 nodes=stats["nodes"], edges=stats["edges"])
 
     COLOR_MAP = {
-        "file":       "#9B59B6",
-        "domain":     "#E67E22",
-        "ip_address": "#E67E22",
-        "url":        "#2ECC71",
-        "collection": "#3498DB",
+        "file":       "#9B59B6",  # Purple
+        "domain":     "#E67E22",  # Orange
+        "ip_address": "#3498DB",  # Blue (differentiated from domain)
+        "url":        "#2ECC71",  # Green
+        "collection": "#F39C12",  # Amber
     }
 
     nodes = []
@@ -139,16 +139,23 @@ def format_graph_from_cache(job_id: str, job: dict) -> dict:
             (str(node_id).lower() in full_report_text)
         )
 
+        # ── Vendor detection stats for detail panel ─────────────────────
+        total_vendors = sum(analysis_stats.get(k, 0) for k in ("malicious", "suspicious", "undetected", "harmless")) if isinstance(analysis_stats, dict) else 0
+
         included_node_ids.add(node_id)
         nodes.append({
-            "id":          node_id,
-            "label":       label,
-            "color":       "#FF4B4B" if is_root else COLOR_MAP.get(etype, "#95A5A6"),
-            "size":        35 if is_root else 20,
-            "title":       tooltip,
-            "isRoot":      is_root,
-            "isMalicious": is_malicious,
-            "inReport":    is_relevant,
+            "id":              node_id,
+            "label":           label,
+            "color":           "#FF4B4B" if is_root else COLOR_MAP.get(etype, "#95A5A6"),
+            "entityType":      etype,
+            "size":            35 if is_root else 20,
+            "title":           tooltip,
+            "isRoot":          is_root,
+            "isMalicious":     is_malicious,
+            "inReport":        is_relevant,
+            "threatScore":     threat_score,
+            "verdict":         verdict,
+            "vendorDetections": f"{malicious_count}/{total_vendors}" if total_vendors else None,
         })
 
     # ── Edges ──────────────────────────────────────────────────────────────

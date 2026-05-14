@@ -229,3 +229,19 @@ body {
 .ambient-glow-secondary {
   box-shadow: 0 0 40px 10px rgba(0, 251, 251, 0.08);
 }
+
+/* Node Detail Panel Slide-in */
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.25s ease-out;
+}

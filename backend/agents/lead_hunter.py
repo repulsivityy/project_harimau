@@ -1,5 +1,5 @@
 import os
-from langchain_google_vertexai import ChatVertexAI
+#from langchain_google_vertexai import ChatVertexAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from backend.config import DEFAULT_HUNT_ITERATIONS

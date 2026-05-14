@@ -3,7 +3,8 @@ import os
 import json
 from contextlib import AsyncExitStack
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
-from langchain_google_vertexai import ChatVertexAI
+#from langchain_google_vertexai import ChatVertexAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.tools import tool
 
 from backend.graph.state import AgentState
@@ -432,7 +433,14 @@ async def infrastructure_node(state: AgentState):
                 shodan_ip_lookup, shodan_dns_lookup, shodan_reverse_dns_lookup,
             ]
             tool_dispatch = {t.name: t for t in tools}
-            base_llm = ChatVertexAI(model="gemini-2.5-flash", temperature=0.0, project=project_id, location=location)
+            base_llm = ChatGoogleGenerativeAI(
+                model="gemini-3.1-pro-preview",
+                temperature=0.0,
+                project=project_id,
+                location="global",
+                thinking_level="medium",
+                include_thoughts=True
+            )
             llm = base_llm.bind_tools(tools)
             
             # Format Triage Context for LLM

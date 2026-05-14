@@ -143,13 +143,16 @@ Provide a final assessment of the investigation including any recommendations.
 *   Include 3-5 hunt hypotheses to hunt for the same threat actor in the future.
 
 ### 10. Appendix
-*   Include all IOCs in a table format 
-| IOC Type | Value | Notes | Confidence |
-| --- | --- | --- | --- |
-| Domain | example.com | C2 Domain | Medium |
-| IP Address | [IP_ADDRESS] | Open Directory to drop files | Low |
-| URL | https://example.com | Phishing URL | High |
-| File Hash | example.exe | Ransomware | High |
+*   Include all IOCs in a JSON array wrapped inside an `iocs` code block. Do NOT use a Markdown table.
+*   Follow this exact format:
+```iocs
+[
+  { "type": "Domain", "value": "example.com", "notes": "C2 Domain", "confidence": "Medium" },
+  { "type": "IP Address", "value": "1.2.3.4", "notes": "Open Directory to drop files", "confidence": "Low" },
+  { "type": "URL", "value": "https://example.com", "notes": "Phishing URL", "confidence": "High" },
+  { "type": "File Hash", "value": "example.exe", "notes": "Ransomware", "confidence": "High" }
+]
+```
 
 ## Output Instructions:
 - Return ONLY the Markdown text.

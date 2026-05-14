@@ -50,6 +50,54 @@ const GraphvizRenderer = ({ dot }: { dot: string }) => {
   return <div ref={containerRef} className="w-full h-full min-h-[300px] flex items-center justify-center bg-surface-container-lowest" />;
 };
 
+const IocTableRenderer = ({ jsonString }: { jsonString: string }) => {
+  try {
+    const data = JSON.parse(jsonString);
+    if (!Array.isArray(data) || data.length === 0) return null;
+    
+    return (
+      <div className="overflow-x-auto my-6 border border-outline-variant/30 rounded bg-surface-container-lowest shadow-inner relative group">
+         <div className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity bg-surface-container-highest/80 px-2 py-1 rounded text-[10px] font-label text-primary border border-primary/20">IOC_DATA_TABLE</div>
+        <table className="w-full text-left border-collapse text-xs">
+          <thead className="bg-surface-container-high text-secondary">
+            <tr>
+              <th className="p-3 font-semibold tracking-wide border-b border-outline-variant/30 whitespace-nowrap">TYPE</th>
+              <th className="p-3 font-semibold tracking-wide border-b border-outline-variant/30 whitespace-nowrap">VALUE</th>
+              <th className="p-3 font-semibold tracking-wide border-b border-outline-variant/30 whitespace-nowrap">NOTES</th>
+              <th className="p-3 font-semibold tracking-wide border-b border-outline-variant/30 whitespace-nowrap">CONFIDENCE</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((row, i) => (
+              <tr key={i} className="hover:bg-surface-container-highest/50 transition-colors">
+                <td className="p-3 border-b border-surface-container text-outline font-mono text-[10px] uppercase">{row.type}</td>
+                <td className="p-3 border-b border-surface-container text-primary font-mono">{row.value}</td>
+                <td className="p-3 border-b border-surface-container text-outline/80">{row.notes}</td>
+                <td className="p-3 border-b border-surface-container">
+                  <span className={`px-2 py-0.5 rounded text-[10px] uppercase tracking-widest ${
+                    row.confidence?.toLowerCase() === 'critical' ? 'bg-error/20 text-error border border-error/30' :
+                    row.confidence?.toLowerCase() === 'high' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' :
+                    row.confidence?.toLowerCase() === 'medium' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
+                    'bg-surface-container-high text-outline border border-outline/30'
+                  }`}>
+                    {row.confidence}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  } catch (err) {
+    return (
+      <div className="bg-surface-container-low p-4 font-mono text-xs text-error border border-error/30 rounded">
+        [SYSTEM_ERROR] Failed to parse IOC data block.
+      </div>
+    );
+  }
+};
+
 // Custom Markdown Renderer for high readability - Adjusted for new design
 const MarkdownRenderer = ({ content }: { content: string }) => (
   <ReactMarkdown
@@ -81,6 +129,10 @@ const MarkdownRenderer = ({ content }: { content: string }) => (
               <GraphvizRenderer dot={dotString} />
             </div>
           );
+        }
+
+        if (match && match[1] === 'iocs') {
+          return <IocTableRenderer jsonString={String(children)} />;
         }
 
         const isInline = !match && !className;

@@ -24,6 +24,19 @@ IMPORTANT_RELATIONSHIPS = {
 MALWARE_TYPES = {"file"}
 INFRA_TYPES = {"domain", "ip_address", "url"}
 
+
+def _node_label(node_id: str, data: dict) -> str:
+    """Human-readable label for a graph node. Used in graph summary and edge tuples."""
+    entity_type = data.get("entity_type", "unknown")
+    if entity_type == "file":
+        return data.get("meaningful_name") or (data.get("names") or [node_id])[0]
+    if entity_type == "url":
+        return data.get("last_final_url") or data.get("url") or node_id
+    if entity_type == "domain":
+        return data.get("host_name") or node_id
+    return data.get("name") or data.get("title") or node_id
+
+
 # --- PROMPT: FINAL SYNTHESIS ---
 LEAD_HUNTER_SYNTHESIS_PROMPT = """
 You are the Lead Threat Hunter and Investigation Commander.
@@ -182,13 +195,8 @@ def _build_specialist_context(state: AgentState) -> str:
             sections.append("Full Report:")
             sections.append(markdown_report)
 
-        # Append only the compact structured fields (not markdown_report — already above)
-        structured = {
-            k: v for k, v in res.items()
-            if k not in ("markdown_report", "summary", "verdict") and v not in (None, [], {}, "")
-        }
-        if structured:
-            sections.append(f"Structured Data: {json.dumps(structured, indent=1)}")
+        # Structured JSON dump removed — the markdown report already contains
+        # the full analysis and duplicating it wastes tokens.
 
     return "\n".join(sections)
 
@@ -210,15 +218,7 @@ def _build_graph_summary(state: AgentState) -> str:
     bridges_malware_infra = set()
     relationship_counts = {}
 
-    def _node_label(node_id: str, data: dict) -> str:
-        entity_type = data.get("entity_type", "unknown")
-        if entity_type == "file":
-            return data.get("meaningful_name") or (data.get("names") or [node_id])[0]
-        if entity_type == "url":
-            return data.get("last_final_url") or data.get("url") or node_id
-        if entity_type == "domain":
-            return data.get("host_name") or node_id
-        return data.get("name") or data.get("title") or node_id
+    # _node_label is now a module-level function (reused by _build_edge_tuples)
 
     for node_id, data in cache.graph.nodes(data=True):
         entity_type = data.get("entity_type", "unknown")
@@ -357,10 +357,40 @@ def _build_graph_summary(state: AgentState) -> str:
         )
     )
 
+def _build_edge_tuples(state: AgentState) -> str:
+    """
+    Generate a machine-readable edge list for grounding the Graphviz diagram.
+    Each line is a DOT-compatible edge: "source_label" -> "target_label" [label="relationship"]
+    The LLM can use these directly instead of reconstructing edges from prose.
+    """
+    graph_state = state.get("investigation_graph")
+    if not graph_state:
+        return "No graph data available."
+
+    cache = InvestigationCache(graph_state)
+    lines = []
+    seen = set()
+
+    for src, tgt, data in cache.graph.edges(data=True):
+        rel = data.get("relationship", "related_to")
+        key = (src, tgt, rel)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        src_data = cache.graph.nodes.get(src, {})
+        tgt_data = cache.graph.nodes.get(tgt, {})
+        src_label = _node_label(src, src_data)
+        tgt_label = _node_label(tgt, tgt_data)
+        lines.append(f'  "{src_label}" -> "{tgt_label}" [label="{rel}"];')
+
+    return "\n".join(lines[:40])  # Cap at 40 edges to limit token cost
+
+
 async def generate_final_report_llm(state: AgentState, llm) -> str:
     """
     Executes the final synthesis logic:
-    1. Gathers context (Triage + Specialist Reports).
+    1. Gathers context (Triage + Specialist Reports + Graph).
     2. Prompts the LLM to write the final markdown report.
     """
     job_id = state.get("job_id")
@@ -369,10 +399,11 @@ async def generate_final_report_llm(state: AgentState, llm) -> str:
     triage_context = _build_triage_context(state)
     specialist_context = _build_specialist_context(state)
     graph_summary = _build_graph_summary(state)
-    
+    edge_tuples = _build_edge_tuples(state)
+
     # Format context
     context = f"""
-    Use ALL three input sections together when writing the final synthesis.
+    Use ALL input sections together when writing the final synthesis.
     
     **Triage Context:**
     {triage_context}
@@ -382,6 +413,9 @@ async def generate_final_report_llm(state: AgentState, llm) -> str:
 
     **Investigation Graph Summary:**
     {graph_summary}
+
+    **Graph Edges (use these for your Graphviz diagram — do NOT invent edges):**
+    {edge_tuples}
     """
 
     messages = [

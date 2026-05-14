@@ -17,10 +17,22 @@ from backend.utils.transparency import emit_tool_call, emit_reasoning
 logger = get_logger("agent_triage")
 
 # Graph growth control
-MAX_ENTITIES_PER_RELATIONSHIP = 10  # Increase to fetch more entities per relationship
-MAX_TOTAL_ENTITIES = 150  # Increased from 50 to accommodate 52 relationship types
-MIN_THREAT_SCORE = 0  # Roadmap: Smart filtering by threat score (Phase 6)
-REQUIRE_MALICIOUS_VERDICT = False  # Roadmap: Smart filtering by verdict (Phase 6)
+MAX_ENTITIES_PER_RELATIONSHIP = 10  # Max entities per relationship sent to LLM
+MAX_TOTAL_ENTITIES = 150  # Hard cap (not yet enforced — tracked for future use)
+
+# Signal filter thresholds for LLM context (NetworkX graph is always fully populated)
+SIGNAL_MALICIOUS_VENDORS = 3   # Include if malicious vendor count EXCEEDS this value
+
+# Relationship types whose entities are attribution/context objects (campaigns, actors,
+# malware families) that do NOT have gti_assessment or last_analysis_stats.
+# These are always passed through to the LLM without signal filtering.
+UNFILTERED_RELATIONSHIPS = {
+    "associations",
+    "malware_families",
+    "attack_techniques",
+    "campaigns",
+    "related_threat_actors",
+}
 
 # Define priority relationships for each IOC type
 # Based on alpha version patterns + analytical depth requirements
@@ -93,75 +105,43 @@ TRIAGE_ANALYSIS_PROMPT = """
 You are a Senior Threat Intelligence Analyst performing comprehensive TRIAGE analysis.
 
 **Your Role:**
-You are the FIRST analyst to review this IOC. Your analysis will guide specialist teams.
-You must provide actionable intelligence and clear direction for deep-dive investigations.
+You are the FIRST analyst to review this IOC. Your analysis will be used to decide
+which specialist teams are dispatched and what they focus on.
+You must provide a clear threat assessment, actionable key findings, and identify
+which related entities are most important for deeper investigation.
 
 **Available Intelligence:**
 You have COMPLETE data from Google Threat Intelligence:
 - Base threat indicators (verdict, score, stats)
 - ALL priority relationships have been fetched and provided
 - Full context about associated threats, infrastructure, and campaigns
+- NOTE: Relationship entities have been pre-filtered to only include indicators
+  with a malicious/suspicious verdict or significant vendor detections.
 
 **Your Tasks:**
 
 1. **THREAT ASSESSMENT**
    - Determine overall verdict (Malicious/Suspicious/Undetected/Benign)
    - Assess confidence level (High/Medium/Low)
-   - Identify threat severity
+   - Identify threat severity (Critical/High/Medium/Low)
 
-2. **FIRST-LEVEL ANALYSIS** (This is critical!)
-   - Identify key threat indicators from relationships
+2. **FIRST-LEVEL ANALYSIS**
+   - Identify key threat indicators from the provided relationships
    - Recognize attack patterns (if malicious)
    - Map threat landscape (campaigns, actors, families)
-   - Identify critical infrastructure elements
-   - Flag high-priority entities for specialist investigation
+   - Identify critical infrastructure elements (C2 domains/IPs, drop servers)
+   - Flag high-priority entities in `priority_entities`
 
 3. **CONTEXTUALIZATION**
    - Link to known campaigns/actors from associations
    - Identify behavioral patterns from relationship data
    - Assess operational context (is this active? recent?)
-   - Determine attack stage (recon, delivery, exploitation, etc.)
+   - Determine attack stage (recon, delivery, exploitation, C2, etc.)
 
-4. **ROUTING & PRIORITIZATION**
-   - Generate specific, actionable subtasks for specialists
-   - Prioritize what specialists should focus on first
-   - Provide context specialists need (don't make them rediscover)
-   - Include key entity IDs specialists should examine
-   - YOU MUST ONLY ASSIGN TASKS TO AVAILABLE AGENTS.
-   - **AVAILABLE AGENTS:**
-     * `malware_specialist`: For file analysis, YARA scanning, and code reverse engineering.
-     * `infrastructure_specialist`: For IP/Domain pivots, passive DNS, and mapping hosting infrastructure.
-   - **CRITICAL**: Create SEPARATE subtasks for each distinct entity you want investigated.
-     * BAD: "Investigate IPs 1.2.3.4, 5.6.7.8, and domain evil.com"
-     * GOOD:
-       - Subtask 1: "Investigate IP 1.2.3.4"
-       - Subtask 2: "Investigate IP 5.6.7.8"
-       - Subtask 3: "Investigate domain evil.com"
-   - If no specialist is needed, leave "subtasks" empty.
-
-**Analysis Framework:**
-
-For MALICIOUS files:
-- What does it do? (dropped_files, contacted_* relationships)
-- Who made it? (associations → campaigns/actors)
-- How does it work? (attack_techniques)
-- Where is the infrastructure? (contacted_domains/ips)
-- **ACTION**: ALWAYS assign the root file hash to `malware_specialist` for deep behavioral and capability analysis.
-- **ACTION**: For EACH entity in `contacted_domains`, `contacted_ips`, `contacted_urls`, `embedded_domains`, or `embedded_ips` relationships — create a SEPARATE `infrastructure_specialist` subtask. Do NOT skip this even if the malware specialist will also call network activity tools. The infrastructure specialist has Shodan, WebRisk, and passive DNS tools that the malware specialist does NOT have.
-- **ACTION**: For EACH entity in `dropped_files` relationships — create a SEPARATE `malware_specialist` subtask.
-- Do NOT bundle multiple entities into a single subtask. One entity = one subtask.
-
-For MALICIOUS infrastructure (IP/Domain):
-- What's hosted here? (downloaded_files, urls)
-- Who connects to it? (communicating_files)
-- What's the infrastructure map? (resolutions, subdomains)
-- What campaigns use it? (associations)
-- **ACTION**: Assign to `infrastructure_specialist`.
-
-For SUSPICIOUS/UNDETECTED:
-- What's uncertain? (missing data, conflicting signals)
-- What needs verification? (specific relationships to check)
-- What's the risk if true positive? (potential impact)
+**Confidence Calibration:**
+- **High**: 10+ vendor detections AND threat_score > 70 AND known malware family identified
+- **Medium**: Some detections OR GTI flags it BUT missing corroborating signals
+- **Low**: Few/no detections, relies on heuristic or contextual signals only
 
 **Output Format (JSON):**
 {
@@ -170,15 +150,15 @@ For SUSPICIOUS/UNDETECTED:
     "confidence": "High|Medium|Low",
     "severity": "Critical|High|Medium|Low",
     "threat_score": <number>,
-    
+
     "executive_summary": "One to three paragraphs: verdict + key findings + recommended action",
-    
+
     "key_findings": [
         "Finding 1 with specific entity IDs/names",
         "Finding 2 with context from relationships",
         "Finding 3 with threat actor/campaign attribution"
     ],
-    
+
     "threat_context": {{
         "campaigns": ["Campaign names from associations"],
         "threat_actors": ["Actor names from associations"],
@@ -186,32 +166,23 @@ For SUSPICIOUS/UNDETECTED:
         "attack_techniques": ["MITRE ATT&CK IDs/names"],
         "infrastructure_notes": "Brief description of C2/hosting infrastructure"
     }},
-    
+
     "priority_entities": [
         {{
             "entity_id": "specific ID from relationships",
-            "entity_type": "file|domain|ip",
-            "reason": "Why this entity is important",
+            "entity_type": "file|domain|ip_address|url",
+            "reason": "Why this entity is important for specialist investigation",
             "relationship": "Which relationship it came from"
         }}
     ],
-    
-    "subtasks": [
-        {{
-            "agent": "malware_specialist",
-            "priority": "high|medium|low",
-            "entity_id": "Exact ID of the entity to analyze (e.g. 1.2.3.4, malicious.com, or hash)",
-            "task": "Specific task with entity IDs and focus areas",
-            "context": "What you found that makes this task necessary"
-        }
-    ],
-    
+
     "investigation_notes": "Additional context or caveats for specialists"
 }
 
 **OUTPUT INSTRUCTIONS:**
 - Return ONLY valid JSON (no additional text before or after)
 - Do not include markdown formatting in the output
+- Only reference entities that appear in the provided relationship data — do NOT hallucinate IOCs
 """
 
 
@@ -247,6 +218,87 @@ def extract_triage_data(data: dict, ioc_type: str) -> dict:
     triage_data["crowdsourced_ai_results"] = get_val(data, "attributes.crowdsourced_ai_results")
 
     return triage_data
+
+# --- DETERMINISTIC SUBTASK GENERATION ---
+# Entity types that route to each specialist agent
+MALWARE_ENTITY_TYPES = {"file"}
+INFRA_ENTITY_TYPES = {"domain", "ip_address", "url"}
+
+def generate_initial_subtasks(
+    ioc: str,
+    ioc_type: str,
+    relationships_data: dict,
+    priority_entities: list | None = None,
+) -> list[dict]:
+    """
+    Deterministically generates first-round subtasks from the filtered
+    relationship data. Only entities that passed the signal filter
+    (malicious/suspicious verdict or >3 malicious vendors) are present
+    in relationships_data, so every subtask targets a genuine indicator.
+
+    Routing rules:
+      - file entities      → malware_specialist
+      - domain/ip/url      → infrastructure_specialist
+      - root IOC           → appropriate specialist (always included)
+
+    If the triage LLM returned priority_entities, those are preferred
+    (they carry analyst context). Otherwise we build from relationships_data.
+    """
+    subtasks: list[dict] = []
+    seen_entities: set[str] = set()
+
+    def _agent_for_type(entity_type: str) -> str | None:
+        t = entity_type.lower()
+        if t in MALWARE_ENTITY_TYPES:
+            return "malware_specialist"
+        if t in INFRA_ENTITY_TYPES:
+            return "infrastructure_specialist"
+        return None
+
+    def _add_subtask(entity_id: str, entity_type: str, context: str):
+        if entity_id in seen_entities:
+            return
+        agent = _agent_for_type(entity_type)
+        if not agent:
+            return
+        seen_entities.add(entity_id)
+        subtasks.append({
+            "agent": agent,
+            "entity_id": entity_id,
+            "task": f"Analyze {entity_type} indicator: {entity_id}",
+            "context": context,
+        })
+
+    # 1. Always include the root IOC
+    root_type_map = {"File": "file", "IP": "ip_address", "Domain": "domain", "URL": "url"}
+    root_entity_type = root_type_map.get(ioc_type, "file")
+    _add_subtask(ioc, root_entity_type, "Root IOC — primary target of investigation")
+
+    # 2. If LLM provided priority_entities, route those first
+    if priority_entities:
+        for pe in priority_entities:
+            eid = pe.get("entity_id")
+            etype = pe.get("entity_type", "")
+            reason = pe.get("reason", "Flagged by triage analysis")
+            if eid:
+                _add_subtask(eid, etype, reason)
+
+    # 3. Backfill from filtered relationships_data (covers entities the LLM may have missed)
+    for rel_name, entities in relationships_data.items():
+        for entity in entities:
+            eid = entity.get("id")
+            etype = entity.get("type", "")
+            if eid and eid not in seen_entities:
+                _add_subtask(eid, etype, f"Discovered via '{rel_name}' relationship")
+
+    logger.info(
+        "deterministic_subtask_generation",
+        total_subtasks=len(subtasks),
+        malware_tasks=sum(1 for s in subtasks if s["agent"] == "malware_specialist"),
+        infra_tasks=sum(1 for s in subtasks if s["agent"] == "infrastructure_specialist"),
+    )
+    return subtasks
+
 
 def prepare_detailed_context_for_llm(relationships_data: dict) -> dict:
     """
@@ -715,14 +767,49 @@ async def triage_node(state: AgentState):
                         parsed["malicious_count"] = stats["malicious"]
                     
                     parsed_entities.append(parsed)
-                
-                # Apply severity filter if needed (reuse existing logic if possible or keep simple)
-                # SAFETY SLICE: Prevent token overflow by limiting entities
+
+                # --- SIGNAL FILTER ---
+                # NetworkX already has the full entity set above.
+                # For LLM context we apply a strict signal filter so only
+                # meaningful indicators reach the prompt.
+                # Attribution relationship types are exempt — their entities
+                # (campaigns, actors, families) have no gti_assessment.
+                if rel_name not in UNFILTERED_RELATIONSHIPS:
+                    pre_filter_count = len(parsed_entities)
+                    parsed_entities = [
+                        e for e in parsed_entities
+                        if (
+                            str(e.get("verdict") or "").lower() in {"malicious", "suspicious"}
+                            or (e.get("malicious_count") or 0) > SIGNAL_MALICIOUS_VENDORS
+                        )
+                    ]
+                    filtered_count = pre_filter_count - len(parsed_entities)
+                    if filtered_count > 0:
+                        logger.debug(
+                            "triage_entity_filter",
+                            rel=rel_name,
+                            dropped=filtered_count,
+                            kept=len(parsed_entities),
+                        )
+
+                # Sort survivors by threat score (highest first) before capping,
+                # so the most dangerous indicators are never pushed out.
+                parsed_entities.sort(
+                    key=lambda e: (e.get("threat_score") or 0), reverse=True
+                )
+
+                # SAFETY SLICE: cap to prevent token overflow
                 if len(parsed_entities) > MAX_ENTITIES_PER_RELATIONSHIP:
                     parsed_entities = parsed_entities[:MAX_ENTITIES_PER_RELATIONSHIP]
-                    
+
+                # Skip relationships where filtering removed all entities —
+                # no point sending an empty list to the LLM.
+                if not parsed_entities:
+                    logger.debug("triage_relationship_skipped_all_filtered", rel=rel_name)
+                    continue
+
                 relationships_data[rel_name] = parsed_entities
-                
+
                 # Add to trace
                 tool_call_trace.append({
                     "relationship": rel_name,
@@ -756,7 +843,19 @@ async def triage_node(state: AgentState):
         
         # Update state with comprehensive analysis
         state["ioc_type"] = analysis.get("ioc_type")
-        state["subtasks"] = analysis.get("subtasks", [])
+
+        # ========================================
+        # PHASE 3: Deterministic Subtask Generation
+        # ========================================
+        # Subtasks are generated from the filtered relationships_data,
+        # informed by the LLM's priority_entities. This replaces the
+        # previous approach where the triage LLM generated subtasks directly.
+        state["subtasks"] = generate_initial_subtasks(
+            ioc=ioc,
+            ioc_type=config["type"],
+            relationships_data=relationships_data,
+            priority_entities=analysis.get("priority_entities", []),
+        )
         
         # Store comprehensive triage findings
         state["metadata"]["rich_intel"]["triage_analysis"] = {
@@ -769,7 +868,6 @@ async def triage_node(state: AgentState):
             "investigation_notes": analysis.get("investigation_notes", ""),
             "markdown_report": analysis.get("markdown_report", ""),
             "_llm_reasoning": analysis.get("_llm_reasoning"),
-            "subtasks": analysis.get("subtasks", [])  # Store for frontend timeline
         }
         
         # Maintain backward compatibility

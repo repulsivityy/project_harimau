@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState, useRef, ChangeEvent } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Background, BackgroundVariant, Controls, MiniMap, ReactFlow, useNodesState, useEdgesState, Handle, Position, MarkerType } from "@xyflow/react";
 import dagre from "dagre";
 
@@ -102,6 +103,7 @@ const IocTableRenderer = ({ jsonString }: { jsonString: string }) => {
 const MarkdownRenderer = ({ content }: { content: string }) => (
   <ReactMarkdown
     className="font-body text-sm leading-relaxed text-outline space-y-4"
+    remarkPlugins={[remarkGfm]}
     components={{
       h1: ({ node, ...props }) => <h1 className="text-2xl font-headline font-black text-primary mt-8 mb-4 uppercase tracking-tighter glow-text-primary" {...props} />,
       h2: ({ node, ...props }) => <h2 className="text-xl font-headline font-bold text-secondary mt-8 mb-4 border-b border-secondary/20 pb-2 uppercase tracking-wide" {...props} />,

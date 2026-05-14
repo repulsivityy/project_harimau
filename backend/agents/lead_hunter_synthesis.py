@@ -157,7 +157,7 @@ Provide a final assessment of the investigation including any recommendations.
 ## Output Instructions:
 - Return ONLY the Markdown text.
 - Be professional, concise, and authoritative.
-- Do NOT output JSON. Output pure Markdown.
+- Do NOT wrap the entire output in a JSON object. Return a standard Markdown document, except for the requested `iocs` JSON code block.
 """
 
 

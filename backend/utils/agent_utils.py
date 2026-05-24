@@ -32,7 +32,7 @@ def parse_llm_json(content) -> tuple[str, dict]:
         raw_text = str(content or "").strip()
 
     if not raw_text:
-        raise ValueError("LLM returned empty content.")
+        return raw_text, {}
 
     # Strip markdown fences
     cleaned = raw_text
@@ -44,22 +44,26 @@ def parse_llm_json(content) -> tuple[str, dict]:
     array_start = cleaned.find("[")
     object_start = cleaned.find("{")
 
-    if array_start != -1 and (object_start == -1 or array_start < object_start):
-        end_idx = cleaned.rfind("]")
-        if end_idx == -1:
-            raise ValueError("No closing bracket found for JSON array.")
-        parsed = json.loads(cleaned[array_start:end_idx + 1])
-        if not isinstance(parsed, list) or len(parsed) == 0:
-            raise ValueError("JSON array is empty or invalid.")
-        return raw_text, parsed[0]
+    try:
+        if array_start != -1 and (object_start == -1 or array_start < object_start):
+            end_idx = cleaned.rfind("]")
+            if end_idx == -1:
+                raise ValueError("No closing bracket found for JSON array.")
+            parsed = json.loads(cleaned[array_start:end_idx + 1])
+            if not isinstance(parsed, list) or len(parsed) == 0:
+                raise ValueError("JSON array is empty or invalid.")
+            return raw_text, parsed[0]
 
-    if object_start != -1:
-        end_idx = cleaned.rfind("}")
-        if end_idx == -1:
-            raise ValueError("No closing brace found for JSON object.")
-        return raw_text, json.loads(cleaned[object_start:end_idx + 1])
+        if object_start != -1:
+            end_idx = cleaned.rfind("}")
+            if end_idx == -1:
+                raise ValueError("No closing brace found for JSON object.")
+            return raw_text, json.loads(cleaned[object_start:end_idx + 1])
+    except (ValueError, json.JSONDecodeError) as e:
+        # Fallback to returning raw text and empty dict on parse failure
+        return raw_text, {}
 
-    raise ValueError(f"No JSON structure found in LLM output. Content starts with: {raw_text[:100]}")
+    return raw_text, {}
 
 
 async def run_tools_parallel(tool_dispatch: dict, tool_calls: list, agent_name: str, logger, timeout: float = 20.0) -> list:

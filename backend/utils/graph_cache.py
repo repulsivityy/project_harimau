@@ -15,6 +15,24 @@ from backend.utils.logger import get_logger
 
 logger = get_logger("graph_cache")
 
+def extract_gti_summary(rel_item: dict) -> dict:
+    """Extract key GTI attributes from a relationship response item."""
+    summary = {}
+    if not isinstance(rel_item, dict): return summary
+    
+    # GTI sometimes nests the actual entity data under 'context_attributes' or leaves it at root
+    attrs = rel_item.get("context_attributes", {}) or rel_item.get("attributes", {}) or rel_item
+    
+    for key in ["gti_assessment", "meaningful_name", "names", "last_analysis_stats"]:
+        if key in attrs:
+            summary[key] = attrs[key]
+            
+    # Also grab the raw ID/Type if it's there for context
+    if "id" in rel_item: summary["gti_id"] = rel_item["id"]
+    if "type" in rel_item: summary["gti_type"] = rel_item["type"]
+            
+    return summary
+
 
 class InvestigationCache:
     """NetworkX-based cache for investigation entities with full attributes."""

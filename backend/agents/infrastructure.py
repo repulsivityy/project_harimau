@@ -1,6 +1,7 @@
 import asyncio
 import os
 import json
+import re
 from contextlib import AsyncExitStack
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 #from langchain_google_vertexai import ChatVertexAI
@@ -10,7 +11,7 @@ from langchain_core.tools import tool
 from backend.graph.state import AgentState
 from backend.mcp.client import mcp_manager
 from backend.utils.logger import get_logger
-from backend.utils.graph_cache import InvestigationCache
+from backend.utils.graph_cache import InvestigationCache, extract_gti_summary
 from backend.utils.transparency import emit_tool_call, emit_reasoning
 from backend.utils.agent_utils import (
     FINAL_ITERATION_PROMPT,
@@ -324,7 +325,11 @@ async def infrastructure_node(state: AgentState):
                         etype = item.get("type", "unknown")
                         if not eid: continue
                         h_type = "ip_address" if etype == "ip_address" else "file" if etype == "file" else "domain"
-                        cache.add_entity(eid, h_type, {"infra_context": f"domain_{relationship}"})
+                        
+                        attrs = {"infra_context": f"domain_{relationship}"}
+                        attrs.update(extract_gti_summary(item))
+                        
+                        cache.add_entity(eid, h_type, attrs)
                         cache.add_relationship(domain, eid, relationship, {"source": "infrastructure_analysis_tool"})
                         found.append(eid)
                     return json.dumps(found)
@@ -354,7 +359,11 @@ async def infrastructure_node(state: AgentState):
                         etype = item.get("type", "unknown")
                         if not eid: continue
                         h_type = "domain" if etype == "domain" else "file" if etype == "file" else "ip_address"
-                        cache.add_entity(eid, h_type, {"infra_context": f"ip_{relationship}"})
+                        
+                        attrs = {"infra_context": f"ip_{relationship}"}
+                        attrs.update(extract_gti_summary(item))
+                        
+                        cache.add_entity(eid, h_type, attrs)
                         cache.add_relationship(ip_address, eid, relationship, {"source": "infrastructure_analysis_tool"})
                         found.append(eid)
                     return json.dumps(found)
@@ -384,7 +393,11 @@ async def infrastructure_node(state: AgentState):
                         etype = item.get("type", "unknown")
                         if not eid: continue
                         h_type = "ip_address" if etype == "ip_address" else "file" if etype == "file" else "domain" if etype == "domain" else "url"
-                        cache.add_entity(eid, h_type, {"infra_context": f"url_{relationship}"})
+                        
+                        attrs = {"infra_context": f"url_{relationship}"}
+                        attrs.update(extract_gti_summary(item))
+                        
+                        cache.add_entity(eid, h_type, attrs)
                         cache.add_relationship(url, eid, relationship, {"source": "infrastructure_analysis_tool"})
                         found.append(eid)
                     return json.dumps(found)
@@ -462,6 +475,25 @@ async def infrastructure_node(state: AgentState):
                     context += f"- Task: {task.get('task')}\n"
                     context += f"- Context: {task.get('context')}\n"
             
+            peer_context = ""
+            if iteration > 0:
+                malware_res = state.get("specialist_results", {}).get("malware")
+                if malware_res:
+                    peer_context += "\n**PEER SPECIALIST FINDINGS (MALWARE):**\n"
+                    peer_context += f"- Verdict: {malware_res.get('verdict', 'Unknown')}\n"
+                    
+                    summary = malware_res.get("summary", "")
+                    if len(summary) > 800: summary = summary[:800] + "..."
+                    peer_context += f"- Summary: {summary}\n"
+                    
+                    if malware_res.get("related_indicators"):
+                        peer_context += f"- Related Indicators: {json.dumps(malware_res['related_indicators'][:10])}\n"
+                    if malware_res.get("pivot_findings"):
+                        peer_context += f"- Pivot Findings: {json.dumps(malware_res['pivot_findings'][:10])}\n"
+                    
+                    logger.info("peer_findings_injected", agent="infrastructure", peer="malware", 
+                              count=len(malware_res.get("related_indicators", [])))
+
             messages = [
                 SystemMessage(content=INFRA_ANALYSIS_PROMPT),
                 HumanMessage(content=f"""
@@ -469,6 +501,7 @@ async def infrastructure_node(state: AgentState):
 
 **YOUR PREVIOUS REPORT:**
 {state.get("specialist_results", {}).get("infrastructure", {}).get("markdown_report", "No previous report exists. This is your first iteration.")}
+{peer_context}
 
 **YOUR ASSIGNMENT:**
 You have been tasked to investigate these new uninvestigated nodes based on the triage context above:
@@ -547,6 +580,10 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
             # --- Parsing & Reporting ---
             try:
                 final_text, result = parse_llm_json(final_content)
+                
+                # If parse failed or returned empty, save the raw text for synthesis fallback
+                if not result:
+                    result["raw_text"] = final_text
 
                 
                 # --- Code-enforced accumulation ---
@@ -679,17 +716,21 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                 primary_target = unique_targets[0]["value"] if unique_targets else ioc
                 for indicator in result.get("related_indicators", []):
                     try:
-                        parts = indicator.split(":", 1)
-                        if len(parts) == 2:
-                            ind_type_raw = parts[0].strip().lower()
-                            ind_value = parts[1].strip()
+                        match = re.match(r"^(?P<type>IP(?:\s*Address)?|Domain|URL|File|Hash|SHA256|MD5)\s*:\s*(?P<value>.+)$", indicator, re.IGNORECASE)
+                        if match:
+                            ind_type_raw = match.group("type").strip().lower()
+                            ind_value = match.group("value").strip()
                             entity_type = "unknown"
+                            
                             if "ip" in ind_type_raw: entity_type = "ip_address"
                             elif "domain" in ind_type_raw: entity_type = "domain"
                             elif "url" in ind_type_raw: entity_type = "url"
-                            elif "file" in ind_type_raw: entity_type = "file"
+                            elif any(h in ind_type_raw for h in ["file", "hash", "sha", "md5"]): entity_type = "file"
+                            
                             if entity_type != "unknown":
                                 push_to_rich_intel(relationships_data, "related_infrastructure", entity_type, ind_value, primary_target, {"infra_context": "related_indicator"})
+                        else:
+                            logger.warning("infra_indicator_unmatched", indicator=str(indicator)[:50])
                     except Exception as e:
                         logger.warning("infra_indicator_parse_failed", indicator=str(indicator)[:50], error=str(e))
                 

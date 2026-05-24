@@ -190,7 +190,15 @@ def _build_specialist_context(state: AgentState) -> str:
     for agent, res in specialist_data.items():
         sections.append(f"--- {agent.upper()} ---")
         sections.append(f"Verdict: {res.get('verdict', 'Unknown')}")
-        sections.append(f"Summary: {res.get('summary', 'No summary')}")
+        
+        # If there's raw_text and no summary/report, it indicates a parse failure where raw text was recovered
+        summary = res.get('summary', '')
+        raw_text = res.get('raw_text', '')
+        
+        if not summary and raw_text:
+            sections.append(f"Summary: [Recovered from raw LLM output]\n{raw_text[:1500]}")
+        else:
+            sections.append(f"Summary: {summary or 'No summary'}")
 
         # Include full markdown report — this is the specialist's complete analysis
         markdown_report = res.get("markdown_report")
@@ -237,6 +245,7 @@ def _build_graph_summary(state: AgentState) -> str:
             "score": threat_score.get("value", 0) if isinstance(threat_score, dict) else 0,
             "verdict": verdict.get("value") if isinstance(verdict, dict) else None,
             "malicious_count": last_analysis_stats.get("malicious", 0) if isinstance(last_analysis_stats, dict) else 0,
+            "raw_attributes": data,
         }
         important_relationships_by_node[node_id] = set()
 
@@ -260,9 +269,6 @@ def _build_graph_summary(state: AgentState) -> str:
     high_signal_nodes = []
     high_signal_node_ids = set()
     for node_id, node in node_details.items():
-        if node["score"] <= HIGH_SIGNAL_THREAT_SCORE:
-            continue
-
         qualifiers = 0
         if node["malicious_count"] > 5:
             qualifiers += 1
@@ -270,14 +276,25 @@ def _build_graph_summary(state: AgentState) -> str:
             qualifiers += 1
         if node_id in bridges_malware_infra:
             qualifiers += 1
+        
+        # S1-T2: Qualifier for specialist discovery
+        if "malware_context" in node.get("raw_attributes", {}) or "infra_context" in node.get("raw_attributes", {}):
+            qualifiers += 1
 
-        if qualifiers >= 2:
-            high_signal_nodes.append({
-                **node,
-                "important_relationships": sorted(important_relationships_by_node.get(node_id, set())),
-                "bridges_malware_infra": node_id in bridges_malware_infra,
-            })
-            high_signal_node_ids.add(node_id)
+        if node["score"] >= 80:
+            qualifies = True        # high enough score alone is sufficient
+        else:
+            qualifies = node["score"] > HIGH_SIGNAL_THREAT_SCORE and qualifiers >= 2
+
+        if not qualifies:
+            continue
+
+        high_signal_nodes.append({
+            **node,
+            "important_relationships": sorted(important_relationships_by_node.get(node_id, set())),
+            "bridges_malware_infra": node_id in bridges_malware_infra,
+        })
+        high_signal_node_ids.add(node_id)
 
     high_signal_nodes = sorted(
         high_signal_nodes,
@@ -398,6 +415,19 @@ async def generate_final_report_llm(state: AgentState, llm) -> str:
     """
     job_id = state.get("job_id")
     logger.info("lead_hunter_synthesis_start", job_id=job_id)
+
+    # S1-T5: Error Recovery Guard
+    specialist_data = state.get("specialist_results", {})
+    if specialist_data and all(res.get("verdict") == "System Error" for res in specialist_data.values()):
+        logger.error("lead_hunter_synthesis_aborted_all_specialists_failed", job_id=job_id)
+        return """## ❌ Investigation Failed
+
+The investigation was aborted because all specialist agents encountered critical system errors. 
+Please review the system logs for stack traces.
+
+### Error Details
+No actionable intelligence could be synthesized. The original indicator may be malformed or external systems may be unreachable.
+"""
 
     triage_context = _build_triage_context(state)
     specialist_context = _build_specialist_context(state)

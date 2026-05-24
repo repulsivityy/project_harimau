@@ -21,7 +21,7 @@ MAX_ENTITIES_PER_RELATIONSHIP = 10  # Max entities per relationship sent to LLM
 MAX_TOTAL_ENTITIES = 150  # Hard cap (not yet enforced — tracked for future use)
 
 # Signal filter thresholds for LLM context (NetworkX graph is always fully populated)
-SIGNAL_MALICIOUS_VENDORS = 3   # Include if malicious vendor count EXCEEDS this value
+SIGNAL_MALICIOUS_VENDORS = 3   # Include if malicious vendor count is >= this value
 
 # Relationship types whose entities are attribution/context objects (campaigns, actors,
 # malware families) that do NOT have gti_assessment or last_analysis_stats.
@@ -603,19 +603,28 @@ async def triage_node(state: AgentState):
     
     try:
         # 1. IOC Identification
+        url_pattern = r"^https?://.+"
         ipv4_pattern = r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$"
+        ipv6_pattern = r"^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$|^(?:[0-9a-fA-F]{1,4}:)*:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4})*$"
+        hash_pattern = r"^[a-fA-F0-9]{32,64}$"
+        domain_pattern = r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"
+        
         config = {}
         
-        if "http" in ioc or "/" in ioc:
+        if re.match(url_pattern, ioc, re.IGNORECASE):
             config = {"type": "URL", "direct_tool": gti.get_url_report, 
                      "rel_tool": "get_entities_related_to_an_url", "arg": "url"}
-        elif re.match(ipv4_pattern, ioc):
+        elif re.match(ipv4_pattern, ioc) or re.match(ipv6_pattern, ioc):
             config = {"type": "IP", "direct_tool": gti.get_ip_report, 
                      "rel_tool": "get_entities_related_to_an_ip_address", "arg": "ip_address"}
-        elif "." in ioc:
+        elif re.match(hash_pattern, ioc):
+             config = {"type": "File", "direct_tool": gti.get_file_report, 
+                      "rel_tool": "get_entities_related_to_a_file", "arg": "hash"}
+        elif re.match(domain_pattern, ioc):
              config = {"type": "Domain", "direct_tool": gti.get_domain_report, 
                       "rel_tool": "get_entities_related_to_a_domain", "arg": "domain"}
         else:
+             # Fallback to file if it doesn't match other formats, as hashes can sometimes be weird
              config = {"type": "File", "direct_tool": gti.get_file_report, 
                       "rel_tool": "get_entities_related_to_a_file", "arg": "hash"}
              
@@ -780,7 +789,7 @@ async def triage_node(state: AgentState):
                         e for e in parsed_entities
                         if (
                             str(e.get("verdict") or "").lower() in {"malicious", "suspicious"}
-                            or (e.get("malicious_count") or 0) > SIGNAL_MALICIOUS_VENDORS
+                            or (e.get("malicious_count") or 0) >= SIGNAL_MALICIOUS_VENDORS
                         )
                     ]
                     filtered_count = pre_filter_count - len(parsed_entities)

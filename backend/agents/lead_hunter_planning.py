@@ -112,6 +112,9 @@ async def run_planning_phase(state: AgentState, llm, cache: InvestigationCache, 
     # 1. Gather Context
     context_str = f"**Triage Context:**\n{str(triage_data.get('triage_analysis', {}).get('executive_summary', 'N/A'))}\n\n"
     context_str += "**Specialist Findings (Latest):**\n"
+    
+    all_analyzed_ids = set()
+    
     for agent, res in specialist_data.items():
         context_str += f"\n#### {agent.replace('_', ' ').title()}:\n"
         context_str += f"Verdict: {res.get('verdict', 'N/A')} | Summary: {res.get('summary', 'No summary')}\n"
@@ -128,13 +131,14 @@ async def run_planning_phase(state: AgentState, llm, cache: InvestigationCache, 
             for ind in res["related_indicators"][:15]:
                 context_str += f"  - {ind}\n"
 
-        # Already-analyzed targets — do not re-task these
+        # Accumulate analyzed targets for deduplication
         analyzed = res.get("analyzed_targets", [])
         if analyzed:
             ids = [str(t.get("indicator") or t.get("value") or t) if isinstance(t, dict) else str(t) for t in analyzed[:10]]
-            ids = [i for i in ids if i]
-            if ids:
-                context_str += f"Already analyzed (do NOT re-task): {', '.join(ids)}\n"
+            all_analyzed_ids.update(i for i in ids if i)
+            
+    if all_analyzed_ids:
+        context_str += f"\n**Already analyzed (do NOT re-task):** {', '.join(list(all_analyzed_ids)[:20])}\n"
 
     # 2. Format pre-filtered uninvestigated nodes (passed in from lead_hunter_node)
     try:

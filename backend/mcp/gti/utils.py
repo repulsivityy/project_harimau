@@ -21,8 +21,13 @@ async def consume_vt_iterator(
     vt_client: vt.Client, endpoint: str, params: dict | None = None, limit: int = 10):
   """Consumes a vt.Iterator iterator and return the list of objects."""
   res = []
-  async for obj in vt_client.iterator(endpoint, params=params, limit=limit, batch_size=40):
-    res.append(obj)
+  try:
+    async for obj in vt_client.iterator(endpoint, params=params, limit=limit, batch_size=40):
+      res.append(obj)
+  except vt.error.APIError as e:
+    logging.warning(f"VT API Error consuming iterator for {endpoint}: {e.code} - {e.message}")
+  except Exception as e:
+    logging.exception(f"Unexpected error consuming iterator for {endpoint}: {e}")
   return res
 
 
@@ -93,6 +98,11 @@ async def fetch_object_relationships(
     descriptors_only: bool = False,
     limit: int = 10):
   """Fetches full relationship objects (not descriptors) from the given object."""
+  
+  if descriptors_only:
+      params = params or {}
+      params["descriptors_only"] = True
+      
   rel_futures = {}
   async with asyncio.TaskGroup() as tg:
     for rel_name in relationships:

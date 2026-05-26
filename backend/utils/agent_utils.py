@@ -1,6 +1,57 @@
 import asyncio
 import json
+import re
 from langchain_core.messages import AIMessage
+
+INDICATOR_PATTERN = re.compile(
+    r"^(?P<type>IP(?:\s*Address)?|Domain|URL|File|Hash|SHA256|MD5)\s*:\s*(?P<value>.+)$",
+    re.IGNORECASE
+)
+
+
+def parse_indicator_string(indicator: str) -> tuple:
+    """Parse 'Type: value' indicator strings. Returns (entity_type, value) or (None, None)."""
+    match = INDICATOR_PATTERN.match(indicator)
+    if not match:
+        return None, None
+    ind_type_raw = match.group("type").strip().lower()
+    ind_value = match.group("value").strip()
+    if "ip" in ind_type_raw:
+        return "ip_address", ind_value
+    elif "domain" in ind_type_raw:
+        return "domain", ind_value
+    elif "url" in ind_type_raw:
+        return "url", ind_value
+    elif any(h in ind_type_raw for h in ["file", "hash", "sha", "md5"]):
+        return "file", ind_value
+    return None, ind_value
+
+
+def build_peer_context(state: dict, iteration: int, self_agent: str, peer_agent: str,
+                       extra_fields: list, count_key: str, logger) -> str:
+    """Build peer specialist context string for injection into an agent prompt."""
+    if iteration == 0:
+        return ""
+    peer_res = state.get("specialist_results", {}).get(peer_agent)
+    if not peer_res:
+        return ""
+
+    lines = [f"\n**PEER SPECIALIST FINDINGS ({peer_agent.upper()}):**\n"]
+    lines.append(f"- Verdict: {peer_res.get('verdict', 'Unknown')}\n")
+
+    summary = peer_res.get("summary", "")
+    if len(summary) > 800:
+        summary = summary[:800] + "..."
+    lines.append(f"- Summary: {summary}\n")
+
+    for label, key in extra_fields:
+        if peer_res.get(key):
+            lines.append(f"- {label}: {json.dumps(peer_res[key][:10])}\n")
+
+    logger.info("peer_findings_injected", agent=self_agent, peer=peer_agent,
+                count=len(peer_res.get(count_key, [])))
+
+    return "".join(lines)
 
 FINAL_ITERATION_PROMPT = (
     "This is the FINAL iteration. You MUST stop using tools now.\n\n"

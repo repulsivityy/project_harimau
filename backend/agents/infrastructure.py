@@ -19,6 +19,8 @@ from backend.utils.agent_utils import (
     run_tools_parallel,
     cap_context_window,
     push_to_rich_intel,
+    build_peer_context,
+    parse_indicator_string,
 )
 import backend.tools.webrisk as webrisk
 
@@ -475,24 +477,15 @@ async def infrastructure_node(state: AgentState):
                     context += f"- Task: {task.get('task')}\n"
                     context += f"- Context: {task.get('context')}\n"
             
-            peer_context = ""
-            if iteration > 0:
-                malware_res = state.get("specialist_results", {}).get("malware")
-                if malware_res:
-                    peer_context += "\n**PEER SPECIALIST FINDINGS (MALWARE):**\n"
-                    peer_context += f"- Verdict: {malware_res.get('verdict', 'Unknown')}\n"
-                    
-                    summary = malware_res.get("summary", "")
-                    if len(summary) > 800: summary = summary[:800] + "..."
-                    peer_context += f"- Summary: {summary}\n"
-                    
-                    if malware_res.get("related_indicators"):
-                        peer_context += f"- Related Indicators: {json.dumps(malware_res['related_indicators'][:10])}\n"
-                    if malware_res.get("pivot_findings"):
-                        peer_context += f"- Pivot Findings: {json.dumps(malware_res['pivot_findings'][:10])}\n"
-                    
-                    logger.info("peer_findings_injected", agent="infrastructure", peer="malware", 
-                              count=len(malware_res.get("related_indicators", [])))
+            peer_context = build_peer_context(
+                state, iteration, "infrastructure", "malware",
+                extra_fields=[
+                    ("Related Indicators", "related_indicators"),
+                    ("Pivot Findings", "pivot_findings"),
+                ],
+                count_key="related_indicators",
+                logger=logger,
+            )
 
             messages = [
                 SystemMessage(content=INFRA_ANALYSIS_PROMPT),
@@ -716,19 +709,9 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                 primary_target = unique_targets[0]["value"] if unique_targets else ioc
                 for indicator in result.get("related_indicators", []):
                     try:
-                        match = re.match(r"^(?P<type>IP(?:\s*Address)?|Domain|URL|File|Hash|SHA256|MD5)\s*:\s*(?P<value>.+)$", indicator, re.IGNORECASE)
-                        if match:
-                            ind_type_raw = match.group("type").strip().lower()
-                            ind_value = match.group("value").strip()
-                            entity_type = "unknown"
-                            
-                            if "ip" in ind_type_raw: entity_type = "ip_address"
-                            elif "domain" in ind_type_raw: entity_type = "domain"
-                            elif "url" in ind_type_raw: entity_type = "url"
-                            elif any(h in ind_type_raw for h in ["file", "hash", "sha", "md5"]): entity_type = "file"
-                            
-                            if entity_type != "unknown":
-                                push_to_rich_intel(relationships_data, "related_infrastructure", entity_type, ind_value, primary_target, {"infra_context": "related_indicator"})
+                        entity_type, ind_value = parse_indicator_string(indicator)
+                        if entity_type:
+                            push_to_rich_intel(relationships_data, "related_infrastructure", entity_type, ind_value, primary_target, {"infra_context": "related_indicator"})
                         else:
                             logger.warning("infra_indicator_unmatched", indicator=str(indicator)[:50])
                     except Exception as e:

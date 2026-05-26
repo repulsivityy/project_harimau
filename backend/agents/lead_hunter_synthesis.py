@@ -281,10 +281,7 @@ def _build_graph_summary(state: AgentState) -> str:
         if "malware_context" in node.get("raw_attributes", {}) or "infra_context" in node.get("raw_attributes", {}):
             qualifiers += 1
 
-        if node["score"] >= 80:
-            qualifies = True        # high enough score alone is sufficient
-        else:
-            qualifies = node["score"] > HIGH_SIGNAL_THREAT_SCORE and qualifiers >= 2
+        qualifies = node["score"] >= 80 or (node["score"] > HIGH_SIGNAL_THREAT_SCORE and qualifiers >= 2)
 
         if not qualifies:
             continue

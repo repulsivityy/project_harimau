@@ -865,6 +865,7 @@ async def triage_node(state: AgentState):
             relationships_data=relationships_data,
             priority_entities=analysis.get("priority_entities", []),
         )
+        state["tasked_entities"] = [t["entity_id"] for t in state["subtasks"] if "entity_id" in t]
         
         # Store comprehensive triage findings
         state["metadata"]["rich_intel"]["triage_analysis"] = {

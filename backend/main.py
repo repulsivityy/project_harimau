@@ -325,10 +325,10 @@ async def _run_investigation_background(job_id: str, ioc: str, max_iterations: i
             "ioc": ioc,
             "messages": [],
             "subtasks": [],
+            "tasked_entities": [],
             "specialist_results": {},
             "metadata": {},
             "iteration": 0,
-            "loop_count": 0,
             "investigation_graph": None,
             "max_iterations": max_iterations
         }

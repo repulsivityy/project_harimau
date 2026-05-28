@@ -10,11 +10,13 @@ def last_value(a: Any, b: Any) -> Any:
     """Reducer that returns the last value (for scalar fields in parallel execution)."""
     return b if b is not None else a
 
-def concat_reports(a: Optional[str], b: Optional[str]) -> Optional[str]:
-    """Concatenate reports with separator (for parallel specialist reports)."""
-    if not a: return b
-    if not b: return a
-    return f"{a}\n\n{b}"
+def union_lists(a: Optional[List[str]], b: Optional[List[str]]) -> List[str]:
+    """Union two lists without introducing duplicates."""
+    res = list(a or [])
+    for item in (b or []):
+        if item not in res:
+            res.append(item)
+    return res
 
 def merge_graphs(a: Optional[Any], b: Optional[Any]) -> Optional[Any]:
     """
@@ -82,16 +84,13 @@ class AgentState(TypedDict):
     investigation_graph: Annotated[Optional[Any], merge_graphs]  # nx.MultiDiGraph (using Any to avoid import)
     
     # Iteration Control
-    loop_count: Annotated[int, operator.add]
     iteration: Annotated[int, last_value]  # Explicit iteration phase (0, 1, 2)
 
     # Investigation depth: controls cost vs. depth trade-off
     # Set from POST /api/investigate, persists unchanged through entire loop
     max_iterations: Annotated[int, last_value]
     
-    # Lead Hunter's Strategic Plan (for transparency)
-    lead_plan: Optional[str]
     lead_hunter_report: Annotated[Optional[str], last_value]  # Full synthesis report
 
     # Entities that have been assigned as subtasks across all iterations (for convergence detection)
-    tasked_entities: Annotated[List[str], operator.add]
+    tasked_entities: Annotated[List[str], union_lists]

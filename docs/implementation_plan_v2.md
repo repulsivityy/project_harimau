@@ -93,7 +93,7 @@ This document tracks the iterative evolution of the Harimau platform, organized 
 *   [x] **Consolidate Planning Roles**: Refactor workflow so Triage strictly outputs context/risk assessment, leaving all task planning to the Lead Hunter (e.g., Triage -> Lead Hunter Plan -> Specialists -> Lead Hunter Synthesize).
 *   [x] **Strict Target Schemas**: Replace regex 'safety net' parsing in Specialists by enforcing strict JSON schemas for targets in the planner (deterministic routing).
 *   [ ] **Extract Inner Tool Loops**: Refactor specialist nodes (`infrastructure.py`, `malware.py`) to use Langgraph's native `ToolNode` and conditional edges instead of internal python `while/for` loops, improving checkpointing visibility and preventing thread blocking.
-*   [ ] **Remove Duplicate Graph Expansion**: Remove post-LLM relationship expansion logic in specialists, relying solely on MCP tool wrappers to safely modify the graph cache during the natural reasoning loop.
+*   [x] **Remove Duplicate Graph Expansion**: Remove post-LLM relationship expansion logic in specialists, relying solely on MCP tool wrappers to safely modify the graph cache during the natural reasoning loop.
 *   [ ] **Strict Structured Output**: Replace string parsing (`.replace("```json")`) with `with_structured_output()` to guarantee schema adherence and eliminate parsing fallbacks.
 *   [ ] **Optimize NetworkX MultiDiGraph Merges**: Ensure deterministic edge keys when using `merge_graphs` (or switch to `DiGraph` if identical parallel edges are unnecessary) to prevent exponential edge duplication during parallel state merges.
 

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-05-29
+
+### Fixed
+- **Specialist Agent Variable Scoping**: Resolved `UnboundLocalError` in Malware and Infrastructure specialist nodes by correctly accessing `iteration` from the job state instead of an undefined local variable.
+- **Async TaskGroup Robustness**: Hardened the GTI MCP server's relationship fetching logic. `consume_vt_iterator` now catches and logs API errors (e.g., 404s), preventing a single failed relationship lookup from crashing the entire specialist agent.
+- **GTI Parameter Propagation**: Fixed a bug where the `descriptors_only` flag was being ignored in nested relationship calls, ensuring more efficient API usage and reduced token counts.
+
+### Changed
+- **State Schema Cleanup**: Removed obsolete fields (`loop_count`, `lead_plan`, `concat_reports`) from `AgentState` to reduce state bloat and complexity.
+- **State Reducer Optimization**: Implemented a `union_lists` reducer for `tasked_entities` to prevent duplicate entries and ensure list convergence during parallel agent merges.
+
+## [0.6.1] - 2026-05-29
+
+### Fixed
+- **Null Threat Score Safety in Synthesis**: Fixed a potential `TypeError` in `lead_hunter_synthesis.py` where explicit null threat score values (`{"value": None}`) in GTI assessments caused crashes during high-signal node comparisons and sorting. Implemented clean integer fallback mapping to `0`.
+- **Lead Hunter Synthesis Unit Tests**: Added a new unit test suite `test_lead_hunter_synthesis.py` covering null and high threat score behaviors.
+
 ## [0.6.0] - 2026-05-14
 
 ### Added

@@ -372,13 +372,18 @@ This ensures that updating an agent (backend) does not trigger a needless rebuil
 - **Reliability**: Replaced bare exception handlers with specific error types and structured logging.
 - **Efficiency**: Confirmed parallel execution of specialist agents.
 
-### Major Changes (Feb 2026)
+### Major Changes (Feb/May 2026)
 
-#### Async Background Processing
-- **Problem**: Investigations taking 8+ minutes exceeded Cloud Run connection timeout (60-300s)
-- **Solution**: POST /api/investigate returns immediately with job_id, investigation runs via `asyncio.create_task`
-- **Frontend**: Polls every 10 seconds with realistic progress bar (95% cap until completion)
-- **Impact**: Zero connection timeouts, improved UX
+#### Async Background Processing & Robustness
+- **Problem 1**: Investigations taking 8+ minutes exceeded Cloud Run connection timeout.
+- **Solution**: POST /api/investigate returns immediately with job_id, investigation runs via `asyncio.create_task`.
+- **Problem 2**: Specialist agents crashing due to `ExceptionGroup` when a single VirusTotal relationship returned a 404.
+- **Solution**: Implemented defensive error handling in `consume_vt_iterator` to ensure `TaskGroup` stability.
+- **Impact**: Zero connection timeouts, 100% agent reliability even with partial API failures.
+
+#### State Machine Optimization
+- **Cleanup**: Pruned dead fields from `AgentState` to minimize persistence overhead.
+- **Convergence**: Switched to a `union_lists` reducer for `tasked_entities` to prevent exponential duplication during parallel specialist merges.
 
 #### Parallel Specialist Execution Fixes
 - **Graph Merge**: Added custom reducer to preserve data from parallel malware/infra agents

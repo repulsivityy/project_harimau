@@ -230,6 +230,40 @@ gcloud run deploy harimau-backend \
 
 ---
 
+### 8. Async TaskGroup Crashes (ExceptionGroup)
+
+#### Symptom
+```
+ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+```
+
+#### Root Cause
+Specialist agents often fetch multiple relationships concurrently using `asyncio.TaskGroup`. If the underlying GTI MCP server encounters an API error (e.g., `404 Not Found`) for a specific relationship endpoint and doesn't catch it locally, the `TaskGroup` will cancel all other tasks and raise an `ExceptionGroup`, crashing the node.
+
+#### Solution
+Implement local `try/except` blocks inside iterators or low-level fetchers to catch `vt.error.APIError`. Return partial results or an empty list instead of allowing the exception to bubble up to the `TaskGroup`.
+
+**Status**: ✅ Fixed in `backend/mcp/gti/utils.py` (May 2026)
+
+---
+
+### 9. UnboundLocalError in Specialist Nodes
+
+#### Symptom
+```
+UnboundLocalError: cannot access local variable 'iteration' where it is not associated with a value
+```
+
+#### Root Cause
+The `malware_node` and `infrastructure_node` were attempting to use an `iteration` variable (e.g., for `build_peer_context`) before the loop where `iteration` is defined had started.
+
+#### Solution
+Always use `state.get("iteration", 0)` to retrieve the current iteration count from the LangGraph state instead of assuming a local variable is present.
+
+**Status**: ✅ Fixed in both specialist agents (May 2026)
+
+---
+
 ## Best Practices
 
 ### Tool Definition Pattern

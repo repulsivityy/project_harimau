@@ -55,10 +55,16 @@ async with mcp_manager.get_session("gti") as session:
 
     # Iteration Context: informs LLM of its cumulative role in a multi-round hunt
     iteration_context = "**Iteration Context:** You may be called multiple times..."
+    
+    # PEER CONTEXT: Inject findings from the other specialist (if any)
+    peer_context = build_peer_context(
+        state, state.get("iteration", 0), "agent_name", "peer_name",
+        extra_fields=[...], count_key="..."
+    )
 
     messages = [
         SystemMessage(content=PROMPT + "\n\n" + iteration_context),
-        HumanMessage(content=f"Task: {task}")
+        HumanMessage(content=f"Task: {task}\n\n{peer_context}")
     ]
     final_content = None
     max_iterations = malware_iterations  # or infra_iterations = 10

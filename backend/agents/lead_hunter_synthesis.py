@@ -242,7 +242,7 @@ def _build_graph_summary(state: AgentState) -> str:
             "id": node_id,
             "type": entity_type,
             "label": _node_label(node_id, data),
-            "score": threat_score.get("value", 0) if isinstance(threat_score, dict) else 0,
+            "score": (threat_score.get("value") if isinstance(threat_score, dict) and threat_score.get("value") is not None else 0),
             "verdict": verdict.get("value") if isinstance(verdict, dict) else None,
             "malicious_count": last_analysis_stats.get("malicious", 0) if isinstance(last_analysis_stats, dict) else 0,
             "raw_attributes": data,

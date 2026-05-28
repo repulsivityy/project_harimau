@@ -478,7 +478,7 @@ async def infrastructure_node(state: AgentState):
                     context += f"- Context: {task.get('context')}\n"
             
             peer_context = build_peer_context(
-                state, iteration, "infrastructure", "malware",
+                state, state.get("iteration", 0), "infrastructure", "malware",
                 extra_fields=[
                     ("Related Indicators", "related_indicators"),
                     ("Pivot Findings", "pivot_findings"),

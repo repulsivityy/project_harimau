@@ -55,6 +55,9 @@ This document tracks the iterative evolution of the Harimau platform, organized 
 **Challenges & Learnings**
 *   **Agent Robustness**: LLMs will skip tool calls if they think they "know" enough. Implemented a "Forced Tool Loop" to guarantee graph data population.
 *   **API Parsing**: Discovered GTI `get_relationships` returns a `dict` (not list) for single entities. Patched `triage.py` to handle both types.
+*   **Async Robustness**: Discovered that `asyncio.TaskGroup` is extremely fragile when consuming iterators (like VT API). A single 404/API error would crash the entire group. Implemented local try/except in `consume_vt_iterator` to ensure partial success doesn't trigger a total specialist failure.
+*   **Variable Scoping**: Patched a critical `UnboundLocalError` where specialist nodes attempted to use `iteration` before definition. Always use `state.get("iteration", 0)` for safety.
+*   **Parameter Propagation**: Found that `descriptors_only=True` was being dropped in nested relationship calls. Explicitly adding it to the `params` dict significantly improved specialist performance.
 
 ### Milestone 2: Specialist Agent Suite (Malware & Infra) ✅
 *   [x] **Malware Specialist**: Deep dive into dropped files, C2 communications, and behavioral patterns.

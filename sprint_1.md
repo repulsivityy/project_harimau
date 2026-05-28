@@ -1,6 +1,6 @@
 # Sprint 1 — Consolidated Execution Plan
 
-> **Owner:** project_harimau · **Updated:** 2026-05-22 · **Status:** ⏳ Planned
+> **Owner:** project_harimau · **Updated:** 2026-05-28 · **Status:** 🚧 In Progress
 > **Pick-up agent:** Read this file top-to-bottom. Tasks are tiered by impact; complete Tier 1 before Tier 2 before Tier 3 before Tier 4. Within a tier, tasks are independent unless a dependency is called out.
 > **Execution model:** This project runs **only on Google Cloud Run**. There is no local execution step. All verification is via deploy → hit deployed endpoint → inspect Cloud SQL state → user-driven browser check for UI. Do not add steps that require `npm run dev`, `uvicorn`, `docker-compose`, or local fixture runs.
 > **Ground truth:** All findings in this file were verified against the **current code**, not the docs. Where docs and code drift, the code wins for execution; flag the drift and update `docs/CHANGELOG.md` + `docs/implementation_plan_v2.md`.
@@ -22,27 +22,27 @@
 
 ---
 
-# TIER 1 — Hunt Accuracy & Safety (Phase 1)
+# TIER 1 — Hunt Accuracy & Safety (Phase 1) [COMPLETED]
 
 **Goal:** Every multi-pivot hunt produces a measurably more grounded synthesis report. Fix fragile parsing and threshold errors.
 
-### S1-T1 · Cross-agent peer findings into specialist prompts
+### [x] S1-T1 · Cross-agent peer findings into specialist prompts
 *   **Files:** `backend/agents/malware.py`, `backend/agents/infrastructure.py`, `backend/agents/lead_hunter_planning.py`
 *   **Change:** Inject `infrastructure` findings into the `malware` agent's prompt (and vice versa) to enable true cross-agent deduction. Expand planner dedup logic to union both specialists' lists. Log `peer_findings_injected`.
 
-### S1-T2 · GTI attribute propagation + synthesis selector relaxation
+### [x] S1-T2 · GTI attribute propagation + synthesis selector relaxation
 *   **Files:** `backend/agents/malware.py`, `backend/agents/infrastructure.py`, `backend/utils/graph_cache.py`, `backend/agents/lead_hunter_synthesis.py`
 *   **Change:** Add helper `extract_gti_summary` in `graph_cache.py`. Read `threat_score` directly from GTI assessment and merge into cache node attributes. Relax synthesis gate in `lead_hunter_synthesis.py` so high-scoring items or specialist-discovered items surface cleanly.
 
-### S1-T3 · Strict Indicator parser regex + JSON `raw_text` fallback
+### [x] S1-T3 · Strict Indicator parser regex + JSON `raw_text` fallback
 *   **Files:** `backend/agents/malware.py`, `backend/agents/infrastructure.py`, `backend/agents/triage.py`, `backend/utils/agent_utils.py`
 *   **Change:** Replace fragile `if/elif` string matching (`"http" in ioc`, `"/" in ioc`) with rigorous ordered regex patterns (`^(?P<type>IP|Domain|URL|File|Hash)\s*:\s*(?P<value>.+)$`). In `parse_llm_json()`, fallback to saving `raw_text` on failure so synthesis has data.
 
-### S1-T4 · Triage signal threshold inclusive
+### [x] S1-T4 · Triage signal threshold inclusive
 *   **Files:** `backend/agents/triage.py`
 *   **Change:** Fix off-by-one error dropping high-value pivots: change `> SIGNAL_MALICIOUS_VENDORS` to `>=`.
 
-### S1-T5 · Error Recovery Guard
+### [x] S1-T5 · Error Recovery Guard
 *   **Files:** `backend/agents/lead_hunter_synthesis.py`, `backend/graph/workflow.py`
 *   **Change:** Add a pre-synthesis check: if all specialist results return `System Error`, gracefully skip synthesis and return a structured error state instead of hallucinating a report.
 

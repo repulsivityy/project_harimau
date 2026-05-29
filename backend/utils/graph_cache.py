@@ -101,6 +101,14 @@ class InvestigationCache:
             rel_type: Relationship type (e.g., contacted_domains, dropped_files)
             metadata: Optional edge metadata
         """
+        if self.graph.has_edge(source_id, target_id):
+            for edge_key, edge_data in self.graph[source_id][target_id].items():
+                if edge_data.get("relationship") == rel_type:
+                    if metadata:
+                        edge_data.update(metadata)
+                    logger.debug("relationship_updated", source=source_id, target=target_id, rel_type=rel_type)
+                    return
+
         edge_data = {"relationship": rel_type}
         if metadata:
             edge_data.update(metadata)

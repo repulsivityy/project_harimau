@@ -34,19 +34,41 @@ def merge_graphs(a: Optional[Any], b: Optional[Any]) -> Optional[Any]:
     graph_a = nx.node_link_graph(a) if isinstance(a, dict) else a
     graph_b = nx.node_link_graph(b) if isinstance(b, dict) else b
     
-    # Merge nodes (b's attributes win on conflicts)
+    # Merge nodes
     combined = nx.MultiDiGraph(graph_a)
     for node, data in graph_b.nodes(data=True):
         if node in combined:
-            # Node exists - merge attributes
-            combined.nodes[node].update(data)
+            # Node exists - deep merge attributes
+            existing = combined.nodes[node]
+            for key, val in data.items():
+                if key not in existing:
+                    existing[key] = val
+                elif isinstance(val, dict) and isinstance(existing[key], dict):
+                    existing[key].update(val)
+                elif isinstance(val, list) and isinstance(existing[key], list):
+                    res = list(existing[key])
+                    for item in val:
+                        if item not in res:
+                            res.append(item)
+                    existing[key] = res
+                else:
+                    existing[key] = val
         else:
             # New node - add it
             combined.add_node(node, **data)
     
     # Merge edges
-    for u, v, key, data in graph_b.edges(keys=True, data=True):
-        combined.add_edge(u, v, key=key, **data)
+    for u, v, data in graph_b.edges(data=True):
+        rel = data.get("relationship")
+        edge_matched = False
+        if combined.has_edge(u, v):
+            for edge_key, edge_data in combined[u][v].items():
+                if edge_data.get("relationship") == rel:
+                    edge_data.update(data)
+                    edge_matched = True
+                    break
+        if not edge_matched:
+            combined.add_edge(u, v, **data)
     
     # Return as dict for state persistence
     return nx.node_link_data(combined)

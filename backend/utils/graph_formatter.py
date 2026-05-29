@@ -71,7 +71,8 @@ def format_graph_from_cache(job_id: str, job: dict) -> dict:
             label = data.get("name") or data.get("title") or node_id
 
         # ── Threat fields from raw GTI attribute structure ─────────────────
-        gti = data.get("gti_assessment") or {}
+        gti_raw = data.get("gti_assessment")
+        gti = gti_raw if isinstance(gti_raw, dict) else {}
         verdict_raw = gti.get("verdict") or {}
         verdict = verdict_raw.get("value") if isinstance(verdict_raw, dict) else None
         score_raw = gti.get("threat_score") or {}
@@ -164,7 +165,7 @@ def format_graph_from_cache(job_id: str, job: dict) -> dict:
         if source not in included_node_ids or target not in included_node_ids:
             continue
             
-        rel = edata.get("relationship", "")
+        rel = edata.get("relationship") or ""
         key = (source, target, rel)
         if key not in edge_registry:
             edges.append({

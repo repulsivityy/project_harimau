@@ -48,7 +48,7 @@
 
 ---
 
-# TIER 2 — State Machine & Cache Integrity (Phase 2)
+# TIER 2 — State Machine & Cache Integrity (Phase 2) [COMPLETED]
 
 **Goal:** Eliminate silent data loss in the persistence layer. Lower visibility, but reduces future bug surface and unlocks graph-query work.
 
@@ -60,7 +60,7 @@
 *   **Files:** `backend/graph/state.py`, `backend/utils/graph_cache.py`
 *   **Change:** Implement proper deep-merge for node attributes in `state.py`. Guard `graph_cache.add_relationship` with edge deduplication logic to prevent parallel bloat.
 
-### S2-T3 · Entity-ID normalisation
+### [x] S2-T3 · Entity-ID normalisation
 *   **Files:** `backend/utils/graph_cache.py`, `backend/main.py`
 *   **Change:** Create `_normalise_id` helper (lowercase, whitespace stripping, IP formatting). Apply to cache operations and initial `state["ioc"]` on intake.
 

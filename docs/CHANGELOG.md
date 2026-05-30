@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-05-30
+
+### Added
+- **Canonical Entity-ID Normalisation**: Created robust `_normalise_id()` helper in `backend/utils/graph_cache.py` (strips whitespace, converts to lowercase, safeguards against null/None). Applied across request intake (`POST /api/investigate`) and all cache read/write methods to prevent node duplication and cache misses.
+- **Entity Normalisation Unit Tests**: Added dedicated unit test suite `backend/tests/test_entity_normalisation.py` asserting static formatting rules, case invariance during retrieval, and elimination of parallel duplicate edges across mixed casing.
+
+### Fixed
+- **Lead Hunter Layer 3 Convergence Fix**: Resolved an early exit convergence failure in `lead_hunter.py` where mixed-case subtask entities failed subset comparisons against lowercased cache nodes (`new_entity_ids.issubset(prev_tasked)`). Both sets are now strictly lowercased before evaluation.
+- **Triage Subtask & Super-Bundle Seeding**: Normalised parsed entity dictionaries and subtask entity lists in `triage.py` to prevent mixed-casing leaks from reaching specialist agents.
+- **Case-Insensitive UI Root Matching**: Updated `format_graph_from_cache` in `graph_formatter.py` to compare node IDs and root IOCs case-insensitively, ensuring legacy records retain visual root styling (`#FF4B4B`).
+- **Case-Insensitive State Reducers**: Hardened `union_lists`, `merge_graphs`, and `push_to_rich_intel` to enforce case-insensitive matching.
+
 ## [0.6.3] - 2026-05-30
 
 ### Added

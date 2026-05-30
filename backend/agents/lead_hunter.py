@@ -89,8 +89,8 @@ async def lead_hunter_node(state: AgentState):
 
             if new_subtasks:
                 # --- LAYER 3: Convergence detection ---
-                prev_tasked = set(state.get("tasked_entities", []))
-                new_entity_ids = {t["entity_id"] for t in new_subtasks}
+                prev_tasked = {str(e).strip().lower() for e in state.get("tasked_entities", []) if e}
+                new_entity_ids = {str(t["entity_id"]).strip().lower() for t in new_subtasks if t.get("entity_id")}
 
                 if new_entity_ids and new_entity_ids.issubset(prev_tasked):
                     logger.info("lead_hunter_early_exit", reason="convergence", entities=list(new_entity_ids))

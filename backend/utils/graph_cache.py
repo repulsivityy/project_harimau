@@ -15,6 +15,13 @@ from backend.utils.logger import get_logger
 
 logger = get_logger("graph_cache")
 
+def _normalise_id(entity_id: Optional[Any]) -> Optional[str]:
+    """Normalise entity identifier by converting to string, stripping whitespace, and lowercasing."""
+    if entity_id is None:
+        return None
+    norm = str(entity_id).strip().lower()
+    return norm if norm else None
+
 def extract_gti_summary(rel_item: dict) -> dict:
     """Extract key GTI attributes from a relationship response item."""
     summary = {}
@@ -65,6 +72,9 @@ class InvestigationCache:
             attributes: Complete attributes dictionary from GTI API
         """
         # Deduplication: Check if entity already exists
+        entity_id = _normalise_id(entity_id)
+        if not entity_id:
+            return
         if entity_id in self.graph:
             # Entity exists - merge attributes instead of overwriting
             existing_data = self.graph.nodes[entity_id]
@@ -101,6 +111,10 @@ class InvestigationCache:
             rel_type: Relationship type (e.g., contacted_domains, dropped_files)
             metadata: Optional edge metadata
         """
+        source_id = _normalise_id(source_id)
+        target_id = _normalise_id(target_id)
+        if not source_id or not target_id:
+            return
         if self.graph.has_edge(source_id, target_id):
             for edge_key, edge_data in self.graph[source_id][target_id].items():
                 if edge_data.get("relationship") == rel_type:
@@ -127,7 +141,8 @@ class InvestigationCache:
         Returns:
             Dictionary with only requested fields
         """
-        if entity_id not in self.graph:
+        entity_id = _normalise_id(entity_id)
+        if not entity_id or entity_id not in self.graph:
             return {}
         
         node_data = self.graph.nodes[entity_id]
@@ -143,7 +158,8 @@ class InvestigationCache:
         Returns:
             Dictionary with all stored attributes
         """
-        if entity_id not in self.graph:
+        entity_id = _normalise_id(entity_id)
+        if not entity_id or entity_id not in self.graph:
             return {}
         
         return dict(self.graph.nodes[entity_id])
@@ -159,7 +175,8 @@ class InvestigationCache:
         Returns:
             List of neighbor entity IDs
         """
-        if entity_id not in self.graph:
+        entity_id = _normalise_id(entity_id)
+        if not entity_id or entity_id not in self.graph:
             return []
         
         neighbors = list(self.graph.neighbors(entity_id))
@@ -222,6 +239,9 @@ class InvestigationCache:
     
     def has_entity(self, entity_id: str) -> bool:
         """Check if entity exists in cache."""
+        entity_id = _normalise_id(entity_id)
+        if not entity_id:
+            return False
         return entity_id in self.graph
     
     def get_stats(self) -> Dict[str, Any]:
@@ -255,7 +275,8 @@ class InvestigationCache:
             entity_id: The entity ID
             agent: The agent name (e.g., 'malware', 'infrastructure')
         """
-        if entity_id not in self.graph:
+        entity_id = _normalise_id(entity_id)
+        if not entity_id or entity_id not in self.graph:
             return
 
         node = self.graph.nodes[entity_id]

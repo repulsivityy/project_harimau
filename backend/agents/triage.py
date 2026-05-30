@@ -704,9 +704,13 @@ async def triage_node(state: AgentState):
                     # Now parse minimal + display fields for LLM and graph UI
                     attrs = full_attrs
                     
+                    norm_id = str(entity_id).strip().lower() if entity_id else None
+                    if not norm_id:
+                        continue
+                    
                     # Base entity (always include)
                     parsed = {
-                        "id": entity_id,
+                        "id": norm_id,
                         "type": entity_type,
                     }
                     
@@ -865,7 +869,7 @@ async def triage_node(state: AgentState):
             relationships_data=relationships_data,
             priority_entities=analysis.get("priority_entities", []),
         )
-        state["tasked_entities"] = [t["entity_id"] for t in state["subtasks"] if "entity_id" in t]
+        state["tasked_entities"] = [str(t["entity_id"]).strip().lower() for t in state["subtasks"] if t.get("entity_id")]
         
         # Store comprehensive triage findings
         state["metadata"]["rich_intel"]["triage_analysis"] = {

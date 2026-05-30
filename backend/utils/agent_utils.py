@@ -163,8 +163,12 @@ def push_to_rich_intel(relationships_data: dict, rel_name: str, entity_type: str
         attributes = {}
     if rel_name not in relationships_data:
         relationships_data[rel_name] = []
+        
+    norm_val = str(value).strip().lower() if value else ""
+    norm_src = str(source_id).strip().lower() if source_id else ""
+    
     exists = any(
-        e.get("id") == value and e.get("source_id") == source_id
+        str(e.get("id")).strip().lower() == norm_val and str(e.get("source_id")).strip().lower() == norm_src
         for e in relationships_data[rel_name]
     )
     if not exists:

@@ -283,19 +283,20 @@ async def run_investigation(request: InvestigationRequest, background_tasks: Bac
     """
     import asyncio
     
+    normalized_ioc = request.ioc.strip().lower()
     job_id = str(uuid.uuid4())
-    logger.info("investigation_request", job_id=job_id, ioc=request.ioc)
+    logger.info("investigation_request", job_id=job_id, ioc=normalized_ioc)
     
     # Initialize Job Status
     await save_job(job_id, {
         "job_id": job_id,
         "status": "running",
-        "ioc": request.ioc,
+        "ioc": normalized_ioc,
         "created_at": datetime.now().isoformat()
     })
     
     # Run investigation in background safely, track for cancellation
-    task = asyncio.create_task(_run_investigation_background(job_id, request.ioc, request.max_iterations))
+    task = asyncio.create_task(_run_investigation_background(job_id, normalized_ioc, request.max_iterations))
     ACTIVE_TASKS[job_id] = task
     
     # Return immediately

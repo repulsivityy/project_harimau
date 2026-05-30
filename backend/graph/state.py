@@ -11,11 +11,15 @@ def last_value(a: Any, b: Any) -> Any:
     return b if b is not None else a
 
 def union_lists(a: Optional[List[str]], b: Optional[List[str]]) -> List[str]:
-    """Union two lists without introducing duplicates."""
+    """Union two lists with case-insensitive deduplication."""
     res = list(a or [])
+    res_norm = {str(item).strip().lower() for item in res if item is not None}
     for item in (b or []):
-        if item not in res:
-            res.append(item)
+        if item is not None:
+            norm = str(item).strip().lower()
+            if norm not in res_norm:
+                res.append(item)
+                res_norm.add(norm)
     return res
 
 def merge_graphs(a: Optional[Any], b: Optional[Any]) -> Optional[Any]:
@@ -36,10 +40,13 @@ def merge_graphs(a: Optional[Any], b: Optional[Any]) -> Optional[Any]:
     
     # Merge nodes
     combined = nx.MultiDiGraph(graph_a)
+    existing_nodes_norm = {str(n).strip().lower(): n for n in combined.nodes()}
     for node, data in graph_b.nodes(data=True):
-        if node in combined:
+        norm_node = str(node).strip().lower()
+        if norm_node in existing_nodes_norm:
+            actual_node = existing_nodes_norm[norm_node]
             # Node exists - deep merge attributes
-            existing = combined.nodes[node]
+            existing = combined.nodes[actual_node]
             for key, val in data.items():
                 if key not in existing:
                     existing[key] = val
@@ -47,15 +54,18 @@ def merge_graphs(a: Optional[Any], b: Optional[Any]) -> Optional[Any]:
                     existing[key].update(val)
                 elif isinstance(val, list) and isinstance(existing[key], list):
                     res = list(existing[key])
+                    res_set = {str(i).strip().lower() for i in res if i is not None}
                     for item in val:
-                        if item not in res:
+                        if item is not None and str(item).strip().lower() not in res_set:
                             res.append(item)
+                            res_set.add(str(item).strip().lower())
                     existing[key] = res
                 else:
                     existing[key] = val
         else:
             # New node - add it
             combined.add_node(node, **data)
+            existing_nodes_norm[norm_node] = node
     
     # Merge edges
     for u, v, data in graph_b.edges(data=True):

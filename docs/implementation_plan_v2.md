@@ -95,7 +95,7 @@ This document tracks the iterative evolution of the Harimau platform, organized 
 *   [ ] **Extract Inner Tool Loops**: Refactor specialist nodes (`infrastructure.py`, `malware.py`) to use Langgraph's native `ToolNode` and conditional edges instead of internal python `while/for` loops, improving checkpointing visibility and preventing thread blocking.
 *   [x] **Remove Duplicate Graph Expansion**: Remove post-LLM relationship expansion logic in specialists, relying solely on MCP tool wrappers to safely modify the graph cache during the natural reasoning loop.
 *   [ ] **Strict Structured Output**: Replace string parsing (`.replace("```json")`) with `with_structured_output()` to guarantee schema adherence and eliminate parsing fallbacks.
-*   [ ] **Optimize NetworkX MultiDiGraph Merges**: Ensure deterministic edge keys when using `merge_graphs` (or switch to `DiGraph` if identical parallel edges are unnecessary) to prevent exponential edge duplication during parallel state merges.
+*   [x] **Optimize NetworkX MultiDiGraph Merges**: (2026-05-30) Implemented deep node attribute merging (unioned lists like `analyzed_by`) and robust pre-insertion edge deduplication in `InvestigationCache.add_relationship` and `merge_graphs` to prevent data loss and exponential edge duplication during parallel state merges.
 
 ### Milestone 5: Intelligence Overhaul (May 2026) ✅
 *   [x] **Gemini 3 Migration**: Switched to official `ChatGoogleGenerativeAI` SDK using Gemini 3 Flash/Pro.

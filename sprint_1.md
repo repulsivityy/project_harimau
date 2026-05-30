@@ -52,11 +52,11 @@
 
 **Goal:** Eliminate silent data loss in the persistence layer. Lower visibility, but reduces future bug surface and unlocks graph-query work.
 
-### S2-T1 · State cleanup + `tasked_entities` reducer
+### [x] S2-T1 · State cleanup + `tasked_entities` reducer
 *   **Files:** `backend/graph/state.py`, `backend/main.py`, `backend/agents/lead_hunter.py`
 *   **Change:** Prune dead state fields (`concat_reports`, `loop_count`, `lead_plan`). Replace `tasked_entities` `operator.add` reducer with a proper `union_lists(a, b)` reducer to prevent exponential duplication.
 
-### S2-T2 · MultiDiGraph merge: list-union node attrs + edge dedup
+### [x] S2-T2 · MultiDiGraph merge: list-union node attrs + edge dedup
 *   **Files:** `backend/graph/state.py`, `backend/utils/graph_cache.py`
 *   **Change:** Implement proper deep-merge for node attributes in `state.py`. Guard `graph_cache.add_relationship` with edge deduplication logic to prevent parallel bloat.
 

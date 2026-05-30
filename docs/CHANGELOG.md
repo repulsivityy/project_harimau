@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-05-30
+
+### Added
+- **Graph Caching Deduplication Guard**: Implemented pre-insertion relationship deduplication in `InvestigationCache.add_relationship` (`backend/utils/graph_cache.py`). Intercepts requests where an edge with an identical relationship already exists between source and target, updating metadata in-place and eliminating parallel edge bloat.
+- **State Deep Node Merging**: `merge_graphs()` in `backend/graph/state.py` now performs deep merging of node attributes. List attributes like `analyzed_by` perform strict union concatenation to ensure all parallel agent execution traces are preserved.
+- **Null-Safety Visual Safeguards**: Hardened `backend/utils/graph_formatter.py` against anomalous non-dictionary GTI assessment structures and explicit `None` edge labels.
+- **Graph Merge Unit Tests**: Added full test suite `backend/tests/test_graph_merge.py` verifying deep merging and deduplication flow.
+
 ## [0.6.2] - 2026-05-29
 
 ### Fixed

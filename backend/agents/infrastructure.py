@@ -151,6 +151,11 @@ def generate_infrastructure_markdown_report(result: dict, ioc: str) -> str:
         md += "### Executive Summary\n"
         md += f"{result.get('summary', 'No summary provided.')}\n\n"
         
+        # Threat Categories
+        categories = result.get("categories", [])
+        if categories:
+            md += f"**Threat Categories:** {', '.join(categories)}\n\n"
+        
         # 1. Pivot Findings
         pivots = result.get("pivot_findings", [])
         if pivots:
@@ -594,14 +599,16 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                 prev = state.get("specialist_results", {}).get("infrastructure", {})
                 if prev:
                     # analyzed_targets: keyed by indicator; newer analysis wins for same target
-                    prev_by_ind = {t["indicator"]: t for t in prev.get("analyzed_targets", []) if isinstance(t, dict) and t.get("indicator")}
-                    new_by_ind  = {t["indicator"]: t for t in result.get("analyzed_targets", []) if isinstance(t, dict) and t.get("indicator")}
+                    prev_by_ind = {t["indicator"]: t for t in (prev.get("analyzed_targets") or []) if isinstance(t, dict) and t.get("indicator")}
+                    new_by_ind  = {t["indicator"]: t for t in (result.get("analyzed_targets") or []) if isinstance(t, dict) and t.get("indicator")}
                     result["analyzed_targets"] = list({**prev_by_ind, **new_by_ind}.values())
 
                     # Ordered-set union for all accumulating list fields
-                    for field in ["pivot_findings", "related_indicators", "associated_campaigns"]:
+                    for field in ["pivot_findings", "related_indicators", "associated_campaigns", "categories"]:
                         seen, merged = set(), []
-                        for v in prev.get(field, []) + result.get(field, []):
+                        prev_list = prev.get(field) or []
+                        result_list = result.get(field) or []
+                        for v in prev_list + result_list:
                             if v not in seen:
                                 seen.add(v)
                                 merged.append(v)

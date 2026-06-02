@@ -599,7 +599,7 @@ Perform comprehensive first-level triage analysis now.
             "priority_entities": [],
             "subtasks": [],
             "investigation_notes": f"System Error: {str(e)}",
-            "_llm_reasoning": f"## Parsing Error\n\nThe LLM output could not be parsed:\n\n```\n{str(e)}\n```\n\n### Raw Output\n```\n{final_text if 'final_text' in locals() else str(response.content)}\n```\n\n### Traceback\n```\n{tb}\n```"
+            "_llm_reasoning": f"## Parsing Error\n\nThe LLM output could not be parsed:\n\n```\n{str(e)}\n```\n\n### Raw Output\n```\n{final_text if 'final_text' in locals() else (str(response_obj) if 'response_obj' in locals() else 'No LLM response')}\n```\n\n### Traceback\n```\n{tb}\n```"
         }
         analysis["markdown_report"] = generate_markdown_report_locally(analysis, ioc, ioc_type, triage_data)
         return analysis

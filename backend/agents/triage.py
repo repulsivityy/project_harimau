@@ -2,6 +2,8 @@ import os
 import json
 import re
 import asyncio
+from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, Field
 
 from langchain_core.messages import SystemMessage, HumanMessage
 #from langchain_google_vertexai import ChatVertexAI
@@ -15,6 +17,32 @@ from backend.utils.graph_cache import InvestigationCache
 from backend.utils.transparency import emit_tool_call, emit_reasoning
 
 logger = get_logger("agent_triage")
+
+class ThreatContext(BaseModel):
+    campaigns: Optional[List[str]] = Field(default_factory=list)
+    threat_actors: Optional[List[str]] = Field(default_factory=list)
+    malware_families: Optional[List[str]] = Field(default_factory=list)
+    attack_techniques: Optional[List[str]] = Field(default_factory=list)
+    infrastructure_notes: Optional[str] = None
+
+class PriorityEntity(BaseModel):
+    entity_id: Optional[str] = None
+    entity_type: Optional[str] = None
+    reason: Optional[str] = None
+    relationship: Optional[str] = None
+
+class TriageAnalysisOutput(BaseModel):
+    ioc_type: str
+    verdict: str
+    confidence: str
+    severity: str
+    threat_score: Optional[float] = 0.0
+    executive_summary: Optional[str] = None
+    key_findings: Optional[List[str]] = Field(default_factory=list)
+    threat_context: Optional[ThreatContext] = Field(default_factory=ThreatContext)
+    priority_entities: Optional[List[PriorityEntity]] = Field(default_factory=list)
+    investigation_notes: Optional[str] = None
+
 
 # Graph growth control
 MAX_ENTITIES_PER_RELATIONSHIP = 10  # Max entities per relationship sent to LLM
@@ -501,27 +529,13 @@ Perform comprehensive first-level triage analysis now.
             "relationships_count": len(relationships_data)
         })
     
-    response = await llm.ainvoke(messages)
-    
-    # Parse response
+    response_obj = None
     try:
-        if isinstance(response.content, list):
-            parts = []
-            for block in response.content:
-                if isinstance(block, dict):
-                    text = block.get("text", "")
-                    if isinstance(text, (dict, list)):
-                        parts.append(json.dumps(text))
-                    else:
-                        parts.append(str(text))
-                else:
-                    parts.append(str(block))
-            final_text = "".join(parts)
-        else:
-            final_text = str(response.content)
+        structured_llm = llm.with_structured_output(TriageAnalysisOutput)
+        response_obj = await structured_llm.ainvoke(messages)
         
-        clean_content = final_text.replace("```json", "").replace("```", "").strip()
-        analysis = json.loads(clean_content)
+        analysis = response_obj.model_dump()
+        final_text = json.dumps(analysis, indent=2)
         
         # [NEW] WebRisk Check for URLs
         if ioc_type == "URL":
@@ -564,7 +578,7 @@ Perform comprehensive first-level triage analysis now.
         return analysis
         
     except Exception as e:
-        logger.error("phase2_parse_error", error=str(e), raw=str(response.content)[:500])
+        logger.error("phase2_parse_error", error=str(e), raw=str(response_obj)[:500])
         
         # Fallback with error visibility
         import traceback

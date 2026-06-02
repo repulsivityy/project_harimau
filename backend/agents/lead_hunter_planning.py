@@ -1,10 +1,24 @@
 import json
+from typing import Optional, List
+from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage
 from backend.utils.logger import get_logger
 from backend.utils.graph_cache import InvestigationCache
 from backend.graph.state import AgentState
 
 logger = get_logger("agent_lead_hunter_planning")
+
+class Subtask(BaseModel):
+    agent: Optional[str] = None
+    entity_id: Optional[str] = None
+    task: Optional[str] = None
+    context: Optional[str] = None
+
+class PlanningOutput(BaseModel):
+    subtasks: List[Subtask] = Field(default_factory=list)
+    investigation_complete: bool = False
+    comment: Optional[str] = None
+
 
 
 def _format_lead_for_prompt(node: dict) -> str:
@@ -164,31 +178,10 @@ Please plan the next steps.
             """)
         ]
         
-        response = await llm.ainvoke(messages)
+        structured_llm = llm.with_structured_output(PlanningOutput)
+        response_obj = await structured_llm.ainvoke(messages)
+        result = response_obj.model_dump()
         
-        # [CRITICAL FIX] ChatVertexAI/ChatGoogleGenerativeAI sometimes returns a list of blocks
-        if isinstance(response.content, list):
-            parts = []
-            for block in response.content:
-                if isinstance(block, dict):
-                    text = block.get("text", "")
-                    if isinstance(text, (dict, list)):
-                        parts.append(json.dumps(text))
-                    else:
-                        parts.append(str(text))
-                else:
-                    parts.append(str(block))
-            content = "".join(parts)
-        else:
-            content = str(response.content)
-            
-        # Initial cleanup
-        if "```json" in content:
-            content = content.split("```json")[-1].split("```")[0].strip()
-        elif "```" in content:
-            content = content.split("```")[1].strip()
-            
-        result = json.loads(content)
         task_count = len(result.get("subtasks", []))
         logger.info("lead_hunter_planning_complete", job_id=job_id, iteration=iteration, task_count=task_count)
         return result

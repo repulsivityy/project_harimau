@@ -3,6 +3,8 @@ import os
 import json
 import re
 from contextlib import AsyncExitStack
+from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 #from langchain_google_vertexai import ChatVertexAI
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -29,6 +31,24 @@ infra_iterations = 10 # number of iterations the infra agent goes through per se
 unique_targets_limit = 10 # number of unique targets the infra agent investigates per set of investigation
 
 logger = get_logger("agent_infrastructure")
+
+class AnalyzedTargetInfra(BaseModel):
+    indicator: Optional[str] = None
+    type: Optional[str] = None
+    verdict: Optional[str] = None
+    behavior: Optional[str] = None
+    notes: Optional[str] = None
+
+class InfrastructureSpecialistOutput(BaseModel):
+    verdict: str
+    threat_score: Optional[float] = 0.0
+    categories: Optional[List[str]] = Field(default_factory=list)
+    asn_or_registrar: Optional[str] = None
+    associated_campaigns: Optional[List[str]] = Field(default_factory=list)
+    pivot_findings: Optional[List[str]] = Field(default_factory=list)
+    related_indicators: Optional[List[str]] = Field(default_factory=list)
+    analyzed_targets: Optional[List[AnalyzedTargetInfra]] = Field(default_factory=list)
+    summary: Optional[str] = None
 
 INFRA_ANALYSIS_PROMPT = """
 You are an Elite Network Infrastructure Hunter.
@@ -510,6 +530,8 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
             
             # --- Robust Loop (Increased to 7 iterations for comprehensive analysis) ---
             final_content = ""
+            result = None
+            final_text = ""
             max_iterations = infra_iterations
             logger.info("infra_agent_loop_start", max_iterations=max_iterations)
             
@@ -519,7 +541,11 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                 if iteration == max_iterations - 1:
                     logger.info("infra_agent_final_iteration", iteration=iteration)
                     messages.append(HumanMessage(content=FINAL_ITERATION_PROMPT))
-                    response = await base_llm.ainvoke(messages)
+                    structured_llm = base_llm.with_structured_output(InfrastructureSpecialistOutput)
+                    response_obj = await structured_llm.ainvoke(messages)
+                    result = response_obj.model_dump()
+                    final_text = json.dumps(result, indent=2)
+                    break
                 else:
                     response = await llm.ainvoke(messages)
 
@@ -543,40 +569,24 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                     messages = cap_context_window(messages)
                 else:
                     logger.info("infra_agent_no_tools", iteration=iteration, has_content=bool(response.content))
-                    final_content = response.content
-                    if final_content: break
+                    structured_llm = base_llm.with_structured_output(InfrastructureSpecialistOutput)
+                    response_obj = await structured_llm.ainvoke(messages)
+                    result = response_obj.model_dump()
+                    final_text = json.dumps(result, indent=2)
+                    break
             
             # Enhanced fallback logic with detailed logging
-            if not final_content and messages:
-                logger.warning("infra_no_final_content_using_fallback", total_messages=len(messages))
-                
-                # Strategy 1: Find AIMessage with content but NO tool_calls (preferred)
-                for msg in reversed(messages):
-                    if isinstance(msg, AIMessage) and msg.content and not msg.tool_calls:
-                        final_content = msg.content
-                        logger.info("infra_fallback_strategy_1", found=True)
-                        break
-                
-                # Strategy 2: If still empty, accept ANY AIMessage with content (even if it has tool_calls)
-                if not final_content:
-                    logger.warning("infra_fallback_strategy_2_trying")
-                    for msg in reversed(messages):
-                        if isinstance(msg, AIMessage) and msg.content:
-                            final_content = msg.content
-                            logger.info("infra_fallback_strategy_2", found=True, had_tool_calls=bool(msg.tool_calls))
-                            break
-                
-                # Log final status
-                if not final_content:
-                    logger.error("infra_fallback_failed", ai_message_count=sum(1 for m in messages if isinstance(m, AIMessage)))
+            if not result:
+                structured_llm = base_llm.with_structured_output(InfrastructureSpecialistOutput)
+                response_obj = await structured_llm.ainvoke(messages)
+                result = response_obj.model_dump()
+                final_text = json.dumps(result, indent=2)
 
             # --- Parsing & Reporting ---
             try:
-                final_text, result = parse_llm_json(final_content)
-                
                 # If parse failed or returned empty, save the raw text for synthesis fallback
                 if not result:
-                    result["raw_text"] = final_text
+                    result = {"raw_text": final_text}
 
                 
                 # --- Code-enforced accumulation ---

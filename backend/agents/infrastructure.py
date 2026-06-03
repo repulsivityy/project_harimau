@@ -546,14 +546,9 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                 if iteration == max_iterations - 1:
                     logger.info("infra_agent_final_iteration", iteration=iteration)
                     messages.append(HumanMessage(content=FINAL_ITERATION_PROMPT))
-                    structured_llm = base_llm.with_structured_output(InfrastructureSpecialistOutput)
-                    response_obj = await structured_llm.ainvoke(messages)
-                    result = response_obj.model_dump()
-                    final_text = json.dumps(result, indent=2)
                     break
-                else:
-                    response = await llm.ainvoke(messages)
-
+                
+                response = await llm.ainvoke(messages)
                 messages.append(response)
 
                 if response.tool_calls:
@@ -574,18 +569,13 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                     messages = cap_context_window(messages)
                 else:
                     logger.info("infra_agent_no_tools", iteration=iteration, has_content=bool(response.content))
-                    structured_llm = base_llm.with_structured_output(InfrastructureSpecialistOutput)
-                    response_obj = await structured_llm.ainvoke(messages)
-                    result = response_obj.model_dump()
-                    final_text = json.dumps(result, indent=2)
                     break
             
-            # Enhanced fallback logic with detailed logging
-            if not result:
-                structured_llm = base_llm.with_structured_output(InfrastructureSpecialistOutput)
-                response_obj = await structured_llm.ainvoke(messages)
-                result = response_obj.model_dump()
-                final_text = json.dumps(result, indent=2)
+            # Invoke structured output LLM exactly once at the end
+            structured_llm = base_llm.with_structured_output(InfrastructureSpecialistOutput)
+            response_obj = await structured_llm.ainvoke(messages)
+            result = response_obj.model_dump()
+            final_text = json.dumps(result, indent=2)
 
             # --- Parsing & Reporting ---
             try:
@@ -599,9 +589,20 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                 prev = state.get("specialist_results", {}).get("infrastructure", {})
                 if prev:
                     # analyzed_targets: keyed by indicator; newer analysis wins for same target
-                    prev_by_ind = {t["indicator"]: t for t in (prev.get("analyzed_targets") or []) if isinstance(t, dict) and t.get("indicator")}
-                    new_by_ind  = {t["indicator"]: t for t in (result.get("analyzed_targets") or []) if isinstance(t, dict) and t.get("indicator")}
-                    result["analyzed_targets"] = list({**prev_by_ind, **new_by_ind}.values())
+                    prev_targets = prev.get("analyzed_targets") or []
+                    result_targets = result.get("analyzed_targets") or []
+
+                    prev_with_ind = [t for t in prev_targets if isinstance(t, dict) and t.get("indicator")]
+                    prev_no_ind = [t for t in prev_targets if isinstance(t, dict) and not t.get("indicator")]
+
+                    new_with_ind = [t for t in result_targets if isinstance(t, dict) and t.get("indicator")]
+                    new_no_ind = [t for t in result_targets if isinstance(t, dict) and not t.get("indicator")]
+
+                    prev_by_ind = {t["indicator"]: t for t in prev_with_ind}
+                    new_by_ind  = {t["indicator"]: t for t in new_with_ind}
+                    
+                    merged_with_ind = list({**prev_by_ind, **new_by_ind}.values())
+                    result["analyzed_targets"] = merged_with_ind + prev_no_ind + new_no_ind
 
                     # Ordered-set union for all accumulating list fields
                     for field in ["pivot_findings", "related_indicators", "associated_campaigns", "categories"]:
@@ -614,19 +615,19 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                                 merged.append(v)
                         result[field] = merged
 
-                    llm_target_count    = len(new_by_ind)
+                    llm_target_count    = len(new_with_ind) + len(new_no_ind)
                     merged_target_count = len(result["analyzed_targets"])
                     logger.info("infra_incremental_merge",
-                                prev_targets=len(prev_by_ind),
+                                prev_targets=len(prev_with_ind) + len(prev_no_ind),
                                 llm_new_targets=llm_target_count,
                                 merged_targets=merged_target_count,
                                 python_recovered=merged_target_count - llm_target_count,
                                 merged_pivot_findings=len(result.get("pivot_findings", [])),
                                 merged_related_indicators=len(result.get("related_indicators", [])))
-                    if llm_target_count < len(prev_by_ind):
+                    if len(new_with_ind) < len(prev_by_ind):
                         logger.warning("infra_incremental_regression",
                                        detail="LLM dropped analyzed_targets from previous iteration — Python enforcement recovered them",
-                                       prev=len(prev_by_ind), llm_produced=llm_target_count, after_merge=merged_target_count)
+                                       prev=len(prev_by_ind), llm_produced=len(new_with_ind), after_merge=len(merged_with_ind))
 
                 # Generate Report from merged result
                 result["markdown_report"] = generate_infrastructure_markdown_report(result, ioc)

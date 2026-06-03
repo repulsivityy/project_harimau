@@ -55,66 +55,10 @@ def build_peer_context(state: dict, iteration: int, self_agent: str, peer_agent:
 
 FINAL_ITERATION_PROMPT = (
     "This is the FINAL iteration. You MUST stop using tools now.\n\n"
-    "Based on all the information you've gathered, provide your comprehensive analysis "
-    "in valid JSON format.\n\n"
-    "Return ONLY the JSON structure as specified in the system prompt.\n\n"
+    "Based on all the information you've gathered, prepare your comprehensive analysis. "
     "If you don't have enough information, provide your best analysis based on what "
     "you've gathered so far."
 )
-
-
-def parse_llm_json(content) -> tuple[str, dict]:
-    """
-    Normalise Gemini/Vertex content (string or list of blocks) and extract a JSON
-    object or the first element of a JSON array.
-
-    Returns (raw_text, parsed_dict). Raises ValueError if no valid JSON is found.
-    """
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, dict):
-                text = block.get("text", "")
-                parts.append(json.dumps(text) if isinstance(text, (dict, list)) else str(text))
-            else:
-                parts.append(str(block))
-        raw_text = "".join(parts).strip()
-    else:
-        raw_text = str(content or "").strip()
-
-    if not raw_text:
-        return raw_text, {}
-
-    # Strip markdown fences
-    cleaned = raw_text
-    if "```json" in cleaned:
-        cleaned = cleaned.split("```json")[-1].split("```")[0].strip()
-    elif cleaned.count("```") >= 2:
-        cleaned = cleaned.split("```")[1].strip()
-
-    array_start = cleaned.find("[")
-    object_start = cleaned.find("{")
-
-    try:
-        if array_start != -1 and (object_start == -1 or array_start < object_start):
-            end_idx = cleaned.rfind("]")
-            if end_idx == -1:
-                raise ValueError("No closing bracket found for JSON array.")
-            parsed = json.loads(cleaned[array_start:end_idx + 1])
-            if not isinstance(parsed, list) or len(parsed) == 0:
-                raise ValueError("JSON array is empty or invalid.")
-            return raw_text, parsed[0]
-
-        if object_start != -1:
-            end_idx = cleaned.rfind("}")
-            if end_idx == -1:
-                raise ValueError("No closing brace found for JSON object.")
-            return raw_text, json.loads(cleaned[object_start:end_idx + 1])
-    except (ValueError, json.JSONDecodeError) as e:
-        # Fallback to returning raw text and empty dict on parse failure
-        return raw_text, {}
-
-    return raw_text, {}
 
 
 async def run_tools_parallel(tool_dispatch: dict, tool_calls: list, agent_name: str, logger, timeout: float = 20.0) -> list:

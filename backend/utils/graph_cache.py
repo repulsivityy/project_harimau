@@ -51,7 +51,7 @@ class InvestigationCache:
         Args:
             graph: Existing NetworkX graph to reuse, a state dict, or None to create new
         """
-        if isinstance(graph, dict):
+        if isinstance(graph, dict) and ("nodes" in graph or "edges" in graph or "links" in graph):
             self.graph = nx.node_link_graph(graph)
         elif isinstance(graph, nx.MultiDiGraph):
             self.graph = graph

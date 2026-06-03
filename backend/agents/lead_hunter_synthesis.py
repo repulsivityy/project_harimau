@@ -455,24 +455,6 @@ No actionable intelligence could be synthesized. The original indicator may be m
     
     try:
         response = await llm.ainvoke(messages)
-        
-        # [CRITICAL FIX] ChatVertexAI sometimes returns a list of blocks instead of a string.
-        # This breaks postgres `asyncpg` which expects a string for the final_report column.
-        if isinstance(response.content, list):
-            parts = []
-            for block in response.content:
-                if isinstance(block, dict):
-                    text = block.get("text", "")
-                    if isinstance(text, (dict, list)):
-                        parts.append(json.dumps(text))
-                    else:
-                        parts.append(str(text))
-                else:
-                    parts.append(str(block))
-            final_text = "".join(parts)
-            logger.info("lead_hunter_synthesis_complete", job_id=job_id)
-            return final_text
-
         logger.info("lead_hunter_synthesis_complete", job_id=job_id)
         return str(response.content)
     except Exception as e:

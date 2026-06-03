@@ -3,6 +3,8 @@ import os
 import json
 import re
 from contextlib import AsyncExitStack
+from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 #from langchain_google_vertexai import ChatVertexAI
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -15,7 +17,6 @@ from backend.utils.graph_cache import InvestigationCache, extract_gti_summary
 from backend.utils.transparency import emit_tool_call, emit_reasoning
 from backend.utils.agent_utils import (
     FINAL_ITERATION_PROMPT,
-    parse_llm_json,
     run_tools_parallel,
     cap_context_window,
     push_to_rich_intel,
@@ -29,6 +30,24 @@ infra_iterations = 10 # number of iterations the infra agent goes through per se
 unique_targets_limit = 10 # number of unique targets the infra agent investigates per set of investigation
 
 logger = get_logger("agent_infrastructure")
+
+class AnalyzedTargetInfra(BaseModel):
+    indicator: Optional[str] = None
+    type: Optional[str] = None
+    verdict: Optional[str] = None
+    behavior: Optional[str] = None
+    notes: Optional[str] = None
+
+class InfrastructureSpecialistOutput(BaseModel):
+    verdict: str
+    threat_score: Optional[float] = 0.0
+    categories: Optional[List[str]] = Field(default_factory=list)
+    asn_or_registrar: Optional[str] = None
+    associated_campaigns: Optional[List[str]] = Field(default_factory=list)
+    pivot_findings: Optional[List[str]] = Field(default_factory=list)
+    related_indicators: Optional[List[str]] = Field(default_factory=list)
+    analyzed_targets: Optional[List[AnalyzedTargetInfra]] = Field(default_factory=list)
+    summary: Optional[str] = None
 
 INFRA_ANALYSIS_PROMPT = """
 You are an Elite Network Infrastructure Hunter.
@@ -130,6 +149,11 @@ def generate_infrastructure_markdown_report(result: dict, ioc: str) -> str:
         # Executive Summary
         md += "### Executive Summary\n"
         md += f"{result.get('summary', 'No summary provided.')}\n\n"
+        
+        # Threat Categories
+        categories = result.get("categories", [])
+        if categories:
+            md += f"**Threat Categories:** {', '.join(categories)}\n\n"
         
         # 1. Pivot Findings
         pivots = result.get("pivot_findings", [])
@@ -509,7 +533,8 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
             ]
             
             # --- Robust Loop (Increased to 7 iterations for comprehensive analysis) ---
-            final_content = ""
+            result = None
+            final_text = ""
             max_iterations = infra_iterations
             logger.info("infra_agent_loop_start", max_iterations=max_iterations)
             
@@ -519,10 +544,9 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                 if iteration == max_iterations - 1:
                     logger.info("infra_agent_final_iteration", iteration=iteration)
                     messages.append(HumanMessage(content=FINAL_ITERATION_PROMPT))
-                    response = await base_llm.ainvoke(messages)
-                else:
-                    response = await llm.ainvoke(messages)
-
+                    break
+                
+                response = await llm.ainvoke(messages)
                 messages.append(response)
 
                 if response.tool_calls:
@@ -543,73 +567,60 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                     messages = cap_context_window(messages)
                 else:
                     logger.info("infra_agent_no_tools", iteration=iteration, has_content=bool(response.content))
-                    final_content = response.content
-                    if final_content: break
+                    break
             
-            # Enhanced fallback logic with detailed logging
-            if not final_content and messages:
-                logger.warning("infra_no_final_content_using_fallback", total_messages=len(messages))
-                
-                # Strategy 1: Find AIMessage with content but NO tool_calls (preferred)
-                for msg in reversed(messages):
-                    if isinstance(msg, AIMessage) and msg.content and not msg.tool_calls:
-                        final_content = msg.content
-                        logger.info("infra_fallback_strategy_1", found=True)
-                        break
-                
-                # Strategy 2: If still empty, accept ANY AIMessage with content (even if it has tool_calls)
-                if not final_content:
-                    logger.warning("infra_fallback_strategy_2_trying")
-                    for msg in reversed(messages):
-                        if isinstance(msg, AIMessage) and msg.content:
-                            final_content = msg.content
-                            logger.info("infra_fallback_strategy_2", found=True, had_tool_calls=bool(msg.tool_calls))
-                            break
-                
-                # Log final status
-                if not final_content:
-                    logger.error("infra_fallback_failed", ai_message_count=sum(1 for m in messages if isinstance(m, AIMessage)))
+            # Invoke structured output LLM exactly once at the end
+            structured_llm = base_llm.with_structured_output(InfrastructureSpecialistOutput)
+            response_obj = await structured_llm.ainvoke(messages)
+            result = response_obj.model_dump()
+            final_text = json.dumps(result, indent=2)
 
             # --- Parsing & Reporting ---
             try:
-                final_text, result = parse_llm_json(final_content)
-                
-                # If parse failed or returned empty, save the raw text for synthesis fallback
-                if not result:
-                    result["raw_text"] = final_text
-
-                
                 # --- Code-enforced accumulation ---
                 # Merge previous iteration's findings regardless of LLM behaviour.
                 prev = state.get("specialist_results", {}).get("infrastructure", {})
                 if prev:
                     # analyzed_targets: keyed by indicator; newer analysis wins for same target
-                    prev_by_ind = {t["indicator"]: t for t in prev.get("analyzed_targets", []) if isinstance(t, dict) and t.get("indicator")}
-                    new_by_ind  = {t["indicator"]: t for t in result.get("analyzed_targets", []) if isinstance(t, dict) and t.get("indicator")}
-                    result["analyzed_targets"] = list({**prev_by_ind, **new_by_ind}.values())
+                    prev_targets = prev.get("analyzed_targets") or []
+                    result_targets = result.get("analyzed_targets") or []
+
+                    prev_with_ind = [t for t in prev_targets if isinstance(t, dict) and t.get("indicator")]
+                    prev_no_ind = [t for t in prev_targets if isinstance(t, dict) and not t.get("indicator")]
+
+                    new_with_ind = [t for t in result_targets if isinstance(t, dict) and t.get("indicator")]
+                    new_no_ind = [t for t in result_targets if isinstance(t, dict) and not t.get("indicator")]
+
+                    prev_by_ind = {t["indicator"]: t for t in prev_with_ind}
+                    new_by_ind  = {t["indicator"]: t for t in new_with_ind}
+                    
+                    merged_with_ind = list({**prev_by_ind, **new_by_ind}.values())
+                    result["analyzed_targets"] = merged_with_ind + prev_no_ind + new_no_ind
 
                     # Ordered-set union for all accumulating list fields
-                    for field in ["pivot_findings", "related_indicators", "associated_campaigns"]:
+                    for field in ["pivot_findings", "related_indicators", "associated_campaigns", "categories"]:
                         seen, merged = set(), []
-                        for v in prev.get(field, []) + result.get(field, []):
+                        prev_list = prev.get(field) or []
+                        result_list = result.get(field) or []
+                        for v in prev_list + result_list:
                             if v not in seen:
                                 seen.add(v)
                                 merged.append(v)
                         result[field] = merged
 
-                    llm_target_count    = len(new_by_ind)
+                    llm_target_count    = len(new_with_ind) + len(new_no_ind)
                     merged_target_count = len(result["analyzed_targets"])
                     logger.info("infra_incremental_merge",
-                                prev_targets=len(prev_by_ind),
+                                prev_targets=len(prev_with_ind) + len(prev_no_ind),
                                 llm_new_targets=llm_target_count,
                                 merged_targets=merged_target_count,
                                 python_recovered=merged_target_count - llm_target_count,
                                 merged_pivot_findings=len(result.get("pivot_findings", [])),
                                 merged_related_indicators=len(result.get("related_indicators", [])))
-                    if llm_target_count < len(prev_by_ind):
+                    if len(new_with_ind) < len(prev_by_ind):
                         logger.warning("infra_incremental_regression",
                                        detail="LLM dropped analyzed_targets from previous iteration — Python enforcement recovered them",
-                                       prev=len(prev_by_ind), llm_produced=llm_target_count, after_merge=merged_target_count)
+                                       prev=len(prev_by_ind), llm_produced=len(new_with_ind), after_merge=len(merged_with_ind))
 
                 # Generate Report from merged result
                 result["markdown_report"] = generate_infrastructure_markdown_report(result, ioc)
@@ -729,7 +740,7 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                 result = {
                     "verdict": "System Error",
                     "summary": f"Failed to parse analysis results: {str(e)}",
-                    "markdown_report": f"## Analysis Failed\n\nThe Infrastructure Agent encountered an error while processing the results.\n\n**Error Details:**\n```\n{str(e)}\n```\n\n**Raw Output:**\n```\n{str(final_text)[:2000] if 'final_text' in locals() else str(final_content)[:2000]}\n```"
+                    "markdown_report": f"## Analysis Failed\n\nThe Infrastructure Agent encountered an error while processing the results.\n\n**Error Details:**\n```\n{str(e)}\n```\n\n**Raw Output:**\n```\n{str(final_text)[:2000]}\n```"
                 }
     except Exception as e:
         logger.error("infra_node_fatal_error", error=str(e))

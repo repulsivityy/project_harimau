@@ -17,7 +17,6 @@ from backend.utils.graph_cache import InvestigationCache, extract_gti_summary
 from backend.utils.transparency import emit_tool_call, emit_reasoning
 from backend.utils.agent_utils import (
     FINAL_ITERATION_PROMPT,
-    parse_llm_json,
     run_tools_parallel,
     cap_context_window,
     push_to_rich_intel,
@@ -534,7 +533,6 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
             ]
             
             # --- Robust Loop (Increased to 7 iterations for comprehensive analysis) ---
-            final_content = ""
             result = None
             final_text = ""
             max_iterations = infra_iterations
@@ -579,11 +577,6 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
 
             # --- Parsing & Reporting ---
             try:
-                # If parse failed or returned empty, save the raw text for synthesis fallback
-                if not result:
-                    result = {"raw_text": final_text}
-
-                
                 # --- Code-enforced accumulation ---
                 # Merge previous iteration's findings regardless of LLM behaviour.
                 prev = state.get("specialist_results", {}).get("infrastructure", {})
@@ -747,7 +740,7 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                 result = {
                     "verdict": "System Error",
                     "summary": f"Failed to parse analysis results: {str(e)}",
-                    "markdown_report": f"## Analysis Failed\n\nThe Infrastructure Agent encountered an error while processing the results.\n\n**Error Details:**\n```\n{str(e)}\n```\n\n**Raw Output:**\n```\n{str(final_text)[:2000] if 'final_text' in locals() else str(final_content)[:2000]}\n```"
+                    "markdown_report": f"## Analysis Failed\n\nThe Infrastructure Agent encountered an error while processing the results.\n\n**Error Details:**\n```\n{str(e)}\n```\n\n**Raw Output:**\n```\n{str(final_text)[:2000]}\n```"
                 }
     except Exception as e:
         logger.error("infra_node_fatal_error", error=str(e))

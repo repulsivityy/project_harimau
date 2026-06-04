@@ -3,12 +3,15 @@ import os
 import json
 import re
 from contextlib import AsyncExitStack
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Annotated, TypedDict
 from pydantic import BaseModel, Field
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage, BaseMessage
 #from langchain_google_vertexai import ChatVertexAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.tools import tool
+from langgraph.graph import StateGraph, START, END
+from langgraph.prebuilt import ToolNode
+from backend.utils import checkpointer_registry
 
 from backend.graph.state import AgentState
 from backend.mcp.client import mcp_manager
@@ -194,10 +197,41 @@ def generate_infrastructure_markdown_report(result: dict, ioc: str) -> str:
     except Exception as e:
         return f"Error generating infrastructure report: {str(e)}"
 
+def reduce_messages(left: List[BaseMessage], right: List[BaseMessage]) -> List[BaseMessage]:
+    if right and right[0].additional_kwargs.get("overwrite_history"):
+        return right
+    merged = list(left)
+    for msg in right:
+        replaced = False
+        if msg.id:
+            for idx, existing in enumerate(merged):
+                if existing.id == msg.id:
+                    merged[idx] = msg
+                    replaced = True
+                    break
+        if not replaced:
+            merged.append(msg)
+    return merged
+
+class InfraSubgraphState(TypedDict):
+    ioc: str
+    subtasks: List[Dict[str, Any]]
+    specialist_results: Dict[str, Any]
+    investigation_graph: Optional[Any]
+    metadata: Dict[str, Any]
+    job_id: Optional[str]
+    iteration: int
+    
+    # Subgraph local variables
+    messages: Annotated[List[BaseMessage], reduce_messages]
+    unique_targets: List[Dict[str, Any]]
+    loop_step: int
+    max_iterations: int
+    final_result: Optional[Dict[str, Any]]
+
 async def infrastructure_node(state: AgentState):
     """
-    Infrastructure Specialist Agent (Iterative & Graph-Aware).
-    Now includes: Triage context reading + Relationship expansion.
+    Infrastructure Specialist Agent (Iterative & Graph-Aware Sub-graph wrapper).
     """
     ioc = state["ioc"]
     logger.info("infra_agent_start", ioc=ioc)
@@ -219,110 +253,7 @@ async def infrastructure_node(state: AgentState):
         project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
         location = os.getenv("GOOGLE_CLOUD_REGION", "asia-southeast1")
 
-        # --- Identify Targets ---
-        # Primary logic: if IOC is IP/Domain/URL or if explicitly tasked
-        targets = []
-        
-        # 1. Check Root
-        import re
-        # Simple heuristics
-        is_ip = re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", ioc)
-        is_domain = not is_ip and "." in ioc and "http" not in ioc
-        is_url = "http" in ioc
-        
-        if is_ip or is_domain or is_url:
-            root_entity = cache.get_entity_full(ioc)
-            if root_entity and "infrastructure" in root_entity.get("analyzed_by", []):
-                logger.info("infra_root_already_investigated", value=ioc)
-            else:
-                targets.append({"type": "root", "value": ioc})
-            
-        # 2. Check Subtasks (with Regex Fallback)
-        for task in state.get("subtasks", []):
-            if task.get("agent") in ["infrastructure_specialist", "infrastructure"]:
-                val = task.get("entity_id")
-                task_text = task.get("task", "")
-                task_context = task.get("context", "")
-
-                # If explicit entity_id is provided, use it
-                if val:
-                    targets.append({
-                        "type": "subtask", 
-                        "value": val,
-                        "context": task.get("context")
-                    })
-                
-                # ALSO scan the task description for additional entities (grouped tasks)
-                # Regex for IP
-                ips = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", task_text)
-                for ip in ips:
-                    targets.append({"type": "subtask_extraction", "value": ip, "context": task_context})
-                
-                # Regex for URL (simple)
-                urls = re.findall(r"https?://[^\s]+", task_text)
-                for url in urls:
-                    targets.append({"type": "subtask_extraction", "value": url, "context": task_context})
-                
-                # Regex for Domain (avoid common words, require dot)
-                # Exclude common file extensions often mistaken for domains in text
-                domains = re.findall(r"\b([a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)\b", task_text)
-                ignored_exts = ["exe", "dll", "pdf", "txt", "json", "docx", "png", "jpg", "zip", "rar"]
-                for d in domains:
-                    parts = d.split(".")
-                    if len(parts) >= 2 and parts[-1].lower() not in ignored_exts and d not in ["e.g", "i.e", "vs."]:
-                         targets.append({"type": "subtask_extraction", "value": d, "context": task_context})
-
-        # 3. SAFETY NET: Scan Triage Key Findings if we have capacity
-        # Sometimes Triage identifies infrastructure but forgets to create a subtask
-        if len(targets) < 5:  # Arbitrary check to see if we need more targets
-            combined_text = triage_summary + " " + " ".join(key_findings)
-            logger.info("infra_safety_net_scanning")
-            
-            # IPs
-            ips = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", combined_text)
-            for ip in ips:
-                e = cache.get_entity_full(ip)
-                if not (e and "infrastructure" in e.get("analyzed_by", [])):
-                    targets.append({"type": "safety_net", "value": ip, "context": "Found in Triage Summary"})
-
-            # Domains (stricter filter for safety net to avoid noise)
-            domains = re.findall(r"\b([a-zA-Z0-9-]+\.[a-zA-Z]{2,})\b", combined_text)
-            for d in domains:
-                if d.lower() not in [ioc.lower(), "google.com", "virustotal.com", "example.com"]:
-                    e = cache.get_entity_full(d)
-                    if not (e and "infrastructure" in e.get("analyzed_by", [])):
-                        targets.append({"type": "safety_net", "value": d, "context": "Found in Triage Summary"})
-
-        # Deduplicate
-        unique_targets = []
-        seen = set()
-        
-        # Helper to clean values (strip trailing periods, etc)
-        def clean_val(v):
-            return v.strip(".,;:").lower()
-
-        for t in targets:
-            raw_val = t["value"]
-            if not raw_val: continue
-            
-            clean = clean_val(raw_val)
-            
-            # Avoid self-referencing loop if target IS the root IOC
-            # (Unless root is specifically what we want to re-analyze, but usually we pivot FROM it)
-            # Actually, we DO want to analyze root if it's infra.
-            
-            if clean not in seen:
-                unique_targets.append(t)
-                seen.add(clean)
-                
-        unique_targets = unique_targets[:unique_targets_limit]
-        logger.info("infra_targets_identified", count=len(unique_targets), targets=[t["value"] for t in unique_targets])
-        
-        if not unique_targets:
-            logger.warning("infra_no_targets_found")
-            return state
-
-        # --- Define Tools ---
+        # Setup Tools & Sub-graph dynamic definitions inside MCP session context
         async with AsyncExitStack() as stack:
             session = await stack.enter_async_context(mcp_manager.get_session("gti"))
             shodan_session = await stack.enter_async_context(mcp_manager.get_session("shodan"))
@@ -331,6 +262,9 @@ async def infrastructure_node(state: AgentState):
             @tool
             async def get_domain_report(domain: str):
                 """Get threat report for a domain."""
+                job_id = state.get("job_id")
+                if job_id:
+                    await emit_tool_call(job_id, "infrastructure", "get_domain_report", {"domain": domain})
                 try: 
                     res = await session.call_tool("get_domain_report", arguments={"domain": domain})
                     return res.content[0].text if res.content else "{}"
@@ -339,6 +273,9 @@ async def infrastructure_node(state: AgentState):
             @tool
             async def get_entities_related_to_a_domain(domain: str, relationship: str):
                 """Get entities related to a domain. Relationships: resolutions, subdomains, communicating_files."""
+                job_id = state.get("job_id")
+                if job_id:
+                    await emit_tool_call(job_id, "infrastructure", "get_entities_related_to_a_domain", {"domain": domain, "relationship": relationship})
                 try:
                     res = await session.call_tool("get_entities_related_to_a_domain", arguments={"domain": domain, "relationship_name": relationship, "descriptors_only": True})
                     if not res.content: return "[]"
@@ -365,6 +302,9 @@ async def infrastructure_node(state: AgentState):
             @tool
             async def get_ip_address_report(ip_address: str):
                 """Get threat report for an IP address."""
+                job_id = state.get("job_id")
+                if job_id:
+                    await emit_tool_call(job_id, "infrastructure", "get_ip_address_report", {"ip_address": ip_address})
                 try: 
                     res = await session.call_tool("get_ip_address_report", arguments={"ip_address": ip_address})
                     return res.content[0].text if res.content else "{}"
@@ -373,6 +313,9 @@ async def infrastructure_node(state: AgentState):
             @tool
             async def get_entities_related_to_an_ip_address(ip_address: str, relationship: str):
                 """Get entities related to an IP. Relationships: resolutions, communicating_files, referrer_files."""
+                job_id = state.get("job_id")
+                if job_id:
+                    await emit_tool_call(job_id, "infrastructure", "get_entities_related_to_an_ip_address", {"ip_address": ip_address, "relationship": relationship})
                 try:
                     res = await session.call_tool("get_entities_related_to_an_ip_address", arguments={"ip_address": ip_address, "relationship_name": relationship, "descriptors_only": True})
                     if not res.content: return "[]"
@@ -399,6 +342,9 @@ async def infrastructure_node(state: AgentState):
             @tool
             async def get_url_report(url: str):
                 """Get threat report for a URL."""
+                job_id = state.get("job_id")
+                if job_id:
+                    await emit_tool_call(job_id, "infrastructure", "get_url_report", {"url": url})
                 try: 
                     res = await session.call_tool("get_url_report", arguments={"url": url})
                     return res.content[0].text if res.content else "{}"
@@ -407,6 +353,9 @@ async def infrastructure_node(state: AgentState):
             @tool
             async def get_entities_related_to_an_url(url: str, relationship: str):
                 """Get entities related to a URL. Relationships: downloaded_files, network_location."""
+                job_id = state.get("job_id")
+                if job_id:
+                    await emit_tool_call(job_id, "infrastructure", "get_entities_related_to_an_url", {"url": url, "relationship": relationship})
                 try:
                     res = await session.call_tool("get_entities_related_to_an_url", arguments={"url": url, "relationship_name": relationship, "descriptors_only": True})
                     if not res.content: return "[]"
@@ -429,11 +378,12 @@ async def infrastructure_node(state: AgentState):
                     return json.dumps(found)
                 except Exception as e: return str(e)
 
-
-
             @tool
             async def get_webrisk_report(url: str):
                 """Check URL against Google Web Risk (Social Engineering/Malware)."""
+                job_id = state.get("job_id")
+                if job_id:
+                    await emit_tool_call(job_id, "infrastructure", "get_webrisk_report", {"url": url})
                 try:
                     res = await webrisk.evaluate_uri(url)
                     return json.dumps(res)
@@ -442,6 +392,9 @@ async def infrastructure_node(state: AgentState):
             @tool
             async def shodan_ip_lookup(ip: str):
                 """Look up an IP in Shodan. Returns open ports, services, banners, known vulnerabilities, and geolocation."""
+                job_id = state.get("job_id")
+                if job_id:
+                    await emit_tool_call(job_id, "infrastructure", "shodan_ip_lookup", {"ip": ip})
                 try:
                     res = await shodan_session.call_tool("ip_lookup", arguments={"ip": ip})
                     return res.content[0].text if res.content else "{}"
@@ -450,6 +403,9 @@ async def infrastructure_node(state: AgentState):
             @tool
             async def shodan_dns_lookup(hostnames: str):
                 """Resolve one or more hostnames to IPs via Shodan DNS. Accepts comma-separated hostnames."""
+                job_id = state.get("job_id")
+                if job_id:
+                    await emit_tool_call(job_id, "infrastructure", "shodan_dns_lookup", {"hostnames": hostnames})
                 try:
                     res = await shodan_session.call_tool("dns_lookup", arguments={"hostnames": hostnames})
                     return res.content[0].text if res.content else "{}"
@@ -458,12 +414,14 @@ async def infrastructure_node(state: AgentState):
             @tool
             async def shodan_reverse_dns_lookup(ips: str):
                 """Resolve one or more IPs to hostnames via Shodan. Accepts comma-separated IPs."""
+                job_id = state.get("job_id")
+                if job_id:
+                    await emit_tool_call(job_id, "infrastructure", "shodan_reverse_dns_lookup", {"ips": ips})
                 try:
                     res = await shodan_session.call_tool("reverse_dns_lookup", arguments={"ips": ips})
                     return res.content[0].text if res.content else "{}"
                 except Exception as e: return str(e)
 
-            # Build LLM
             tools = [
                 get_domain_report, get_entities_related_to_a_domain,
                 get_ip_address_report, get_entities_related_to_an_ip_address,
@@ -471,7 +429,7 @@ async def infrastructure_node(state: AgentState):
                 get_webrisk_report,
                 shodan_ip_lookup, shodan_dns_lookup, shodan_reverse_dns_lookup,
             ]
-            tool_dispatch = {t.name: t for t in tools}
+
             base_llm = ChatGoogleGenerativeAI(
                 model="gemini-3.1-pro-preview",
                 temperature=0.0,
@@ -481,43 +439,133 @@ async def infrastructure_node(state: AgentState):
                 include_thoughts=True
             )
             llm = base_llm.bind_tools(tools)
-            
-            # Format Triage Context for LLM
-            triage_context_str = f"""**TRIAGE SUMMARY:**
+
+            # Node 1: init_node
+            def init_node(sub_state: InfraSubgraphState):
+                if sub_state.get("messages"):
+                    return {}
+                
+                # --- Identify Targets ---
+                targets = []
+                
+                # 1. Check Root
+                is_ip = re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", ioc)
+                is_domain = not is_ip and "." in ioc and "http" not in ioc
+                is_url = "http" in ioc
+                
+                if is_ip or is_domain or is_url:
+                    root_entity = cache.get_entity_full(ioc)
+                    if root_entity and "infrastructure" in root_entity.get("analyzed_by", []):
+                        logger.info("infra_root_already_investigated", value=ioc)
+                    else:
+                        targets.append({"type": "root", "value": ioc})
+                    
+                # 2. Check Subtasks (with Regex Fallback)
+                for task in sub_state.get("subtasks", []):
+                    if task.get("agent") in ["infrastructure_specialist", "infrastructure"]:
+                        val = task.get("entity_id")
+                        task_text = task.get("task", "")
+                        task_context = task.get("context", "")
+
+                        if val:
+                            targets.append({
+                                "type": "subtask", 
+                                "value": val,
+                                "context": task.get("context")
+                            })
+                        
+                        # ALSO scan the task description for additional entities (grouped tasks)
+                        ips = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", task_text)
+                        for ip in ips:
+                            targets.append({"type": "subtask_extraction", "value": ip, "context": task_context})
+                        
+                        urls = re.findall(r"https?://[^\s]+", task_text)
+                        for url in urls:
+                            targets.append({"type": "subtask_extraction", "value": url, "context": task_context})
+                        
+                        domains = re.findall(r"\b([a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)\b", task_text)
+                        ignored_exts = ["exe", "dll", "pdf", "txt", "json", "docx", "png", "jpg", "zip", "rar"]
+                        for d in domains:
+                            parts = d.split(".")
+                            if len(parts) >= 2 and parts[-1].lower() not in ignored_exts and d not in ["e.g", "i.e", "vs."]:
+                                 targets.append({"type": "subtask_extraction", "value": d, "context": task_context})
+
+                # 3. SAFETY NET: Scan Triage Key Findings if we have capacity
+                if len(targets) < 5:
+                    combined_text = triage_summary + " " + " ".join(key_findings)
+                    logger.info("infra_safety_net_scanning")
+                    
+                    ips = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", combined_text)
+                    for ip in ips:
+                        e = cache.get_entity_full(ip)
+                        if not (e and "infrastructure" in e.get("analyzed_by", [])):
+                            targets.append({"type": "safety_net", "value": ip, "context": "Found in Triage Summary"})
+
+                    domains = re.findall(r"\b([a-zA-Z0-9-]+\.[a-zA-Z]{2,})\b", combined_text)
+                    for d in domains:
+                        if d.lower() not in [ioc.lower(), "google.com", "virustotal.com", "example.com"]:
+                            e = cache.get_entity_full(d)
+                            if not (e and "infrastructure" in e.get("analyzed_by", [])):
+                                targets.append({"type": "safety_net", "value": d, "context": "Found in Triage Summary"})
+
+                # Deduplicate
+                unique_targets = []
+                seen = set()
+                
+                def clean_val(v):
+                    return v.strip(".,;:").lower()
+
+                for t in targets:
+                    raw_val = t["value"]
+                    if not raw_val: continue
+                    clean = clean_val(raw_val)
+                    if clean not in seen:
+                        unique_targets.append(t)
+                        seen.add(clean)
+                        
+                unique_targets = unique_targets[:unique_targets_limit]
+                logger.info("infra_targets_identified", count=len(unique_targets), targets=[t["value"] for t in unique_targets])
+                
+                if not unique_targets:
+                    logger.warning("infra_no_targets_found")
+                    return {"unique_targets": [], "messages": []}
+
+                # Format Triage Context for LLM
+                triage_context_str = f"""**TRIAGE SUMMARY:**
 {triage_summary}
 
 **KEY FINDINGS FROM TRIAGE:**
 """
-            if key_findings:
-                for finding in key_findings:
-                    triage_context_str += f"- {finding}\n"
-            else:
-                triage_context_str += "- (No specific findings listed)\n"
-            
-            # Check subtasks for specific instructions
-            context = ""
-            for task in state.get("subtasks", []):
-                if task.get("agent") in ["infrastructure_specialist", "infrastructure"]:
-                    context += f"- Task: {task.get('task')}\n"
-                    context += f"- Context: {task.get('context')}\n"
-            
-            peer_context = build_peer_context(
-                state, state.get("iteration", 0), "infrastructure", "malware",
-                extra_fields=[
-                    ("Related Indicators", "related_indicators"),
-                    ("Pivot Findings", "pivot_findings"),
-                ],
-                count_key="related_indicators",
-                logger=logger,
-            )
+                if key_findings:
+                    for finding in key_findings:
+                        triage_context_str += f"- {finding}\n"
+                else:
+                    triage_context_str += "- (No specific findings listed)\n"
+                
+                # Check subtasks for specific instructions
+                context = ""
+                for task in sub_state.get("subtasks", []):
+                    if task.get("agent") in ["infrastructure_specialist", "infrastructure"]:
+                        context += f"- Task: {task.get('task')}\n"
+                        context += f"- Context: {task.get('context')}\n"
+                
+                peer_context = build_peer_context(
+                    state, sub_state.get("iteration", 0), "infrastructure", "malware",
+                    extra_fields=[
+                        ("Related Indicators", "related_indicators"),
+                        ("Pivot Findings", "pivot_findings"),
+                    ],
+                    count_key="related_indicators",
+                    logger=logger,
+                )
 
-            messages = [
-                SystemMessage(content=INFRA_ANALYSIS_PROMPT),
-                HumanMessage(content=f"""
+                messages = [
+                    SystemMessage(content=INFRA_ANALYSIS_PROMPT),
+                    HumanMessage(content=f"""
 {triage_context_str}
 
 **YOUR PREVIOUS REPORT:**
-{state.get("specialist_results", {}).get("infrastructure", {}).get("markdown_report", "No previous report exists. This is your first iteration.")}
+{sub_state.get("specialist_results", {}).get("infrastructure", {}).get("markdown_report", "No previous report exists. This is your first iteration.")}
 {peer_context}
 
 **YOUR ASSIGNMENT:**
@@ -529,59 +577,65 @@ You have been tasked to investigate these new uninvestigated nodes based on the 
 
 **CRITICAL REPORTING INSTRUCTION:**
 Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields below. Your output must be a single valid JSON object that merges prior and new intelligence into one cohesive picture.
-                """)
-            ]
-            
-            # --- Robust Loop (Increased to 7 iterations for comprehensive analysis) ---
-            result = None
-            final_text = ""
-            max_iterations = infra_iterations
-            logger.info("infra_agent_loop_start", max_iterations=max_iterations)
-            
-            for iteration in range(max_iterations):
-                logger.info("infra_agent_iteration", iteration=iteration, max_iterations=max_iterations)
+                    """)
+                ]
                 
-                if iteration == max_iterations - 1:
-                    logger.info("infra_agent_final_iteration", iteration=iteration)
+                return {
+                    "unique_targets": unique_targets,
+                    "messages": messages,
+                    "loop_step": 0
+                }
+
+            # Node 2: agent_node
+            async def agent_node(sub_state: InfraSubgraphState):
+                messages = list(sub_state["messages"])
+                loop_step = sub_state["loop_step"]
+                max_iterations = sub_state["max_iterations"]
+                
+                if loop_step == max_iterations - 1:
+                    logger.info("infra_agent_final_iteration", loop_step=loop_step)
                     messages.append(HumanMessage(content=FINAL_ITERATION_PROMPT))
-                    break
                 
+                logger.info("infra_agent_iteration", iteration=loop_step, max_iterations=max_iterations)
                 response = await llm.ainvoke(messages)
-                messages.append(response)
+                
+                new_messages = []
+                if loop_step == max_iterations - 1:
+                    new_messages.append(HumanMessage(content=FINAL_ITERATION_PROMPT))
+                new_messages.append(response)
+                
+                return {
+                    "messages": new_messages,
+                    "loop_step": loop_step + 1
+                }
 
-                if response.tool_calls:
-                    job_id = state.get("job_id")
-                    logger.info("infra_agent_tool_calls", iteration=iteration, num_tools=len(response.tool_calls), tools=[tc["name"] for tc in response.tool_calls])
+            # Node 3: post_tool_node
+            async def post_tool_node(sub_state: InfraSubgraphState):
+                updated_graph = cache.get_state()
+                messages = sub_state["messages"]
+                capped_messages = cap_context_window(messages)
+                
+                if len(capped_messages) < len(messages):
+                    logger.info("infra_subgraph_capping_context", original=len(messages), capped=len(capped_messages))
+                    capped_messages[0].additional_kwargs["overwrite_history"] = True
+                    return {
+                        "messages": capped_messages,
+                        "investigation_graph": updated_graph
+                    }
+                
+                return {
+                    "investigation_graph": updated_graph
+                }
 
-                    for tc in response.tool_calls:
-                        logger.info("infra_invoking_tool", iteration=iteration, tool=tc["name"], args=tc["args"])
-                        if job_id:
-                            await emit_tool_call(job_id, "infrastructure", tc["name"], tc["args"])
-
-                    results = await run_tools_parallel(tool_dispatch, response.tool_calls, "infrastructure", logger)
-
-                    for tc, result_txt in zip(response.tool_calls, results):
-                        messages.append(ToolMessage(content=result_txt, tool_call_id=tc["id"]))
-                        logger.info("infra_tool_response", iteration=iteration, tool=tc["name"], response_length=len(result_txt))
-
-                    messages = cap_context_window(messages)
-                else:
-                    logger.info("infra_agent_no_tools", iteration=iteration, has_content=bool(response.content))
-                    break
-            
-            # Invoke structured output LLM exactly once at the end
-            structured_llm = base_llm.with_structured_output(InfrastructureSpecialistOutput)
-            response_obj = await structured_llm.ainvoke(messages)
-            result = response_obj.model_dump()
-            final_text = json.dumps(result, indent=2)
-
-            # --- Parsing & Reporting ---
-            try:
+            # Node 4: final_output_node
+            async def final_output_node(sub_state: InfraSubgraphState):
+                structured_llm = base_llm.with_structured_output(InfrastructureSpecialistOutput)
+                response_obj = await structured_llm.ainvoke(sub_state["messages"])
+                result = response_obj.model_dump()
+                
                 # --- Code-enforced accumulation ---
-                # Merge previous iteration's findings regardless of LLM behaviour.
-                prev = state.get("specialist_results", {}).get("infrastructure", {})
+                prev = sub_state["specialist_results"].get("infrastructure") or {}
                 if prev:
-                    # analyzed_targets: keyed by indicator; newer analysis wins for same target
                     prev_targets = prev.get("analyzed_targets") or []
                     result_targets = result.get("analyzed_targets") or []
 
@@ -597,7 +651,6 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                     merged_with_ind = list({**prev_by_ind, **new_by_ind}.values())
                     result["analyzed_targets"] = merged_with_ind + prev_no_ind + new_no_ind
 
-                    # Ordered-set union for all accumulating list fields
                     for field in ["pivot_findings", "related_indicators", "associated_campaigns", "categories"]:
                         seen, merged = set(), []
                         prev_list = prev.get(field) or []
@@ -607,118 +660,126 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                                 seen.add(v)
                                 merged.append(v)
                         result[field] = merged
-
-                    llm_target_count    = len(new_with_ind) + len(new_no_ind)
-                    merged_target_count = len(result["analyzed_targets"])
-                    logger.info("infra_incremental_merge",
-                                prev_targets=len(prev_with_ind) + len(prev_no_ind),
-                                llm_new_targets=llm_target_count,
-                                merged_targets=merged_target_count,
-                                python_recovered=merged_target_count - llm_target_count,
-                                merged_pivot_findings=len(result.get("pivot_findings", [])),
-                                merged_related_indicators=len(result.get("related_indicators", [])))
-                    if len(new_with_ind) < len(prev_by_ind):
-                        logger.warning("infra_incremental_regression",
-                                       detail="LLM dropped analyzed_targets from previous iteration — Python enforcement recovered them",
-                                       prev=len(prev_by_ind), llm_produced=len(new_with_ind), after_merge=len(merged_with_ind))
-
-                # Generate Report from merged result
+                
+                # Generate Markdown report
                 result["markdown_report"] = generate_infrastructure_markdown_report(result, ioc)
-
-                # Emit final LLM reasoning for transparency (matches triage pattern)
-                job_id = state.get("job_id")
-                if job_id and 'final_text' in locals():
+                
+                # Emit reasoning
+                job_id = sub_state.get("job_id")
+                if job_id:
+                    final_text = json.dumps(result, indent=2)
                     await emit_reasoning(job_id, "infrastructure", final_text)
+                    
+                return {
+                    "final_result": result
+                }
+
+            # Routers
+            def route_after_init(sub_state: InfraSubgraphState):
+                if not sub_state.get("unique_targets"):
+                    return "end"
+                return "agent"
+
+            def route_after_agent(sub_state: InfraSubgraphState):
+                messages = sub_state["messages"]
+                last_message = messages[-1]
+                loop_step = sub_state["loop_step"]
+                max_iterations = sub_state["max_iterations"]
                 
-                # Removed LLM JSON-to-Graph parsing. Graph population is now deterministically
-                # handled by the MCP-backed tools used during the investigation loop.
-                #
-                # Previous duplicate expansion logic kept here for human review:
-                #
-                # from backend.tools import gti
-                # import re
-                #
-                # for target in unique_targets:
-                #     target_value = target["value"]
-                #     logger.info("infra_expanding_relationships", target=target_value)
-                #
-                #     try:
-                #         is_ip = re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", target_value)
-                #         is_url = "http" in target_value
-                #         is_domain = not is_ip and not is_url and "." in target_value
-                #
-                #         rel_data = None
-                #
-                #         if is_ip:
-                #             rel_data = await gti.get_ip_report(
-                #                 target_value,
-                #                 relationships=["resolutions", "communicating_files", "downloaded_files"]
-                #             )
-                #         elif is_domain:
-                #             rel_data = await gti.get_domain_report(
-                #                 target_value,
-                #                 relationships=["resolutions", "subdomains", "communicating_files", "downloaded_files"]
-                #             )
-                #         elif is_url:
-                #             rel_data = await gti.get_url_report(
-                #                 target_value,
-                #                 relationships=["network_location", "downloaded_files", "contacted_domains", "contacted_ips"]
-                #             )
-                #
-                #         if rel_data and "data" in rel_data:
-                #             raw_rels = rel_data["data"].get("relationships", {})
-                #             new_entities_count = 0
-                #
-                #             for rel_name, rel_content in raw_rels.items():
-                #                 entities = rel_content.get("data", [])
-                #                 for entity in entities:
-                #                     entity_id = entity.get("id")
-                #                     entity_type = entity.get("type")
-                #                     entity_attrs = entity.get("attributes", {})
-                #
-                #                     cache.add_entity(
-                #                         entity_id=entity_id,
-                #                         entity_type=entity_type,
-                #                         attributes=entity_attrs
-                #                     )
-                #                     cache.add_relationship(target_value, entity_id, rel_name)
-                #                     new_entities_count += 1
-                #
-                #             logger.info(
-                #                 "infra_graph_expanded",
-                #                 target=target_value,
-                #                 new_entities=new_entities_count,
-                #                 relationships=list(raw_rels.keys())
-                #             )
-                #     except Exception as expand_err:
-                #         logger.error("infra_expansion_error", target=target_value, error=str(expand_err))
+                if last_message.tool_calls and loop_step < max_iterations:
+                    return "tools"
+                else:
+                    return "final"
+
+            # Construct Sub-graph
+            builder = StateGraph(InfraSubgraphState)
+            builder.add_node("init", init_node)
+            builder.add_node("agent", agent_node)
+            builder.add_node("tools", ToolNode(tools))
+            builder.add_node("post_tool", post_tool_node)
+            builder.add_node("final", final_output_node)
+            
+            builder.add_edge(START, "init")
+            builder.add_conditional_edges(
+                "init",
+                route_after_init,
+                {
+                    "agent": "agent",
+                    "end": END
+                }
+            )
+            builder.add_conditional_edges(
+                "agent",
+                route_after_agent,
+                {
+                    "tools": "tools",
+                    "final": "final"
+                }
+            )
+            builder.add_edge("tools", "post_tool")
+            builder.add_edge("post_tool", "agent")
+            builder.add_edge("final", END)
+            
+            # Compile Sub-graph
+            subgraph = builder.compile(checkpointer=checkpointer_registry.checkpointer)
+            
+            subgraph_config = {
+                "configurable": {
+                    "thread_id": state.get("job_id"),
+                    "checkpoint_ns": f"infra_specialist_iter_{state.get('iteration', 0)}"
+                }
+            }
+            
+            # Check for resumption
+            current_sub_state = await subgraph.aget_state(subgraph_config)
+            is_resuming = current_sub_state and current_sub_state.values
+            
+            if is_resuming:
+                logger.info("infra_subgraph_resuming")
+                saved_graph = current_sub_state.values.get("investigation_graph")
+                temp_cache = InvestigationCache(saved_graph or state.get("investigation_graph"))
+                cache.graph = temp_cache.graph
+                subgraph_input = None
+            else:
+                # Inputs to subgraph
+                subgraph_input = {
+                    "ioc": state.get("ioc"),
+                    "subtasks": state.get("subtasks", []),
+                    "specialist_results": state.get("specialist_results", {}),
+                    "investigation_graph": state.get("investigation_graph"),
+                    "metadata": state.get("metadata", {}),
+                    "job_id": state.get("job_id"),
+                    "iteration": state.get("iteration", 0),
+                    "messages": [],
+                    "unique_targets": [],
+                    "loop_step": 0,
+                    "max_iterations": infra_iterations,
+                    "final_result": None
+                }
+            
+            # Execute sub-graph
+            subgraph_output = await subgraph.ainvoke(subgraph_input, config=subgraph_config)
+            
+            final_result = subgraph_output.get("final_result")
+            if final_result:
+                if "specialist_results" not in state:
+                    state["specialist_results"] = {}
+                state["specialist_results"]["infrastructure"] = final_result
                 
-                # Mark all analyzed targets as investigated (for Lead Hunter tracking)
-                for target_info in unique_targets:
-                    cache.mark_as_investigated(target_info["value"], "infrastructure")
-                    logger.info("infra_marked_investigated", entity=target_info["value"])
+                # Sync cache/investigation graph
+                state["investigation_graph"] = subgraph_output.get("investigation_graph")
                 
-                # Persist expanded graph back to state
-                state["investigation_graph"] = cache.get_state()
-                cache_stats_after = cache.get_stats()
-                logger.info("infra_graph_updated", 
-                           before=cache_stats_before, 
-                           after=cache_stats_after)
-                
-                # --- SYNC CACHE TO STATE (Frontend Graph Visibility) ---
-                # Ensure structure exists
-                if "metadata" not in state: 
-                    state["metadata"] = {}
-                if "rich_intel" not in state["metadata"]: 
-                    state["metadata"]["rich_intel"] = {}
-                if "relationships" not in state["metadata"]["rich_intel"]: 
-                    state["metadata"]["rich_intel"]["relationships"] = {}
+                # Sync to metadata/rich_intel
+                if "metadata" not in state: state["metadata"] = {}
+                if "rich_intel" not in state["metadata"]: state["metadata"]["rich_intel"] = {}
+                if "relationships" not in state["metadata"]["rich_intel"]: state["metadata"]["rich_intel"]["relationships"] = {}
                 
                 relationships_data = state["metadata"]["rich_intel"]["relationships"]
                 
                 # Sync related indicators from infrastructure analysis
-                primary_target = unique_targets[0]["value"] if unique_targets else ioc
-                for indicator in result.get("related_indicators", []):
+                final_targets = subgraph_output.get("unique_targets") or []
+                primary_target = final_targets[0]["value"] if final_targets else ioc
+                for indicator in final_result.get("related_indicators", []):
                     try:
                         entity_type, ind_value = parse_indicator_string(indicator)
                         if entity_type:
@@ -728,33 +789,32 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                     except Exception as e:
                         logger.warning("infra_indicator_parse_failed", indicator=str(indicator)[:50], error=str(e))
                 
-                # [RACE CONDITION FIX] Do not update final_report here.
-                # Lead Hunter will assemble it to avoid race conditions.
-
+                # Mark targets as investigated
+                cache = InvestigationCache(state["investigation_graph"])
+                for target_info in final_targets:
+                    cache.mark_as_investigated(target_info["value"], "infrastructure")
+                    logger.info("infra_marked_investigated", entity=target_info["value"])
                 
-                logger.info("infra_agent_success", verdict=result.get("verdict"))
-            except Exception as e:
-                logger.error("infra_parsing_error", error=str(e))
-                import traceback
-                tb = traceback.format_exc()
-                result = {
-                    "verdict": "System Error",
-                    "summary": f"Failed to parse analysis results: {str(e)}",
-                    "markdown_report": f"## Analysis Failed\n\nThe Infrastructure Agent encountered an error while processing the results.\n\n**Error Details:**\n```\n{str(e)}\n```\n\n**Raw Output:**\n```\n{str(final_text)[:2000]}\n```"
-                }
+                state["investigation_graph"] = cache.get_state()
+                cache_stats_after = cache.get_stats()
+                logger.info("infra_graph_updated", 
+                           before=cache_stats_before, 
+                           after=cache_stats_after)
+                
+                logger.info("infra_agent_success", verdict=final_result.get("verdict"))
+            else:
+                # Subgraph yielded no final result (no targets identified)
+                pass
+
     except Exception as e:
         logger.error("infra_node_fatal_error", error=str(e))
         import traceback
         tb = traceback.format_exc()
-        result = {
+        if "specialist_results" not in state: state["specialist_results"] = {}
+        state["specialist_results"]["infrastructure"] = {
             "verdict": "System Error",
             "summary": f"Fatal error in Infrastructure Specialist: {str(e)}",
             "markdown_report": f"## System Error\n\nThe Infrastructure Specialist encountered a fatal error.\n\n### Error Details\n```\n{str(e)}\n```\n\n### Traceback\n```\n{tb}\n```"
         }
-    
-    # Consolidated State Update - Single source of truth
-    if "specialist_results" not in state:
-        state["specialist_results"] = {}
-    state["specialist_results"]["infrastructure"] = result
-    
+
     return state

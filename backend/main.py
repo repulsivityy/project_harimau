@@ -10,6 +10,7 @@ from backend.utils.logger import configure_logger, get_logger
 import asyncpg
 from backend.graph.workflow import create_graph
 from backend.config import DEFAULT_HUNT_ITERATIONS
+from backend.utils import checkpointer_registry
 
 # 1. Configure Logging
 configure_logger()
@@ -96,6 +97,7 @@ async def lifespan(app: FastAPI):
                 checkpointer_ctx = AsyncPostgresSaver.from_conn_string(db_url, pool_kwargs={"min_size": 1, "max_size": 5})
                 checkpointer_instance = await checkpointer_ctx.__aenter__()
                 await checkpointer_instance.setup()  # Creates checkpoint tables if missing
+                checkpointer_registry.checkpointer = checkpointer_instance
                 logger.info("checkpointer_initialized", type="AsyncPostgresSaver")
                 app_graph = create_graph(checkpointer=checkpointer_instance)
             except Exception as cp_err:

@@ -26,6 +26,8 @@ async def lifespan(app: FastAPI):
     
     # --- Startup Phase ---
     db_url = os.environ.get("DATABASE_URL")
+    checkpointer_ctx = None          # declared here so shutdown can always reference it safely
+    checkpointer_ctx_entered = False  # True only after __aenter__ succeeds; gates __aexit__ in shutdown
     
     async def init_db():
         """Isolated DB setup logic to be wrapped in a strict timeout."""
@@ -96,6 +98,7 @@ async def lifespan(app: FastAPI):
                 # Pass pool_kwargs directly (the kwargs are passed to the underlying psycopg_pool.AsyncConnectionPool)
                 checkpointer_ctx = AsyncPostgresSaver.from_conn_string(db_url, pool_kwargs={"min_size": 1, "max_size": 5})
                 checkpointer_instance = await checkpointer_ctx.__aenter__()
+                checkpointer_ctx_entered = True  # pool is open; __aexit__ MUST be called on shutdown
                 await checkpointer_instance.setup()  # Creates checkpoint tables if missing
                 checkpointer_registry.checkpointer = checkpointer_instance
                 logger.info("checkpointer_initialized", type="AsyncPostgresSaver")
@@ -103,6 +106,7 @@ async def lifespan(app: FastAPI):
             except Exception as cp_err:
                 logger.error("checkpointer_init_failed", error=str(cp_err), exc_info=True)
                 checkpointer_instance = None
+                checkpointer_registry.checkpointer = None  # keep sub-graphs consistent with outer graph
                 app_graph = create_graph()  # Fallback: no checkpointer
             
             logger.info("backend_startup", status="started_with_db")
@@ -127,7 +131,7 @@ async def lifespan(app: FastAPI):
         yield  # ** SERVER LISTENS HERE IN FALLBACK **
 
     # --- Shutdown Phase ---
-    if checkpointer_instance:
+    if checkpointer_ctx_entered:  # close pool whenever __aenter__ succeeded, even if init later failed
         try:
             await checkpointer_ctx.__aexit__(None, None, None)
             logger.info("checkpointer_closed")

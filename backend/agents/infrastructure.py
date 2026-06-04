@@ -20,7 +20,7 @@ from backend.utils.graph_cache import InvestigationCache, extract_gti_summary
 from backend.utils.transparency import emit_tool_call, emit_reasoning
 from backend.utils.agent_utils import (
     FINAL_ITERATION_PROMPT,
-    run_tools_parallel,
+    reduce_messages,
     cap_context_window,
     push_to_rich_intel,
     build_peer_context,
@@ -197,22 +197,6 @@ def generate_infrastructure_markdown_report(result: dict, ioc: str) -> str:
     except Exception as e:
         return f"Error generating infrastructure report: {str(e)}"
 
-def reduce_messages(left: List[BaseMessage], right: List[BaseMessage]) -> List[BaseMessage]:
-    if right and right[0].additional_kwargs.get("overwrite_history"):
-        return right
-    merged = list(left)
-    for msg in right:
-        replaced = False
-        if msg.id:
-            for idx, existing in enumerate(merged):
-                if existing.id == msg.id:
-                    merged[idx] = msg
-                    replaced = True
-                    break
-        if not replaced:
-            merged.append(msg)
-    return merged
-
 class InfraSubgraphState(TypedDict):
     ioc: str
     subtasks: List[Dict[str, Any]]
@@ -228,6 +212,9 @@ class InfraSubgraphState(TypedDict):
     loop_step: int
     max_iterations: int
     final_result: Optional[Dict[str, Any]]
+
+# Lazily cached LLM instance — stateless, safe to reuse across invocations.
+_infra_base_llm: Optional[ChatGoogleGenerativeAI] = None
 
 async def infrastructure_node(state: AgentState):
     """
@@ -430,14 +417,17 @@ async def infrastructure_node(state: AgentState):
                 shodan_ip_lookup, shodan_dns_lookup, shodan_reverse_dns_lookup,
             ]
 
-            base_llm = ChatGoogleGenerativeAI(
-                model="gemini-3.1-pro-preview",
-                temperature=0.0,
-                project=project_id,
-                location="global",
-                thinking_level="medium",
-                include_thoughts=True
-            )
+            global _infra_base_llm
+            if _infra_base_llm is None:
+                _infra_base_llm = ChatGoogleGenerativeAI(
+                    model="gemini-3.1-pro-preview",
+                    temperature=0.0,
+                    project=project_id,
+                    location="global",
+                    thinking_level="medium",
+                    include_thoughts=True
+                )
+            base_llm = _infra_base_llm
             llm = base_llm.bind_tools(tools)
 
             # Node 1: init_node
@@ -617,9 +607,13 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                 
                 if len(capped_messages) < len(messages):
                     logger.info("infra_subgraph_capping_context", original=len(messages), capped=len(capped_messages))
-                    capped_messages[0].additional_kwargs["overwrite_history"] = True
+                    # Use model_copy to avoid mutating the shared message object in place;
+                    # the in-place mutation would persist on the object across invocations.
+                    marker = capped_messages[0].model_copy(
+                        update={"additional_kwargs": {**capped_messages[0].additional_kwargs, "overwrite_history": True}}
+                    )
                     return {
-                        "messages": capped_messages,
+                        "messages": [marker] + list(capped_messages[1:]),
                         "investigation_graph": updated_graph
                     }
                 
@@ -725,14 +719,16 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
             
             subgraph_config = {
                 "configurable": {
-                    "thread_id": state.get("job_id"),
-                    "checkpoint_ns": f"infra_specialist_iter_{state.get('iteration', 0)}"
+                    "thread_id": f"{state.get('job_id')}_infra_{state.get('iteration', 0)}",
                 }
             }
             
             # Check for resumption
             current_sub_state = await subgraph.aget_state(subgraph_config)
-            is_resuming = current_sub_state and current_sub_state.values
+            # Only resume if the graph was interrupted mid-run (next is non-empty).
+            # A completed graph has next=() — treating it as resumable would re-use
+            # stale state from a prior iteration instead of starting fresh.
+            is_resuming = bool(current_sub_state and current_sub_state.values and current_sub_state.next)
             
             if is_resuming:
                 logger.info("infra_subgraph_resuming")

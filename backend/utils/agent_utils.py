@@ -1,7 +1,8 @@
 import asyncio
 import json
 import re
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, BaseMessage
+from typing import List
 
 INDICATOR_PATTERN = re.compile(
     r"^(?P<type>IP(?:\s*Address)?|Domain|URL|File|Hash|SHA256|MD5)\s*:\s*(?P<value>.+)$",
@@ -96,6 +97,24 @@ def cap_context_window(messages: list, system_count: int = 2, tail_size: int = 1
     tail = messages[-tail_size:]
     first_ai = next((i for i, m in enumerate(tail) if isinstance(m, AIMessage)), len(tail))
     return messages[:system_count] + tail[first_ai:]
+
+
+def reduce_messages(left: List[BaseMessage], right: List[BaseMessage]) -> List[BaseMessage]:
+    """LangGraph reducer: ID-based dedup merge with full-history overwrite support."""
+    if right and right[0].additional_kwargs.get("overwrite_history"):
+        return right
+    merged = list(left)
+    for msg in right:
+        replaced = False
+        if msg.id:
+            for idx, existing in enumerate(merged):
+                if existing.id == msg.id:
+                    merged[idx] = msg
+                    replaced = True
+                    break
+        if not replaced:
+            merged.append(msg)
+    return merged
 
 
 def push_to_rich_intel(relationships_data: dict, rel_name: str, entity_type: str, value: str, source_id: str, attributes: dict = None) -> None:

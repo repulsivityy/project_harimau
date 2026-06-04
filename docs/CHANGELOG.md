@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-06-04
+
+### Changed
+- **Strict Structured Output Migration**: Migrated Malware and Infrastructure specialist agents and Lead Hunter Planning agent to use LangChain's native `with_structured_output()` with strict Pydantic schemas, replacing fragile string-parsing fallbacks.
+- **Simplified Agent Iteration Prompt**: Cleaned up `FINAL_ITERATION_PROMPT` in `backend/utils/agent_utils.py` to remove redundant JSON formatting instructions, preventing potential LLM parser confusion.
+
+### Fixed
+- **Double LLM Call Prevention**: Restructured specialist agent loops to run the structured LLM parsing exactly once at the end of the reasoning iteration.
+- **Indicator-less Target Preservation**: Hardened the state merging logic to prevent dropping targets that do not contain explicit indicator keys.
+- **Empty Graph Cache Resilience**: Updated `InvestigationCache` to gracefully handle empty dictionary inputs (`{}`) and avoid initialization crashes.
+- **Dead Code and Legacy Workaround Cleanups**: Removed the legacy Vertex AI list block workaround in `lead_hunter_synthesis.py` and pruned the unused `parse_llm_json` helper and dead variables.
+
 ## [0.6.4] - 2026-05-30
 
 ### Added

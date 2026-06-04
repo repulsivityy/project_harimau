@@ -88,7 +88,7 @@
 
 **Goal:** Fix structural debt. Run after Tiers 1-3 ship and soak.
 
-### S4-T1 · Strict structured output
+### [x] S4-T1 · Strict structured output
 *   **Files:** `backend/agents/*.py`
 *   **Change:** Migrate JSON outputs from string-parsing to LangChain `with_structured_output()` using Pydantic schemas.
 

@@ -94,7 +94,7 @@ This document tracks the iterative evolution of the Harimau platform, organized 
 *   [x] **Strict Target Schemas**: Replace regex 'safety net' parsing in Specialists by enforcing strict JSON schemas for targets in the planner (deterministic routing).
 *   [ ] **Extract Inner Tool Loops**: Refactor specialist nodes (`infrastructure.py`, `malware.py`) to use Langgraph's native `ToolNode` and conditional edges instead of internal python `while/for` loops, improving checkpointing visibility and preventing thread blocking.
 *   [x] **Remove Duplicate Graph Expansion**: Remove post-LLM relationship expansion logic in specialists, relying solely on MCP tool wrappers to safely modify the graph cache during the natural reasoning loop.
-*   [ ] **Strict Structured Output**: Replace string parsing (`.replace("```json")`) with `with_structured_output()` to guarantee schema adherence and eliminate parsing fallbacks.
+*   [x] **Strict Structured Output**: (2026-06-04) Replace string parsing (`.replace("```json")`) with `with_structured_output()` to guarantee schema adherence and eliminate parsing fallbacks.
 *   [x] **Optimize NetworkX MultiDiGraph Merges**: (2026-05-30) Implemented deep node attribute merging (unioned lists like `analyzed_by`) and robust pre-insertion edge deduplication in `InvestigationCache.add_relationship` and `merge_graphs` to prevent data loss and exponential edge duplication during parallel state merges.
 *   [x] **Canonical Entity-ID Normalisation**: (2026-05-30) Implemented robust identifier normalisation (`_normalise_id`) across request intake (`main.py`), caching layers (`graph_cache.py`), Lead Hunter convergence detection, and UI root identification (`graph_formatter.py`) to prevent duplicate nodes and broken relationship links.
 

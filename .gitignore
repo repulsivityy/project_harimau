@@ -56,3 +56,4 @@ test_*
 node_modules/
 .next/
 out/
+app/package-lock.json

@@ -45,7 +45,7 @@ async def lead_hunter_node(state: AgentState):
     #     location="global",
     # )
     llm_flash = ChatGoogleGenerativeAI(
-        model="gemini-3-flash-preview",
+        model="gemini-3.5-flash",
         temperature=0.1,
         #max_tokens=1024,
         project=project_id,

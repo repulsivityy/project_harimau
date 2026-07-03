@@ -486,7 +486,7 @@ async def comprehensive_triage_analysis(
 #    )
     
     llm = ChatGoogleGenerativeAI(
-        model="gemini-3-flash-preview",
+        model="gemini-3.5-flash",
         temperature=0,
         #max_tokens=1024,
         project=project_id,
@@ -524,17 +524,31 @@ Perform comprehensive first-level triage analysis now.
     job_id = state.get("job_id") if 'state' in locals() else None
     if job_id:
         await emit_tool_call(job_id, "triage", "comprehensive_analysis_llm", {
-            "model": "gemini-2.5-flash",
+            "model": "gemini-3.5-flash",
             "ioc": ioc,
             "relationships_count": len(relationships_data)
         })
     
     response_obj = None
     try:
-        structured_llm = llm.with_structured_output(TriageAnalysisOutput)
+        structured_llm = llm.with_structured_output(TriageAnalysisOutput, include_raw=True)
         response_obj = await structured_llm.ainvoke(messages)
         
-        analysis = response_obj.model_dump()
+        if response_obj.get("parsing_error"):
+            # Fallback manual parsing if structured output fails
+            raw_content = response_obj["raw"].content if hasattr(response_obj["raw"], "content") else str(response_obj["raw"])
+            import re
+            json_match = re.search(r'```(?:json)?\s*(\{.*\})\s*```', raw_content, re.DOTALL)
+            raw_json = json_match.group(1) if json_match else raw_content
+            
+            try:
+                parsed_dict = json.loads(raw_json)
+                analysis = TriageAnalysisOutput(**parsed_dict).model_dump()
+            except Exception as inner_e:
+                raise response_obj["parsing_error"]
+        else:
+            analysis = response_obj["parsed"].model_dump()
+            
         final_text = json.dumps(analysis, indent=2)
         
         # [NEW] WebRisk Check for URLs
@@ -578,7 +592,11 @@ Perform comprehensive first-level triage analysis now.
         return analysis
         
     except Exception as e:
-        logger.error("phase2_parse_error", error=str(e), raw=str(response_obj)[:500])
+        raw_output = "None"
+        if response_obj and "raw" in response_obj:
+            raw_output = str(response_obj["raw"].content)[:1000] if hasattr(response_obj["raw"], "content") else str(response_obj["raw"])[:1000]
+            
+        logger.error("phase2_parse_error", error=str(e), raw=raw_output)
         
         # Fallback with error visibility
         import traceback

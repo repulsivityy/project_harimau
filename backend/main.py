@@ -897,12 +897,12 @@ async def diagnostic_pipeline(ioc: str):
         project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
         location = os.getenv("GOOGLE_CLOUD_REGION", "asia-southeast1")
         
-        from langchain_google_vertexai import ChatVertexAI
-        llm = ChatVertexAI(
-            model="gemini-2.5-flash",
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-3.5-flash",
             temperature=0.0,
             project=project_id,
-            location=location
+            location="global"
         )
         
         # Simple test

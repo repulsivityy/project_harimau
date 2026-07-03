@@ -21,8 +21,13 @@ async def consume_vt_iterator(
     vt_client: vt.Client, endpoint: str, params: dict | None = None, limit: int = 10):
   """Consumes a vt.Iterator iterator and return the list of objects."""
   res = []
+  
+  # Escape curly braces to prevent KeyError from vt.Client's internal format() calls
+  # when the provided endpoint (like a malicious URL or probe) contains literal '{' or '}'
+  safe_endpoint = endpoint.replace("{", "{{").replace("}", "}}")
+  
   try:
-    async for obj in vt_client.iterator(endpoint, params=params, limit=limit, batch_size=40):
+    async for obj in vt_client.iterator(safe_endpoint, params=params, limit=limit, batch_size=40):
       res.append(obj)
   except vt.error.APIError as e:
     logging.warning(f"VT API Error consuming iterator for {endpoint}: {e.code} - {e.message}")

@@ -95,8 +95,8 @@ async def lifespan(app: FastAPI):
             # --- LangGraph Checkpointer (psycopg-based, separate from asyncpg pool) ---
             try:
                 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-                # Pass pool_kwargs directly (the kwargs are passed to the underlying psycopg_pool.AsyncConnectionPool)
-                checkpointer_ctx = AsyncPostgresSaver.from_conn_string(db_url, pool_kwargs={"min_size": 1, "max_size": 5})
+                # Use default pool settings
+                checkpointer_ctx = AsyncPostgresSaver.from_conn_string(db_url)
                 checkpointer_instance = await checkpointer_ctx.__aenter__()
                 checkpointer_ctx_entered = True  # pool is open; __aexit__ MUST be called on shutdown
                 await checkpointer_instance.setup()  # Creates checkpoint tables if missing

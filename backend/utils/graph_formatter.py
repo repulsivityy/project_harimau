@@ -13,7 +13,7 @@ def format_graph_from_cache(job_id: str, job: dict) -> dict:
     set stored during the investigation rather than the downsampled rich_intel snapshot.
     Falls back to format_investigation_graph() if the stored graph is absent.
     """
-    from backend.utils.graph_cache import InvestigationCache
+    from backend.utils.graph_cache import InvestigationCache, normalize_verdict
 
     graph_data = job.get("investigation_graph")
     if not graph_data:
@@ -121,7 +121,7 @@ def format_graph_from_cache(job_id: str, job: dict) -> dict:
         # ── isMalicious ────────────────────────────────────────────────────
         is_malicious = bool(
             (malicious_count and malicious_count > 0)
-            or (verdict and "malicious" in str(verdict).lower())
+            or (normalize_verdict(verdict) == "malicious")
             or (threat_score and isinstance(threat_score, (int, float)) and threat_score >= 70)
         )
 
@@ -185,7 +185,8 @@ def format_investigation_graph(job_id: str, job: dict) -> dict:
     Returns graph data with improved naming conventions for visualization.
     Extracts nodes and edges from job's rich_intel and subtasks.
     """
-    
+    from backend.utils.graph_cache import normalize_verdict
+
     logger.info("graph_request", job_id=job_id)
     
     ioc = job.get("ioc", "Unknown")
@@ -317,11 +318,11 @@ def format_investigation_graph(job_id: str, job: dict) -> dict:
             specialist_ctx = attrs.get("malware_context") or entity.get("malware_context") or \
                            attrs.get("infra_context") or entity.get("infra_context")
             is_malicious = bool(
-                (m_count and m_count > 0) or 
-                (verdict and isinstance(verdict, str) and "malicious" in verdict.lower()) or 
+                (m_count and m_count > 0) or
+                (normalize_verdict(verdict) == "malicious") or
                 (score and isinstance(score, (int, float)) and score >= 70)
             )
-            
+
             # 1. Root IOC (Handled automatically since root is added separately)
             # 2. Evaluated by specialist and flagged (specialist_ctx)
             # 3. Malicious
@@ -447,8 +448,8 @@ def format_investigation_graph(job_id: str, job: dict) -> dict:
                         tooltip_lines.append(f"Verdict: {verdict}")
                     
                     is_malicious = bool(
-                        (m_count and m_count > 0) or 
-                        (verdict and isinstance(verdict, str) and "malicious" in verdict.lower()) or 
+                        (m_count and m_count > 0) or
+                        (normalize_verdict(verdict) == "malicious") or
                         (score and isinstance(score, (int, float)) and score >= 70)
                     )
 

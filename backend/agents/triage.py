@@ -13,7 +13,7 @@ from backend.graph.state import AgentState
 from backend.utils.logger import get_logger
 import backend.tools.gti as gti
 import backend.tools.webrisk as webrisk
-from backend.utils.graph_cache import InvestigationCache
+from backend.utils.graph_cache import InvestigationCache, normalize_verdict
 from backend.utils.transparency import emit_tool_call, emit_reasoning
 
 logger = get_logger("agent_triage")
@@ -367,10 +367,13 @@ def generate_markdown_report_locally(analysis: dict, ioc: str, ioc_type: str, tr
         score = analysis.get('threat_score', triage_data.get('threat_score') if triage_data else None)
         score_str = f"`{score}/100`" if score is not None else "`Unknown`"
         
-        # Color-coded verdict (emoji-based for markdown)
+        # Color-coded verdict (emoji-based for markdown).
+        # normalize_verdict handles both the LLM's own Title-case verdict text
+        # ("Malicious") and the raw GTI enum used in fallback/error paths ("VERDICT_MALICIOUS").
         v_emoji = "✅"
-        if verdict.lower() == "malicious": v_emoji = "🔴"
-        elif verdict.lower() == "suspicious": v_emoji = "🟠"
+        normalized = normalize_verdict(verdict)
+        if normalized == "malicious": v_emoji = "🔴"
+        elif normalized == "suspicious": v_emoji = "🟠"
         
         md += f"*   **GTI Verdict:** {v_emoji} **{verdict}**\n"
         md += f"*   **Threat Score:** {score_str}\n"
@@ -824,7 +827,7 @@ async def triage_node(state: AgentState):
                     parsed_entities = [
                         e for e in parsed_entities
                         if (
-                            str(e.get("verdict") or "").lower() in {"malicious", "suspicious"}
+                            normalize_verdict(e.get("verdict")) in {"malicious", "suspicious"}
                             or (e.get("malicious_count") or 0) >= SIGNAL_MALICIOUS_VENDORS
                         )
                     ]

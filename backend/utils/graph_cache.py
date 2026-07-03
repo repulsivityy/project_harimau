@@ -22,6 +22,28 @@ def _normalise_id(entity_id: Optional[Any]) -> Optional[str]:
     norm = str(entity_id).strip().lower()
     return norm if norm else None
 
+# Ordered (not a set) so the substring fallback below is deterministic.
+KNOWN_VERDICTS = ["malicious", "suspicious", "benign", "undetected", "unknown"]
+
+def normalize_verdict(raw: Optional[Any]) -> Optional[str]:
+    """
+    Normalise a raw GTI verdict value (e.g. 'VERDICT_MALICIOUS') to a canonical
+    lowercase token (e.g. 'malicious'). Returns None if raw is falsy or unrecognised.
+    """
+    if not raw:
+        return None
+    v = str(raw).strip().lower()
+    v = v[len("verdict_"):] if v.startswith("verdict_") else v
+    if v in KNOWN_VERDICTS:
+        return v
+    # Forward-compat: fall back to substring containment, then log so an
+    # unrecognised GTI verdict format doesn't silently resolve to "no signal" again.
+    for known in KNOWN_VERDICTS:
+        if known in v:
+            return known
+    logger.warning("verdict_unrecognized", raw=raw)
+    return None
+
 def extract_gti_summary(rel_item: dict) -> dict:
     """Extract key GTI attributes from a relationship response item."""
     summary = {}

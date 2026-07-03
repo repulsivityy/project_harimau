@@ -1,8 +1,9 @@
 import json
+from typing import Optional
 from langchain_core.messages import SystemMessage, HumanMessage
 from backend.utils.logger import get_logger
 from backend.graph.state import AgentState
-from backend.utils.graph_cache import InvestigationCache
+from backend.utils.graph_cache import InvestigationCache, normalize_verdict
 
 logger = get_logger("agent_lead_hunter_synthesis")
 
@@ -212,25 +213,13 @@ def _build_specialist_context(state: AgentState) -> str:
     return "\n".join(sections)
 
 
-def _build_graph_summary(state: AgentState) -> str:
+def _compute_node_details(cache) -> dict:
     """
-    Summarize the investigation graph into compact, high-signal text for synthesis.
-    This gives the Lead Hunter actual graph context without dumping the full cache.
+    Per-node score/verdict/type summary. Shared by _build_graph_summary (text
+    rendering) and _score_edges (edge relevance) so both consumers see the
+    same numbers instead of independently re-deriving them.
     """
-    graph_state = state.get("investigation_graph")
-    if not graph_state:
-        return "No investigation graph available."
-
-    cache = InvestigationCache(graph_state)
-    stats = cache.get_stats()
-    root_ioc = state.get("ioc")
     node_details = {}
-    important_relationships_by_node = {}
-    bridges_malware_infra = set()
-    relationship_counts = {}
-
-    # _node_label is now a module-level function (reused by _build_edge_tuples)
-
     for node_id, data in cache.graph.nodes(data=True):
         entity_type = data.get("entity_type", "unknown")
         gti_assessment = data.get("gti_assessment") or {}
@@ -247,12 +236,20 @@ def _build_graph_summary(state: AgentState) -> str:
             "malicious_count": last_analysis_stats.get("malicious", 0) if isinstance(last_analysis_stats, dict) else 0,
             "raw_attributes": data,
         }
-        important_relationships_by_node[node_id] = set()
+    return node_details
+
+
+def _compute_high_signal(cache, node_details: dict):
+    """
+    Determine which nodes qualify as high-signal and the supporting sets
+    (important-relationships-by-node, malware/infra bridges) needed to explain
+    why. Returns (high_signal_node_ids, important_relationships_by_node, bridges_malware_infra).
+    """
+    important_relationships_by_node = {node_id: set() for node_id in node_details}
+    bridges_malware_infra = set()
 
     for source, target, data in cache.graph.edges(data=True):
         rel = data.get("relationship", "related_to")
-        relationship_counts[rel] = relationship_counts.get(rel, 0) + 1
-
         if rel in IMPORTANT_RELATIONSHIPS:
             important_relationships_by_node.setdefault(source, set()).add(rel)
             important_relationships_by_node.setdefault(target, set()).add(rel)
@@ -266,7 +263,6 @@ def _build_graph_summary(state: AgentState) -> str:
             bridges_malware_infra.add(source)
             bridges_malware_infra.add(target)
 
-    high_signal_nodes = []
     high_signal_node_ids = set()
     for node_id, node in node_details.items():
         qualifiers = 0
@@ -276,40 +272,39 @@ def _build_graph_summary(state: AgentState) -> str:
             qualifiers += 1
         if node_id in bridges_malware_infra:
             qualifiers += 1
-        
+
         # S1-T2: Qualifier for specialist discovery
         if "malware_context" in node.get("raw_attributes", {}) or "infra_context" in node.get("raw_attributes", {}):
             qualifiers += 1
 
         qualifies = node["score"] >= 80 or (node["score"] > HIGH_SIGNAL_THREAT_SCORE and qualifiers >= 2)
+        if qualifies:
+            high_signal_node_ids.add(node_id)
 
-        if not qualifies:
-            continue
+    return high_signal_node_ids, important_relationships_by_node, bridges_malware_infra
 
-        high_signal_nodes.append({
-            **node,
-            "important_relationships": sorted(important_relationships_by_node.get(node_id, set())),
-            "bridges_malware_infra": node_id in bridges_malware_infra,
-        })
-        high_signal_node_ids.add(node_id)
 
-    high_signal_nodes = sorted(
-        high_signal_nodes,
-        key=lambda n: (n["score"], n["malicious_count"]),
-        reverse=True
-    )[:15]
+def _score_edges(cache, node_details: dict, high_signal_node_ids: set, root_ioc: Optional[str]) -> list:
+    """
+    Score every edge in the investigation graph for relevance and sort it,
+    so downstream consumers (graph-summary key edges, Graphviz edge grounding)
+    can sort-then-cap instead of truncating in arbitrary NetworkX insertion
+    order. Single source of truth for edge relevance — previously
+    _build_graph_summary's key_edges and _build_edge_tuples computed
+    overlapping-but-different relevance logic independently and drifted apart.
 
-    key_edges = []
+    Root-adjacent edges always sort first (they anchor the attack-flow
+    diagram/narrative), then by descending relevance score.
+    """
+    scored = []
     for source, target, data in cache.graph.edges(data=True):
         rel = data.get("relationship", "related_to")
-        target_node = node_details.get(target, {})
         source_node = node_details.get(source, {})
+        target_node = node_details.get(target, {})
 
-        verdict = (target_node.get("verdict") or "").lower()
+        target_verdict = normalize_verdict(target_node.get("verdict"))
         vendor_count = target_node.get("malicious_count", 0)
-        has_threat_signal = verdict in {"malicious", "suspicious"} or vendor_count > 0
-        if not has_threat_signal:
-            continue
+        has_threat_signal = target_verdict in {"malicious", "suspicious"} or vendor_count > 0
 
         qualifiers = 0
         if rel in IMPORTANT_RELATIONSHIPS:
@@ -324,16 +319,64 @@ def _build_graph_summary(state: AgentState) -> str:
         ):
             qualifiers += 1
 
-        if qualifiers >= 1:
-            key_edges.append({
-                "source": source,
-                "target": target,
-                "relationship": rel,
-                "target_verdict": target_node.get("verdict") or "unknown",
-                "target_malicious_count": vendor_count,
-            })
+        node_score = max(source_node.get("score") or 0, target_node.get("score") or 0)
 
-    key_edges = key_edges[:25]
+        scored.append({
+            "source": source,
+            "target": target,
+            "relationship": rel,
+            "score": node_score + qualifiers * 10,
+            "root_adjacent": bool(root_ioc) and root_ioc in (source, target),
+            "qualifiers": qualifiers,
+            "has_threat_signal": has_threat_signal,
+            "target_verdict": target_node.get("verdict") or "unknown",
+            "target_malicious_count": vendor_count,
+        })
+
+    scored.sort(key=lambda e: (e["root_adjacent"], e["score"]), reverse=True)
+    return scored
+
+
+def _build_graph_summary(state: AgentState) -> str:
+    """
+    Summarize the investigation graph into compact, high-signal text for synthesis.
+    This gives the Lead Hunter actual graph context without dumping the full cache.
+    """
+    graph_state = state.get("investigation_graph")
+    if not graph_state:
+        return "No investigation graph available."
+
+    cache = InvestigationCache(graph_state)
+    stats = cache.get_stats()
+    root_ioc = state.get("ioc")
+
+    node_details = _compute_node_details(cache)
+    high_signal_node_ids, important_relationships_by_node, bridges_malware_infra = (
+        _compute_high_signal(cache, node_details)
+    )
+
+    relationship_counts = {}
+    for _source, _target, data in cache.graph.edges(data=True):
+        rel = data.get("relationship", "related_to")
+        relationship_counts[rel] = relationship_counts.get(rel, 0) + 1
+
+    high_signal_nodes = [
+        {
+            **node_details[node_id],
+            "important_relationships": sorted(important_relationships_by_node.get(node_id, set())),
+            "bridges_malware_infra": node_id in bridges_malware_infra,
+        }
+        for node_id in node_details
+        if node_id in high_signal_node_ids
+    ]
+    high_signal_nodes = sorted(
+        high_signal_nodes,
+        key=lambda n: (n["score"], n["malicious_count"]),
+        reverse=True
+    )[:15]
+
+    scored_edges = _score_edges(cache, node_details, high_signal_node_ids, root_ioc)
+    key_edges = [e for e in scored_edges if e["has_threat_signal"] and e["qualifiers"] >= 1][:25]
 
     root_neighbors = []
     if root_ioc and root_ioc in cache.graph:
@@ -379,27 +422,36 @@ def _build_edge_tuples(state: AgentState) -> str:
     Generate a machine-readable edge list for grounding the Graphviz diagram.
     Each line is a DOT-compatible edge: "source_label" -> "target_label" [label="relationship"]
     The LLM can use these directly instead of reconstructing edges from prose.
+
+    Edges are relevance-sorted (root-adjacent first, then by score, via
+    _score_edges) before the cap is applied, so the highest-signal and
+    root-anchored edges always survive truncation instead of whatever
+    NetworkX happened to iterate first. Previously this took the first 40
+    edges in raw insertion order, which could exhaust the cap on benign
+    triage-phase noise before any specialist-discovered edge was considered.
     """
     graph_state = state.get("investigation_graph")
     if not graph_state:
         return "No graph data available."
 
     cache = InvestigationCache(graph_state)
+    root_ioc = state.get("ioc")
+
+    node_details = _compute_node_details(cache)
+    high_signal_node_ids, _important_rels, _bridges = _compute_high_signal(cache, node_details)
+    scored_edges = _score_edges(cache, node_details, high_signal_node_ids, root_ioc)
+
     lines = []
     seen = set()
-
-    for src, tgt, data in cache.graph.edges(data=True):
-        rel = data.get("relationship", "related_to")
-        key = (src, tgt, rel)
+    for edge in scored_edges:
+        key = (edge["source"], edge["target"], edge["relationship"])
         if key in seen:
             continue
         seen.add(key)
 
-        src_data = cache.graph.nodes.get(src, {})
-        tgt_data = cache.graph.nodes.get(tgt, {})
-        src_label = _node_label(src, src_data)
-        tgt_label = _node_label(tgt, tgt_data)
-        lines.append(f'  "{src_label}" -> "{tgt_label}" [label="{rel}"];')
+        src_label = node_details.get(edge["source"], {}).get("label", edge["source"])
+        tgt_label = node_details.get(edge["target"], {}).get("label", edge["target"])
+        lines.append(f'  "{src_label}" -> "{tgt_label}" [label="{edge["relationship"]}"];')
 
     return "\n".join(lines[:40])  # Cap at 40 edges to limit token cost
 

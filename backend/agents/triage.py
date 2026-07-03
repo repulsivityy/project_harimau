@@ -540,6 +540,11 @@ Perform comprehensive first-level triage analysis now.
         if response_obj.get("parsing_error"):
             # Fallback manual parsing if structured output fails
             raw_content = response_obj["raw"].content if hasattr(response_obj["raw"], "content") else str(response_obj["raw"])
+            if isinstance(raw_content, list):
+                raw_content = " ".join([b.get("text", "") if isinstance(b, dict) else str(b) for b in raw_content])
+            elif not isinstance(raw_content, str):
+                raw_content = str(raw_content)
+                
             import re
             json_match = re.search(r'```(?:json)?\s*(\{.*\})\s*```', raw_content, re.DOTALL)
             raw_json = json_match.group(1) if json_match else raw_content

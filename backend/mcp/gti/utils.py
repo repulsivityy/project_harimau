@@ -26,6 +26,9 @@ async def consume_vt_iterator(
   # when the provided endpoint (like a malicious URL or probe) contains literal '{' or '}'
   safe_endpoint = endpoint.replace("{", "{{").replace("}", "}}")
   
+  if params:
+    params = {k: (str(v).lower() if isinstance(v, bool) else v) for k, v in params.items()}
+  
   try:
     async for obj in vt_client.iterator(safe_endpoint, params=params, limit=limit, batch_size=40):
       res.append(obj)
@@ -56,6 +59,8 @@ async def fetch_object(
     params["attributes"] = ",".join(attributes)
   if relationships:
     params["relationships"] = ",".join(relationships)
+
+  params = {k: (str(v).lower() if isinstance(v, bool) else v) for k, v in params.items()}
 
   try:
     obj = await vt_client.get_object_async(

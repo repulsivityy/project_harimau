@@ -546,7 +546,7 @@ Perform comprehensive first-level triage analysis now.
                 raw_content = str(raw_content)
                 
             import re
-            json_match = re.search(r'```(?:json)?\s*(\{.*\})\s*```', raw_content, re.DOTALL)
+            json_match = re.search(r'(\{.*\})', raw_content, re.DOTALL)
             raw_json = json_match.group(1) if json_match else raw_content
             
             try:

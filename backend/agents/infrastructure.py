@@ -623,9 +623,27 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
 
             # Node 4: final_output_node
             async def final_output_node(sub_state: InfraSubgraphState):
-                structured_llm = base_llm.with_structured_output(InfrastructureSpecialistOutput)
+                structured_llm = base_llm.with_structured_output(InfrastructureSpecialistOutput, include_raw=True)
                 response_obj = await structured_llm.ainvoke(sub_state["messages"])
-                result = response_obj.model_dump()
+                
+                if response_obj.get("parsing_error"):
+                    raw_content = response_obj["raw"].content if hasattr(response_obj["raw"], "content") else str(response_obj["raw"])
+                    if isinstance(raw_content, list):
+                        raw_content = " ".join([b.get("text", "") if isinstance(b, dict) else str(b) for b in raw_content])
+                    elif not isinstance(raw_content, str):
+                        raw_content = str(raw_content)
+                        
+                    import re
+                    json_match = re.search(r'(\{.*\})', raw_content, re.DOTALL)
+                    raw_json = json_match.group(1) if json_match else raw_content
+                    
+                    try:
+                        parsed_dict = json.loads(raw_json)
+                        result = InfrastructureSpecialistOutput(**parsed_dict).model_dump()
+                    except Exception as inner_e:
+                        raise response_obj["parsing_error"]
+                else:
+                    result = response_obj["parsed"].model_dump()
                 
                 # --- Code-enforced accumulation ---
                 prev = sub_state["specialist_results"].get("infrastructure") or {}

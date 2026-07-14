@@ -9,6 +9,8 @@ from backend.utils.graph_cache import InvestigationCache
 
 from backend.agents.lead_hunter_planning import run_planning_phase
 from backend.agents.lead_hunter_synthesis import generate_final_report_llm
+from backend.utils.verdict_engine import apply_composite_verdicts
+from backend.utils.report_validator import validate_and_annotate
 
 logger = get_logger("agent_lead_hunter")
 
@@ -107,11 +109,30 @@ async def lead_hunter_node(state: AgentState):
     # --- SYNTHESIS MODE (uses Pro) ---
     logger.info("lead_hunter_mode_synthesis")
 
+    # Composite verdicts must be computed before synthesis so the report can
+    # narrate graph-context escalations (e.g. undetected domain resolving to a
+    # confirmed C2 IP) instead of echoing raw GTI verdicts. See verdict_engine.py.
+    apply_composite_verdicts(cache, job_id=state.get("job_id"))
+
     final_report = await generate_final_report_llm(state, llm_pro)
 
+    # Annotate (never strip) any IOC cited in the report that isn't grounded in
+    # the investigation graph or specialist findings. See report_validator.py.
+    final_report = validate_and_annotate(
+        report_md=final_report,
+        cache=cache,
+        specialist_results=state.get("specialist_results", {}),
+        root_ioc=state.get("ioc"),
+        job_id=state.get("job_id"),
+    )
+
     # [CRITICAL] CLEAR SUBTASKS TO STOP INFINITE LOOP
-    # Return only changed fields — investigation_graph is untouched so merge_graphs is not triggered.
+    # investigation_graph IS now mutated (composite verdicts written onto nodes
+    # by apply_composite_verdicts above), so it must be returned/persisted here
+    # or the escalations are lost. This is the terminal node with no parallel
+    # writer at this point, so merge_graphs is not a concern.
     return {
         "final_report": final_report,
         "subtasks": [],
+        "investigation_graph": cache.get_state(),
     }

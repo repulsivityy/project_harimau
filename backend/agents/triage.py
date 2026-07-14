@@ -14,6 +14,7 @@ from backend.utils.logger import get_logger
 import backend.tools.gti as gti
 import backend.tools.webrisk as webrisk
 from backend.utils.graph_cache import InvestigationCache, normalize_verdict
+from backend.utils.signal_filter import get_signal_reason, promote_by_graph_context
 from backend.utils.transparency import emit_tool_call, emit_reasoning
 
 logger = get_logger("agent_triage")
@@ -48,8 +49,10 @@ class TriageAnalysisOutput(BaseModel):
 MAX_ENTITIES_PER_RELATIONSHIP = 10  # Max entities per relationship sent to LLM
 MAX_TOTAL_ENTITIES = 150  # Hard cap (not yet enforced — tracked for future use)
 
-# Signal filter thresholds for LLM context (NetworkX graph is always fully populated)
-SIGNAL_MALICIOUS_VENDORS = 3   # Include if malicious vendor count is >= this value
+# Signal filter thresholds/heuristics live in backend.utils.signal_filter —
+# zero-detection entities can still be high-signal (newly-registered domains,
+# fresh/rare samples, self-signed certs, etc.), so filtering is no longer a
+# pure detection-count threshold. See get_signal_reason().
 
 # Relationship types whose entities are attribution/context objects (campaigns, actors,
 # malware families) that do NOT have gti_assessment or last_analysis_stats.
@@ -143,8 +146,19 @@ You have COMPLETE data from Google Threat Intelligence:
 - Base threat indicators (verdict, score, stats)
 - ALL priority relationships have been fetched and provided
 - Full context about associated threats, infrastructure, and campaigns
-- NOTE: Relationship entities have been pre-filtered to only include indicators
-  with a malicious/suspicious verdict or significant vendor detections.
+- NOTE: Relationship entities have been pre-filtered to only include high-signal
+  indicators — a malicious/suspicious verdict, significant vendor detections,
+  a heuristic signal (e.g. newly registered, fresh/rare sample), or graph
+  adjacency to an already-flagged entity. See "Signal Reasons" below.
+
+**Signal Reasons:**
+Some entities carry a `signal_reason` field (e.g. `newly_registered`,
+`fresh_rare_sample`, `self_signed_cert`, or a `graph_context` promotion).
+These were kept despite low or zero detections because a heuristic or
+graph-context signal flagged them as worth analyst attention — not because
+GTI corroborated them. Do NOT treat a low detection count on an entity
+carrying `signal_reason` as evidence that it is benign; treat the reason as
+the basis for scrutiny it is.
 
 **Your Tasks:**
 
@@ -260,9 +274,12 @@ def generate_initial_subtasks(
 ) -> list[dict]:
     """
     Deterministically generates first-round subtasks from the filtered
-    relationship data. Only entities that passed the signal filter
-    (malicious/suspicious verdict or >3 malicious vendors) are present
-    in relationships_data, so every subtask targets a genuine indicator.
+    relationship data. Only entities that passed the heuristic signal filter
+    (malicious/suspicious verdict, significant vendor detections, or a
+    heuristic bypass such as a newly-registered domain or fresh/rare sample —
+    see backend/utils/signal_filter.py) or were promoted via graph-context
+    adjacency are present in relationships_data, so every subtask targets a
+    genuine indicator.
 
     Routing rules:
       - file entities      → malware_specialist
@@ -336,8 +353,9 @@ def prepare_detailed_context_for_llm(relationships_data: dict) -> dict:
     detailed_context = {}
     
     # Fields to keep for LLM (exclude display-only fields)
-    llm_fields = ["id", "type", "display_name", "verdict", "threat_score", 
-                  "malicious_count", "file_type", "reputation", "name"]
+    llm_fields = ["id", "type", "display_name", "verdict", "threat_score",
+                  "malicious_count", "file_type", "reputation", "name",
+                  "signal_reason"]
     
     for rel_name, entities in relationships_data.items():
         # Filter entities to only include LLM-relevant fields
@@ -715,6 +733,15 @@ async def triage_node(state: AgentState):
         logger.info("networkx_cached_root", ioc=ioc, type=config["type"])
         
         relationships_data = {}
+        # --- Signal filter accumulators (span the whole relationship loop) ---
+        # dropped_entities: norm_id -> parsed entity for everything that failed
+        #   get_signal_reason(); candidates for the graph-context promotion pass.
+        # flagged_ids: norm_ids of every entity that IS (or will be) in
+        #   relationships_data — filter survivors plus UNFILTERED_RELATIONSHIPS
+        #   entities (exempt by definition). Used by promote_by_graph_context()
+        #   to know which graph neighbors count as "already flagged".
+        dropped_entities: dict = {}
+        flagged_ids: set = set()
         tool_call_trace = []
         
         raw_relationships = base_data.get("relationships", {})
@@ -818,24 +845,47 @@ async def triage_node(state: AgentState):
                     stats = attrs.get("last_analysis_stats", {})
                     if stats.get("malicious", 0) > 0:
                         parsed["malicious_count"] = stats["malicious"]
-                    
+
+                    # Carry full GTI attributes under a private key so the
+                    # signal filter (below) can see fields like creation_date,
+                    # first_submission_date, last_https_certificate that don't
+                    # exist in the slim `parsed` projection. Stripped before
+                    # anything reaches relationships_data.
+                    parsed["_full_attrs"] = full_attrs
+
                     parsed_entities.append(parsed)
 
                 # --- SIGNAL FILTER ---
                 # NetworkX already has the full entity set above.
-                # For LLM context we apply a strict signal filter so only
-                # meaningful indicators reach the prompt.
+                # For LLM context we apply a heuristic signal filter so only
+                # meaningful indicators reach the prompt. get_signal_reason()
+                # covers both detection-based signal (malicious/suspicious
+                # verdict, high vendor count) AND zero-detection entities that
+                # are high-signal by heuristic (newly registered domains,
+                # fresh/rare samples, self-signed certs, etc.) — exactly the
+                # indicators a threat hunter would flag by eye despite no
+                # detections yet. See backend/utils/signal_filter.py.
                 # Attribution relationship types are exempt — their entities
                 # (campaigns, actors, families) have no gti_assessment.
                 if rel_name not in UNFILTERED_RELATIONSHIPS:
                     pre_filter_count = len(parsed_entities)
-                    parsed_entities = [
-                        e for e in parsed_entities
-                        if (
-                            normalize_verdict(e.get("verdict")) in {"malicious", "suspicious"}
-                            or (e.get("malicious_count") or 0) >= SIGNAL_MALICIOUS_VENDORS
+                    survivors = []
+                    for e in parsed_entities:
+                        norm_eid = e["id"]
+                        full_attrs_for_filter = e.get("_full_attrs") or {}
+                        reason = get_signal_reason(
+                            e.get("type"),
+                            full_attrs_for_filter,
+                            e.get("verdict"),
+                            e.get("malicious_count"),
                         )
-                    ]
+                        if reason:
+                            e["signal_reason"] = reason
+                            flagged_ids.add(norm_eid)
+                            survivors.append(e)
+                        else:
+                            dropped_entities[norm_eid] = e
+                    parsed_entities = survivors
                     filtered_count = pre_filter_count - len(parsed_entities)
                     if filtered_count > 0:
                         logger.debug(
@@ -844,6 +894,13 @@ async def triage_node(state: AgentState):
                             dropped=filtered_count,
                             kept=len(parsed_entities),
                         )
+                else:
+                    # Unfiltered relationship types pass every entity through
+                    # by definition — still register them as flagged so the
+                    # graph-context promotion pass (below) knows they're
+                    # already "in" the graph.
+                    for e in parsed_entities:
+                        flagged_ids.add(e["id"])
 
                 # Sort survivors by threat score (highest first) before capping,
                 # so the most dangerous indicators are never pushed out.
@@ -851,7 +908,9 @@ async def triage_node(state: AgentState):
                     key=lambda e: (e.get("threat_score") or 0), reverse=True
                 )
 
-                # SAFETY SLICE: cap to prevent token overflow
+                # SAFETY SLICE: cap to prevent token overflow. Entities capped
+                # here already survived the filter (high-signal) — they stay
+                # in flagged_ids, they just don't reach the LLM this round.
                 if len(parsed_entities) > MAX_ENTITIES_PER_RELATIONSHIP:
                     parsed_entities = parsed_entities[:MAX_ENTITIES_PER_RELATIONSHIP]
 
@@ -860,6 +919,12 @@ async def triage_node(state: AgentState):
                 if not parsed_entities:
                     logger.debug("triage_relationship_skipped_all_filtered", rel=rel_name)
                     continue
+
+                # Strip the private full-attrs carrier — it must never reach
+                # LLM context or get persisted to the graph as a raw attribute
+                # blob.
+                for e in parsed_entities:
+                    e.pop("_full_attrs", None)
 
                 relationships_data[rel_name] = parsed_entities
 
@@ -870,7 +935,36 @@ async def triage_node(state: AgentState):
                     "entities_found": len(parsed_entities),
                     "sample_entity": {"id": parsed_entities[0]["id"], "type": parsed_entities[0]["type"]}
                 })
-        
+
+        # --- SECOND PASS: graph-context promotion ---
+        # "This zero-detection domain resolves to an already-flagged malicious
+        # IP" can't be evaluated inside the per-entity loop above — it needs
+        # the whole graph, which only exists now that every relationship type
+        # has been fetched and the cache is fully populated for this
+        # investigation.
+        promoted = promote_by_graph_context(cache, dropped_entities, flagged_ids)
+        if promoted:
+            promoted_entities = []
+            for entity_id, reason in promoted.items():
+                if entity_id in flagged_ids:
+                    # Same entity id surfaced in another relationship and
+                    # already survived the filter there — don't duplicate it
+                    # into relationships_data under a second key.
+                    continue
+                parsed = dropped_entities[entity_id]
+                parsed["signal_reason"] = reason
+                parsed.pop("_full_attrs", None)
+                promoted_entities.append(parsed)
+            # Parity with the per-relationship skip-if-empty behavior: every
+            # promotion may have been deduped away by the flagged_ids guard.
+            if promoted_entities:
+                relationships_data["graph_context_promoted"] = promoted_entities
+                logger.info(
+                    "triage_graph_context_promotion_applied",
+                    promoted=len(promoted_entities),
+                    dropped_total=len(dropped_entities),
+                )
+
         # Log cache statistics
         cache_stats = cache.get_stats()
         logger.info("phase1_super_bundle_complete", 

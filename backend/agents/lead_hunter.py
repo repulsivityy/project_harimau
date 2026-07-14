@@ -114,7 +114,7 @@ async def lead_hunter_node(state: AgentState):
     # confirmed C2 IP) instead of echoing raw GTI verdicts. See verdict_engine.py.
     apply_composite_verdicts(cache, job_id=state.get("job_id"))
 
-    final_report = await generate_final_report_llm(state, llm_pro)
+    final_report = await generate_final_report_llm(state, llm_pro, cache=cache)
 
     # Annotate (never strip) any IOC cited in the report that isn't grounded in
     # the investigation graph or specialist findings. See report_validator.py.

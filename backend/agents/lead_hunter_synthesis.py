@@ -4,6 +4,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from backend.utils.logger import get_logger
 from backend.graph.state import AgentState
 from backend.utils.graph_cache import InvestigationCache, normalize_verdict
+from backend.utils.verdict_engine import build_escalation_context
 
 logger = get_logger("agent_lead_hunter_synthesis")
 
@@ -50,6 +51,9 @@ Your job is to connect the dots, identify the broader campaign context, and writ
 1.  **Triage Context:** Initial assessment and key findings.
 2.  **Specialist Reports:** Detailed analysis of files and infrastructure.
 3.  **Investigation Graph:** The network of connections found.
+
+**Verdict Handling:**
+Some entities in the Investigation Graph carry an assessed verdict that differs from their raw GTI baseline verdict — this happens when graph context (e.g. adjacency to a confirmed-malicious entity) or corroborating evidence justified an escalation. When an entity's assessed verdict differs from its GTI baseline, state BOTH explicitly rather than presenting the escalation as if it were GTI's own finding (e.g. "GTI: undetected — assessed SUSPICIOUS because it resolves to a confirmed C2 IP"). Draw escalation reasons from the Verdict Escalations context block provided below; do not invent reasons that aren't listed there. If an entity's `stale_analysis_days` is present, note that its verdict may be outdated. This is additive context for narrating the investigation accurately — it does not change how threat scores are reported; threat scores are passed through from GTI as-is and should never be derived or adjusted.
 
 **Goal:**
 Produce a comprehensive Markdown report that reads like a high-level Threat Intelligence product (e.g., similar to Mandiant or Red Canary reporting).
@@ -227,12 +231,26 @@ def _compute_node_details(cache) -> dict:
         threat_score = gti_assessment.get("threat_score") or {}
         last_analysis_stats = data.get("last_analysis_stats") or {}
 
+        # Raw GTI verdict value, preserved as-is (e.g. "VERDICT_MALICIOUS") under
+        # "gti_verdict" so the baseline is never lost. The composite verdict
+        # engine (verdict_engine.py) may have escalated this node beyond its
+        # GTI baseline using graph context; when present, prefer it for the
+        # "verdict" field consumers actually act on. composite_verdict is
+        # already a normalized lowercase token (e.g. "suspicious"), so when it
+        # is absent we normalize the GTI fallback the same way — keeping
+        # "verdict" in one consistent format for downstream consumers
+        # (_score_edges' normalize_verdict() call, graph-summary text
+        # rendering) instead of mixing raw and normalized shapes.
+        gti_verdict_raw = verdict.get("value") if isinstance(verdict, dict) else None
+        composite_verdict = data.get("composite_verdict")
+
         node_details[node_id] = {
             "id": node_id,
             "type": entity_type,
             "label": _node_label(node_id, data),
             "score": (threat_score.get("value") if isinstance(threat_score, dict) and threat_score.get("value") is not None else 0),
-            "verdict": verdict.get("value") if isinstance(verdict, dict) else None,
+            "verdict": composite_verdict if composite_verdict else normalize_verdict(gti_verdict_raw),
+            "gti_verdict": gti_verdict_raw,
             "malicious_count": last_analysis_stats.get("malicious", 0) if isinstance(last_analysis_stats, dict) else 0,
             "raw_attributes": data,
         }
@@ -337,16 +355,22 @@ def _score_edges(cache, node_details: dict, high_signal_node_ids: set, root_ioc:
     return scored
 
 
-def _build_graph_summary(state: AgentState) -> str:
+def _build_graph_summary(state: AgentState, cache: Optional[InvestigationCache] = None) -> str:
     """
     Summarize the investigation graph into compact, high-signal text for synthesis.
     This gives the Lead Hunter actual graph context without dumping the full cache.
-    """
-    graph_state = state.get("investigation_graph")
-    if not graph_state:
-        return "No investigation graph available."
 
-    cache = InvestigationCache(graph_state)
+    `cache` is optional and defaults to rebuilding from `state["investigation_graph"]`
+    for backward compatibility with any caller that doesn't have an already-built
+    cache on hand. Prefer passing an in-memory cache (e.g. one composite verdicts
+    were already applied to) so this doesn't rebuild from pre-mutation state.
+    """
+    if cache is None:
+        graph_state = state.get("investigation_graph")
+        if not graph_state:
+            return "No investigation graph available."
+        cache = InvestigationCache(graph_state)
+
     stats = cache.get_stats()
     root_ioc = state.get("ioc")
 
@@ -417,7 +441,7 @@ def _build_graph_summary(state: AgentState) -> str:
         )
     )
 
-def _build_edge_tuples(state: AgentState) -> str:
+def _build_edge_tuples(state: AgentState, cache: Optional[InvestigationCache] = None) -> str:
     """
     Generate a machine-readable edge list for grounding the Graphviz diagram.
     Each line is a DOT-compatible edge: "source_label" -> "target_label" [label="relationship"]
@@ -429,12 +453,18 @@ def _build_edge_tuples(state: AgentState) -> str:
     NetworkX happened to iterate first. Previously this took the first 40
     edges in raw insertion order, which could exhaust the cap on benign
     triage-phase noise before any specialist-discovered edge was considered.
-    """
-    graph_state = state.get("investigation_graph")
-    if not graph_state:
-        return "No graph data available."
 
-    cache = InvestigationCache(graph_state)
+    `cache` is optional and defaults to rebuilding from `state["investigation_graph"]`
+    for backward compatibility with any caller that doesn't have an already-built
+    cache on hand. Prefer passing an in-memory cache (e.g. one composite verdicts
+    were already applied to) so this doesn't rebuild from pre-mutation state.
+    """
+    if cache is None:
+        graph_state = state.get("investigation_graph")
+        if not graph_state:
+            return "No graph data available."
+        cache = InvestigationCache(graph_state)
+
     root_ioc = state.get("ioc")
 
     node_details = _compute_node_details(cache)
@@ -456,14 +486,23 @@ def _build_edge_tuples(state: AgentState) -> str:
     return "\n".join(lines[:40])  # Cap at 40 edges to limit token cost
 
 
-async def generate_final_report_llm(state: AgentState, llm) -> str:
+async def generate_final_report_llm(state: AgentState, llm, cache: Optional[InvestigationCache] = None) -> str:
     """
     Executes the final synthesis logic:
     1. Gathers context (Triage + Specialist Reports + Graph).
     2. Prompts the LLM to write the final markdown report.
+
+    `cache` is optional. When the caller (lead_hunter.py's synthesis branch)
+    already has an in-memory InvestigationCache with composite verdicts applied
+    (see verdict_engine.apply_composite_verdicts), it should pass that cache
+    directly here so escalations aren't lost by rebuilding from pre-mutation
+    `state["investigation_graph"]`. Falls back to rebuilding from state only if
+    no cache is supplied.
     """
     job_id = state.get("job_id")
     logger.info("lead_hunter_synthesis_start", job_id=job_id)
+
+    cache = cache if cache is not None else InvestigationCache(state.get("investigation_graph"))
 
     # S1-T5: Error Recovery Guard
     specialist_data = state.get("specialist_results", {})
@@ -480,13 +519,14 @@ No actionable intelligence could be synthesized. The original indicator may be m
 
     triage_context = _build_triage_context(state)
     specialist_context = _build_specialist_context(state)
-    graph_summary = _build_graph_summary(state)
-    edge_tuples = _build_edge_tuples(state)
+    graph_summary = _build_graph_summary(state, cache)
+    edge_tuples = _build_edge_tuples(state, cache)
+    escalation_context = build_escalation_context(cache)
 
     # Format context
     context = f"""
     Use ALL input sections together when writing the final synthesis.
-    
+
     **Triage Context:**
     {triage_context}
 
@@ -498,6 +538,9 @@ No actionable intelligence could be synthesized. The original indicator may be m
 
     **Graph Edges (use these for your Graphviz diagram — do NOT invent edges):**
     {edge_tuples}
+
+    **Verdict Escalations (graph-context analysis):**
+    {escalation_context}
     """
 
     messages = [

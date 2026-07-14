@@ -43,6 +43,8 @@ debugs/
 *.pyc
 *.backup
 test_*
+# but keep the real test suite
+!backend/tests/test_*.py
 
 # Terraform
 .terraform/

@@ -11,6 +11,7 @@ from backend.agents.lead_hunter_planning import run_planning_phase
 from backend.agents.lead_hunter_synthesis import generate_final_report_llm
 from backend.utils.verdict_engine import apply_composite_verdicts
 from backend.utils.report_validator import validate_and_annotate
+from backend.utils.signal_filter import promote_by_graph_context
 
 logger = get_logger("agent_lead_hunter")
 
@@ -109,6 +110,26 @@ async def lead_hunter_node(state: AgentState):
     # --- SYNTHESIS MODE (uses Pro) ---
     logger.info("lead_hunter_mode_synthesis")
 
+    # Graph-context promotion runs here, not in triage. Triage only ever
+    # creates root->entity edges (a star topology), so at triage time a
+    # dropped entity's only neighbor is the root IOC — which is never
+    # "flagged" — so promotion could never fire there. By synthesis time
+    # specialists have added entity-entity edges, so the graph is connected
+    # enough for adjacency to mean something. See signal_filter.py and
+    # triage.py's signal_filter_carryover persistence.
+    carryover = (state.get("metadata") or {}).get("rich_intel", {}).get("signal_filter_carryover") or {}
+    dropped = carryover.get("dropped_entities") or {}
+    flagged = set(carryover.get("flagged_ids") or [])
+    if dropped and flagged:
+        promoted = promote_by_graph_context(cache, dropped, flagged)
+        for entity_id, reason in promoted.items():
+            # An entity dropped under one relationship may have survived the
+            # filter under another — it's already surfaced, don't re-promote.
+            if entity_id in flagged:
+                continue
+            if entity_id in cache.graph and "signal_reason" not in cache.graph.nodes[entity_id]:
+                cache.graph.nodes[entity_id]["signal_reason"] = reason
+
     # Composite verdicts must be computed before synthesis so the report can
     # narrate graph-context escalations (e.g. undetected domain resolving to a
     # confirmed C2 IP) instead of echoing raw GTI verdicts. See verdict_engine.py.
@@ -127,10 +148,11 @@ async def lead_hunter_node(state: AgentState):
     )
 
     # [CRITICAL] CLEAR SUBTASKS TO STOP INFINITE LOOP
-    # investigation_graph IS now mutated (composite verdicts written onto nodes
-    # by apply_composite_verdicts above), so it must be returned/persisted here
-    # or the escalations are lost. This is the terminal node with no parallel
-    # writer at this point, so merge_graphs is not a concern.
+    # investigation_graph IS now mutated (graph-context promotions and
+    # composite verdicts written onto nodes above), so it must be
+    # returned/persisted here or those annotations are lost. This is the
+    # terminal node with no parallel writer at this point, so merge_graphs is
+    # not a concern.
     return {
         "final_report": final_report,
         "subtasks": [],

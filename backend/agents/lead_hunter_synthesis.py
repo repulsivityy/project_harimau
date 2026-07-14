@@ -5,6 +5,7 @@ from backend.utils.logger import get_logger
 from backend.graph.state import AgentState
 from backend.utils.graph_cache import InvestigationCache, normalize_verdict
 from backend.utils.verdict_engine import build_escalation_context
+from backend.utils.signal_filter import build_promotion_context
 
 logger = get_logger("agent_lead_hunter_synthesis")
 
@@ -522,6 +523,7 @@ No actionable intelligence could be synthesized. The original indicator may be m
     graph_summary = _build_graph_summary(state, cache)
     edge_tuples = _build_edge_tuples(state, cache)
     escalation_context = build_escalation_context(cache)
+    promotion_context = build_promotion_context(cache)
 
     # Format context
     context = f"""
@@ -541,6 +543,9 @@ No actionable intelligence could be synthesized. The original indicator may be m
 
     **Verdict Escalations (graph-context analysis):**
     {escalation_context}
+
+    **Graph-Context Promotions:**
+    {promotion_context}
     """
 
     messages = [

@@ -2,7 +2,7 @@ import time
 from backend.utils.graph_cache import InvestigationCache
 from backend.utils.report_validator import validate_report_iocs, annotate_report
 from backend.utils.verdict_engine import apply_composite_verdicts, compute_composite_verdict, build_escalation_context
-from backend.utils.signal_filter import get_signal_reason, promote_by_graph_context
+from backend.utils.signal_filter import get_signal_reason, promote_by_graph_context, build_promotion_context
 
 NOW = time.time()
 DAY = 86400
@@ -96,6 +96,25 @@ g.add_relationship("quiet-domain", "bad-ip", "resolutions")
 promoted = promote_by_graph_context(g, {"quiet-domain": {}, "unrelated": {}}, {"bad-ip"})
 check("quiet domain resolving to flagged IP promoted", "quiet-domain" in promoted, f"got {promoted}")
 check("unrelated domain NOT promoted", "unrelated" not in promoted)
+
+# build_promotion_context — simulates what lead_hunter.py does: write the
+# promoted reason onto the node's signal_reason attr, then render for the
+# synthesis prompt.
+for entity_id, reason in promoted.items():
+    g.graph.nodes[entity_id]["signal_reason"] = reason
+promo_ctx = build_promotion_context(g)
+check("promotion context renders promoted node id", "quiet-domain" in promo_ctx, f"got {promo_ctx}")
+check("promotion context renders reason", "graph_context:" in promo_ctx, f"got {promo_ctx}")
+
+empty_g = InvestigationCache()
+empty_g.add_entity("solo", "domain", {})
+check("no promotions renders placeholder",
+      build_promotion_context(empty_g) == "No entities were promoted by graph-context analysis.")
+
+heuristic_g = InvestigationCache()
+heuristic_g.add_entity("new-domain", "domain", {"signal_reason": "newly_registered:4d"})
+check("non-promotion signal_reason NOT rendered",
+      "new-domain" not in build_promotion_context(heuristic_g), f"got {build_promotion_context(heuristic_g)}")
 
 print(); print("="*70); print("#6 VERDICT ENGINE"); print("="*70)
 

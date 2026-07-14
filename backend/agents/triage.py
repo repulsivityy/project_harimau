@@ -14,7 +14,7 @@ from backend.utils.logger import get_logger
 import backend.tools.gti as gti
 import backend.tools.webrisk as webrisk
 from backend.utils.graph_cache import InvestigationCache, normalize_verdict
-from backend.utils.signal_filter import get_signal_reason, promote_by_graph_context
+from backend.utils.signal_filter import get_signal_reason
 from backend.utils.transparency import emit_tool_call, emit_reasoning
 
 logger = get_logger("agent_triage")
@@ -277,9 +277,10 @@ def generate_initial_subtasks(
     relationship data. Only entities that passed the heuristic signal filter
     (malicious/suspicious verdict, significant vendor detections, or a
     heuristic bypass such as a newly-registered domain or fresh/rare sample —
-    see backend/utils/signal_filter.py) or were promoted via graph-context
-    adjacency are present in relationships_data, so every subtask targets a
-    genuine indicator.
+    see backend/utils/signal_filter.py) are present in relationships_data, so
+    every subtask targets a genuine indicator. Graph-context promotion of
+    dropped entities happens later, at Lead Hunter synthesis time, once
+    specialists have connected the graph — see signal_filter.promote_by_graph_context.
 
     Routing rules:
       - file entities      → malware_specialist
@@ -740,6 +741,13 @@ async def triage_node(state: AgentState):
         #   relationships_data — filter survivors plus UNFILTERED_RELATIONSHIPS
         #   entities (exempt by definition). Used by promote_by_graph_context()
         #   to know which graph neighbors count as "already flagged".
+        # NOTE: the graph-context promotion pass itself does NOT run here.
+        # Triage only ever creates root->entity edges (a star topology), so a
+        # dropped entity's only neighbor at this point is the root IOC, which
+        # is never in flagged_ids — promotion would always be a no-op. Instead
+        # these accumulators are persisted below (rich_intel.signal_filter_carryover)
+        # and the promotion pass runs in the Lead Hunter at synthesis time,
+        # once specialists have connected the graph with entity-entity edges.
         dropped_entities: dict = {}
         flagged_ids: set = set()
         tool_call_trace = []
@@ -884,6 +892,12 @@ async def triage_node(state: AgentState):
                             flagged_ids.add(norm_eid)
                             survivors.append(e)
                         else:
+                            # Dropped entities are persisted to state (see
+                            # signal_filter_carryover below) for the Lead
+                            # Hunter's graph-context promotion pass — strip the
+                            # full-attrs blob now, same as survivors below,
+                            # so nothing oversized reaches state/JSON.
+                            e.pop("_full_attrs", None)
                             dropped_entities[norm_eid] = e
                     parsed_entities = survivors
                     filtered_count = pre_filter_count - len(parsed_entities)
@@ -897,8 +911,9 @@ async def triage_node(state: AgentState):
                 else:
                     # Unfiltered relationship types pass every entity through
                     # by definition — still register them as flagged so the
-                    # graph-context promotion pass (below) knows they're
-                    # already "in" the graph.
+                    # Lead Hunter's later graph-context promotion pass (see
+                    # signal_filter_carryover below) knows they're already
+                    # "in" the graph.
                     for e in parsed_entities:
                         flagged_ids.add(e["id"])
 
@@ -936,34 +951,12 @@ async def triage_node(state: AgentState):
                     "sample_entity": {"id": parsed_entities[0]["id"], "type": parsed_entities[0]["type"]}
                 })
 
-        # --- SECOND PASS: graph-context promotion ---
-        # "This zero-detection domain resolves to an already-flagged malicious
-        # IP" can't be evaluated inside the per-entity loop above — it needs
-        # the whole graph, which only exists now that every relationship type
-        # has been fetched and the cache is fully populated for this
-        # investigation.
-        promoted = promote_by_graph_context(cache, dropped_entities, flagged_ids)
-        if promoted:
-            promoted_entities = []
-            for entity_id, reason in promoted.items():
-                if entity_id in flagged_ids:
-                    # Same entity id surfaced in another relationship and
-                    # already survived the filter there — don't duplicate it
-                    # into relationships_data under a second key.
-                    continue
-                parsed = dropped_entities[entity_id]
-                parsed["signal_reason"] = reason
-                parsed.pop("_full_attrs", None)
-                promoted_entities.append(parsed)
-            # Parity with the per-relationship skip-if-empty behavior: every
-            # promotion may have been deduped away by the flagged_ids guard.
-            if promoted_entities:
-                relationships_data["graph_context_promoted"] = promoted_entities
-                logger.info(
-                    "triage_graph_context_promotion_applied",
-                    promoted=len(promoted_entities),
-                    dropped_total=len(dropped_entities),
-                )
+        # NOTE: graph-context promotion (promote_by_graph_context) deliberately
+        # does NOT run here. See the accumulator comment above — at this point
+        # in the pipeline the graph is a root->entity star, so nothing could
+        # ever be promoted. dropped_entities/flagged_ids are persisted below
+        # for the Lead Hunter to promote from once specialists have connected
+        # the graph.
 
         # Log cache statistics
         cache_stats = cache.get_stats()
@@ -975,6 +968,14 @@ async def triage_node(state: AgentState):
         # Store in state for graph building
         state["metadata"]["rich_intel"]["relationships"] = relationships_data
         state["metadata"]["tool_call_trace"] = tool_call_trace
+        # Carry the filtered-out entities + flagged ids forward so the Lead
+        # Hunter can run promote_by_graph_context() once specialists have
+        # connected the graph with entity-entity edges (see accumulator
+        # comment above). JSON-safe: dict of slim dicts + list of strings.
+        state["metadata"]["rich_intel"]["signal_filter_carryover"] = {
+            "dropped_entities": dropped_entities,
+            "flagged_ids": sorted(flagged_ids),
+        }
         state["investigation_graph"] = cache.get_state()  # Persist cache in state
         
         # ========================================

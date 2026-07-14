@@ -135,9 +135,10 @@ def promote_by_graph_context(
     Second pass: an entity that resolves to / is contacted by an already-flagged
     node is high-signal regardless of its own detection count.
 
-    Cannot be done in the per-entity loop because it needs the full graph, which
-    only exists after every relationship has been parsed. Pure in-memory pass —
-    everything is already in the NetworkX cache by this point.
+    Cannot be done per-entity because it needs a connected graph. Triage only
+    creates root->entity edges (star topology), so this runs at Lead Hunter
+    synthesis time, after specialists have added entity-entity edges. Pure
+    in-memory pass — everything is already in the NetworkX cache by this point.
 
     Args:
         filtered_out: {entity_id: parsed_entity} that FAILED the per-entity filter
@@ -166,4 +167,40 @@ def promote_by_graph_context(
     if promoted:
         logger.info("signal_filter_graph_promotions", count=len(promoted))
     return promoted
+
+
+def build_promotion_context(cache: InvestigationCache, limit: int = 10) -> str:
+    """
+    Render graph-context promotions for the synthesis prompt so the LLM can
+    weigh them the way an analyst would, instead of dismissing a zero-detection
+    entity as benign. Mirrors verdict_engine.build_escalation_context's style.
+
+    Pure/read-only: scans `signal_reason` node attributes written by
+    promote_by_graph_context() (called by lead_hunter.py before synthesis).
+    Never raises — a rendering failure here must not break report generation.
+    """
+    try:
+        promoted = [
+            (node_id, data)
+            for node_id, data in cache.graph.nodes(data=True)
+            if str(data.get("signal_reason", "")).startswith("graph_context:")
+        ]
+        if not promoted:
+            return "No entities were promoted by graph-context analysis."
+
+        lines = [
+            "The following low/zero-detection entities were promoted for analyst "
+            "attention because the investigation graph connects them to flagged "
+            "infrastructure. Weigh them in the narrative; do not treat their low "
+            "detection counts as evidence of benignity:"
+        ]
+        for node_id, data in promoted[:limit]:
+            lines.append(
+                f"- {node_id} ({data.get('entity_type', 'unknown')}): "
+                f"{data.get('signal_reason')}"
+            )
+        return "\n".join(lines)
+    except Exception as e:
+        logger.error("build_promotion_context_failed", error=str(e))
+        return "No entities were promoted by graph-context analysis."
 

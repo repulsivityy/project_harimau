@@ -50,6 +50,22 @@ SIGNAL_MALICIOUS_VENDORS_FOR_BENIGN_OVERRIDE = 5
 
 STALE_ANALYSIS_DAYS = 180
 
+# Entity types that carry real GTI reputational data (gti_assessment,
+# last_analysis_stats, etc.) and are therefore eligible to be escalated as
+# the SUBJECT of the ladder below. Mirrors lead_hunter.py's ACTIONABLE_TYPES
+# and the etype switch in signal_filter.get_signal_reason.
+#
+# Everything else in the graph — MITRE ATT&CK technique nodes ("attack_technique",
+# from the attack_techniques relationship), campaign/actor/malware-family
+# attribution nodes ("collection", from associations/campaigns/malware_families/
+# related_threat_actors), and DNS-resolution join-records ("resolution", from
+# the resolutions relationship) — never carries gti_assessment. Their
+# _gti_verdict() always defaults to "unknown", which is a NO_SIGNAL_VERDICT,
+# so without this guard Rule 1 would escalate a technique reference or a
+# collection tag to "suspicious" merely for being graph-adjacent to malware —
+# which is not a meaningful analytic claim about that node.
+REAL_INDICATOR_TYPES = {"file", "domain", "ip_address", "url"}
+
 
 def _gti_verdict(attrs: Dict[str, Any]) -> str:
     assessment = attrs.get("gti_assessment") or {}
@@ -112,6 +128,25 @@ def compute_composite_verdict(entity_id: str, cache: InvestigationCache) -> Dict
             "gti_verdict": "unknown",
             "escalated": False,
             "escalation_reasons": [],
+        }
+
+    # Non-entity taxonomy/collection/technique/resolution-join nodes have no
+    # real reputational data to escalate. Return early with a sentinel that
+    # does not participate in escalation (composite_verdict=None). This does
+    # NOT affect the neighbor-scanning loop below for OTHER entities: a node
+    # without gti_assessment always has _gti_verdict() == "unknown" !=
+    # "malicious", so it could never have counted as a "malicious neighbor"
+    # for its neighbors anyway — this guard only concerns whether THIS node
+    # can itself be escalated.
+    entity_type = attrs.get("entity_type")
+    if entity_type not in REAL_INDICATOR_TYPES:
+        return {
+            "composite_verdict": None,
+            "gti_verdict": _gti_verdict(attrs),
+            "escalated": False,
+            "escalation_reasons": [],
+            "malicious_neighbors": 0,
+            "malicious_neighbor_ids": [],
         }
 
     base = _gti_verdict(attrs)
@@ -231,6 +266,15 @@ def apply_composite_verdicts(cache: InvestigationCache, job_id: Optional[str] = 
     escalated_count = 0
     stale_count = 0
     for node_id, result in results.items():
+        if result["composite_verdict"] is None:
+            # Non-entity node (taxonomy/collection/technique/resolution-join)
+            # — no meaningful verdict to report. Leave the node's attributes
+            # alone rather than writing composite_verdict=None onto every
+            # such node; build_escalation_context()'s escalation filter and
+            # "has apply() run" guard both key off real entities having these
+            # fields set, so skipping is safe as long as at least one real
+            # entity exists in the graph (the root IOC always is one).
+            continue
         cache.graph.nodes[node_id]["composite_verdict"] = result["composite_verdict"]
         cache.graph.nodes[node_id]["verdict_escalated"] = result["escalated"]
         cache.graph.nodes[node_id]["escalation_reasons"] = result["escalation_reasons"]

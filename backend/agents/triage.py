@@ -49,6 +49,13 @@ class TriageAnalysisOutput(BaseModel):
 MAX_ENTITIES_PER_RELATIONSHIP = 10  # Max entities per relationship sent to LLM
 MAX_TOTAL_ENTITIES = 150  # Hard cap (not yet enforced — tracked for future use)
 
+# GTI's detected type ("IP"/"File"/"Domain"/"URL") to the entity_type string used
+# everywhere else in the graph (verdict_engine.REAL_INDICATOR_TYPES, signal_filter's
+# etype switch, lead_hunter.ACTIONABLE_TYPES). Bare `.lower()` on "IP" gives "ip",
+# not "ip_address" — every root-caching call site must go through this map, or the
+# root node silently falls outside every one of those type-keyed code paths.
+ROOT_TYPE_MAP = {"File": "file", "IP": "ip_address", "Domain": "domain", "URL": "url"}
+
 # Signal filter thresholds/heuristics live in backend.utils.signal_filter —
 # zero-detection entities can still be high-signal (newly-registered domains,
 # fresh/rare samples, self-signed certs, etc.), so filtering is no longer a
@@ -316,8 +323,7 @@ def generate_initial_subtasks(
         })
 
     # 1. Always include the root IOC
-    root_type_map = {"File": "file", "IP": "ip_address", "Domain": "domain", "URL": "url"}
-    root_entity_type = root_type_map.get(ioc_type, "file")
+    root_entity_type = ROOT_TYPE_MAP.get(ioc_type, "file")
     _add_subtask(ioc, root_entity_type, "Root IOC — primary target of investigation")
 
     # 2. If LLM provided priority_entities, route those first
@@ -728,7 +734,7 @@ async def triage_node(state: AgentState):
         # Store root IOC in cache with full base_data attributes
         cache.add_entity(
             entity_id=ioc,
-            entity_type=config["type"].lower(),
+            entity_type=ROOT_TYPE_MAP.get(config["type"], config["type"].lower()),
             attributes=base_data.get("attributes", {})
         )
         logger.info("networkx_cached_root", ioc=ioc, type=config["type"])

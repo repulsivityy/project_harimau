@@ -189,6 +189,63 @@ check("empty graph context safe", "No entities" in build_escalation_context(Inve
 _unapplied = InvestigationCache(); _unapplied.add_entity("x","file",gti("VERDICT_MALICIOUS"))
 check("guard fires if apply() not run", "not run" in build_escalation_context(_unapplied))
 
+# --- Non-entity taxonomy nodes must never be escalated ---
+# (MITRE technique / collection-attribution / resolution-join nodes have no
+# gti_assessment; adjacency to malware alone must not turn them "suspicious".)
+tax = InvestigationCache()
+tax.add_entity("mal-root", "file", gti("VERDICT_MALICIOUS", 95, 50))
+tax.add_entity("t1012", "attack_technique", {})
+tax.add_entity("apt-collection", "collection", {})
+tax.add_entity("some-resolution", "resolution", {})
+tax.add_entity("real-domain", "domain", gti("VERDICT_UNDETECTED", 0, 0))
+tax.add_relationship("mal-root", "t1012", "attack_techniques")
+tax.add_relationship("mal-root", "apt-collection", "associations")
+tax.add_relationship("mal-root", "some-resolution", "resolutions")
+tax.add_relationship("mal-root", "real-domain", "contacted_domains")
+
+r = compute_composite_verdict("t1012", tax)
+check("attack_technique node adjacent to malicious NOT escalated", not r["escalated"], f"got {r}")
+check("attack_technique node composite_verdict is sentinel (no verdict)", r["composite_verdict"] is None, f"got {r}")
+
+r = compute_composite_verdict("apt-collection", tax)
+check("collection node adjacent to malicious NOT escalated", not r["escalated"], f"got {r}")
+check("collection node composite_verdict is sentinel (no verdict)", r["composite_verdict"] is None, f"got {r}")
+
+r = compute_composite_verdict("some-resolution", tax)
+check("resolution node adjacent to malicious NOT escalated", not r["escalated"], f"got {r}")
+check("resolution node composite_verdict is sentinel (no verdict)", r["composite_verdict"] is None, f"got {r}")
+
+r = compute_composite_verdict("real-domain", tax)
+check("regression: real domain adjacent to malicious IS still escalated", r["escalated"], f"got {r}")
+check("regression: real domain escalates to suspicious", r["composite_verdict"] == "suspicious", f"got {r}")
+
+tax_stats = apply_composite_verdicts(tax, "taxonomy-test")
+check("taxonomy nodes not counted as escalated", tax_stats["escalated"] == 1, f"got {tax_stats}")
+check("attack_technique node gets no composite_verdict attr written",
+      "composite_verdict" not in tax.graph.nodes["t1012"], f"{dict(tax.graph.nodes['t1012'])}")
+check("collection node gets no composite_verdict attr written",
+      "composite_verdict" not in tax.graph.nodes["apt-collection"])
+check("resolution node gets no composite_verdict attr written",
+      "composite_verdict" not in tax.graph.nodes["some-resolution"])
+
+tax_ctx = build_escalation_context(tax)
+check("escalation context does NOT render technique node", "t1012" not in tax_ctx, f"got {tax_ctx}")
+check("escalation context does NOT render collection node", "apt-collection" not in tax_ctx, f"got {tax_ctx}")
+check("escalation context does NOT render resolution node", "some-resolution" not in tax_ctx, f"got {tax_ctx}")
+
+# --- Regression: an IP root must be typed "ip_address", not "ip" ---
+# triage.py used to cache IP roots as entity_type="ip" (bare .lower() on GTI's
+# "IP" type string), which would silently fall outside REAL_INDICATOR_TYPES
+# and make every IP-rooted investigation's primary target unescalatable.
+ip_root = InvestigationCache()
+ip_root.add_entity("1.2.3.4", "ip_address", gti("VERDICT_UNDETECTED", 0, 0))
+ip_root.add_entity("dropper", "file", gti("VERDICT_MALICIOUS", 90, 40))
+ip_root.add_relationship("dropper", "1.2.3.4", "contacted_ips")
+r = compute_composite_verdict("1.2.3.4", ip_root)
+check("ip_address-typed root adjacent to malicious IS escalated", r["escalated"], f"got {r}")
+check("ip_address-typed root escalates to suspicious", r["composite_verdict"] == "suspicious", f"got {r}")
+check("escalation context DOES render the real escalated domain", "real-domain" in tax_ctx, f"got {tax_ctx}")
+
 apply_composite_verdicts(c, "idem")
 before = {n: c.graph.nodes[n]["composite_verdict"] for n in c.graph.nodes()}
 apply_composite_verdicts(c, "idem2")

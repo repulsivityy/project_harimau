@@ -556,7 +556,19 @@ No actionable intelligence could be synthesized. The original indicator may be m
     try:
         response = await llm.ainvoke(messages)
         logger.info("lead_hunter_synthesis_complete", job_id=job_id)
-        return str(response.content)
+
+        # Some models (e.g. Gemini "thinking" preview models) return `.content`
+        # as a list of content blocks (with thought-signature metadata) rather
+        # than a plain string. A bare str() cast would stringify the whole
+        # list/dict structure instead of the actual report text. Mirrors the
+        # established extraction pattern used in triage.py / malware.py /
+        # infrastructure.py's manual-fallback paths.
+        raw_content = response.content if hasattr(response, "content") else str(response)
+        if isinstance(raw_content, list):
+            raw_content = " ".join([b.get("text", "") if isinstance(b, dict) else str(b) for b in raw_content])
+        elif not isinstance(raw_content, str):
+            raw_content = str(raw_content)
+        return raw_content
     except Exception as e:
         logger.error("lead_hunter_synthesis_error", job_id=job_id, error=str(e))
         return f"# Analysis Error\n\nFailed to generate final report. Error: {str(e)}"

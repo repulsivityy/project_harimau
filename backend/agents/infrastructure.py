@@ -274,8 +274,8 @@ async def infrastructure_node(state: AgentState):
                         eid = item.get("id")
                         etype = item.get("type", "unknown")
                         if not eid: continue
-                        h_type = "ip_address" if etype == "ip_address" else "file" if etype == "file" else "domain"
-                        
+                        h_type = etype
+
                         attrs = {"infra_context": f"domain_{relationship}"}
                         attrs.update(extract_gti_summary(item))
                         
@@ -314,8 +314,8 @@ async def infrastructure_node(state: AgentState):
                         eid = item.get("id")
                         etype = item.get("type", "unknown")
                         if not eid: continue
-                        h_type = "domain" if etype == "domain" else "file" if etype == "file" else "ip_address"
-                        
+                        h_type = etype
+
                         attrs = {"infra_context": f"ip_{relationship}"}
                         attrs.update(extract_gti_summary(item))
                         
@@ -354,8 +354,8 @@ async def infrastructure_node(state: AgentState):
                         eid = item.get("id")
                         etype = item.get("type", "unknown")
                         if not eid: continue
-                        h_type = "ip_address" if etype == "ip_address" else "file" if etype == "file" else "domain" if etype == "domain" else "url"
-                        
+                        h_type = etype
+
                         attrs = {"infra_context": f"url_{relationship}"}
                         attrs.update(extract_gti_summary(item))
                         

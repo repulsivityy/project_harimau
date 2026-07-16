@@ -231,8 +231,11 @@ async def infrastructure_node(state: AgentState):
         
         # Retrieve Triage Context
         triage_context = state.get("metadata", {}).get("rich_intel", {}).get("triage_analysis", {})
-        triage_summary = triage_context.get("executive_summary", "No triage summary available.")
-        key_findings = triage_context.get("key_findings", [])
+        # .get(key, default) does not catch an explicitly-stored None (only a
+        # missing key) — triage_analysis.executive_summary can be None if the
+        # triage LLM/synthesis step ever left it unset, so fall back with `or`.
+        triage_summary = triage_context.get("executive_summary") or "No triage summary available."
+        key_findings = triage_context.get("key_findings") or []
         logger.info("infra_triage_context_loaded", 
                    has_summary=bool(triage_summary), 
                    findings_count=len(key_findings))
@@ -505,7 +508,11 @@ async def infrastructure_node(state: AgentState):
 
                 # 3. SAFETY NET: Scan Triage Key Findings if we have capacity
                 if len(targets) < 5:
-                    combined_text = triage_summary + " " + " ".join(key_findings)
+                    # Belt-and-suspenders: guard again right at the point of use, in
+                    # case triage_summary/key_findings ever reach this closure as
+                    # None through some other path (this closure captures them from
+                    # the outer scope, not a re-fetch).
+                    combined_text = (triage_summary or "") + " " + " ".join(key_findings or [])
                     logger.info("infra_safety_net_scanning")
                     
                     ips = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", combined_text)

@@ -192,6 +192,11 @@ the basis for scrutiny it is.
 - **Medium**: Some detections OR GTI flags it BUT missing corroborating signals
 - **Low**: Few/no detections, relies on heuristic or contextual signals only
 
+**Executive Summary Requirement:**
+`executive_summary` is mandatory on every response — never null, never blank,
+even when the verdict is clear-cut and there's little else to say. Keep it to
+1-2 sentences; do not pad it with paragraphs.
+
 **Output Format (JSON):**
 {
     "ioc_type": "IP|Domain|File|URL",
@@ -200,7 +205,7 @@ the basis for scrutiny it is.
     "severity": "Critical|High|Medium|Low",
     "threat_score": <number>,
 
-    "executive_summary": "One to three paragraphs: verdict + key findings + recommended action",
+    "executive_summary": "REQUIRED, never null or blank. 1-2 concise sentences: the verdict and the single most important reason. Even for a clear-cut or low-information verdict, state it plainly (e.g. 'Confirmed malicious file; escalate for immediate response.') — do not omit this field.",
 
     "key_findings": [
         "Finding 1 with specific entity IDs/names",
@@ -388,7 +393,7 @@ def generate_markdown_report_locally(analysis: dict, ioc: str, ioc_type: str, tr
         
         # 1. Detection Summary (GTI + VT)
         md += "### Detection Summary\n"
-        verdict = analysis.get('verdict', triage_data.get('verdict') if triage_data else 'Unknown')
+        verdict = analysis.get('verdict') or (triage_data.get('verdict') if triage_data else None) or 'Unknown'
         score = analysis.get('threat_score', triage_data.get('threat_score') if triage_data else None)
         score_str = f"`{score}/100`" if score is not None else "`Unknown`"
         
@@ -414,7 +419,7 @@ def generate_markdown_report_locally(analysis: dict, ioc: str, ioc_type: str, tr
         
         # 2. Executive Summary
         md += "### Executive Summary\n"
-        md += f"{analysis.get('executive_summary', 'No summary provided.')}\n\n"
+        md += f"{analysis.get('executive_summary') or 'No summary provided.'}\n\n"
         
         # 3. Key Findings
         if analysis.get("key_findings"):
@@ -581,7 +586,24 @@ Perform comprehensive first-level triage analysis now.
                 raise response_obj["parsing_error"]
         else:
             analysis = response_obj["parsed"].model_dump()
-            
+
+        # DEFENSE IN DEPTH: the LLM can validate successfully against
+        # TriageAnalysisOutput while still emitting `null` for
+        # executive_summary (Optional[str] = None accepts it). A null here
+        # propagates into the markdown report and shared state, and can
+        # crash downstream specialists that concatenate it (see
+        # infrastructure.py init_node). Synthesize a short summary from
+        # fields that are always present and reliable so nothing downstream
+        # ever sees a null/blank executive_summary, regardless of what the
+        # LLM actually returned.
+        if not analysis.get("executive_summary"):
+            analysis["executive_summary"] = (
+                f"{analysis.get('verdict', 'Unknown')} verdict "
+                f"(severity: {analysis.get('severity', 'Unknown')}, "
+                f"confidence: {analysis.get('confidence', 'Unknown')}, "
+                f"threat score: {analysis.get('threat_score', 'N/A')})."
+            )
+
         final_text = json.dumps(analysis, indent=2)
         
         # [NEW] WebRisk Check for URLs
@@ -637,10 +659,10 @@ Perform comprehensive first-level triage analysis now.
         
         analysis = {
             "ioc_type": ioc_type,
-            "verdict": triage_data.get("verdict", "Unknown"),
+            "verdict": triage_data.get("verdict") or "Unknown",
             "confidence": "Low",
             "severity": "Medium",
-            "threat_score": triage_data.get("threat_score", "N/A"),
+            "threat_score": triage_data.get("threat_score") if triage_data.get("threat_score") is not None else "N/A",
             "executive_summary": f"Analysis failed: {str(e)}",
             "key_findings": [
                 f"Found {len(entities)} entities in {rel_name}"

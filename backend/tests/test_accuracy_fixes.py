@@ -1,5 +1,5 @@
 import time
-from backend.utils.graph_cache import InvestigationCache
+from backend.utils.graph_cache import InvestigationCache, extract_gti_summary
 from backend.utils.report_validator import validate_report_iocs, annotate_report
 from backend.utils.verdict_engine import apply_composite_verdicts, compute_composite_verdict, build_escalation_context
 from backend.utils.signal_filter import get_signal_reason, promote_by_graph_context, build_promotion_context
@@ -251,6 +251,73 @@ before = {n: c.graph.nodes[n]["composite_verdict"] for n in c.graph.nodes()}
 apply_composite_verdicts(c, "idem2")
 after = {n: c.graph.nodes[n]["composite_verdict"] for n in c.graph.nodes()}
 check("idempotent (no cascade on re-run)", before == after, f"{before} vs {after}")
+
+print(); print("="*70); print("#7 EXTRACT_GTI_SUMMARY"); print("="*70)
+
+# --- Regression: the original 4-field extraction still works unchanged ---
+rel_item_basic = {
+    "id": "evil.example",
+    "type": "domain",
+    "attributes": {
+        "gti_assessment": {"verdict": {"value": "VERDICT_MALICIOUS"}, "threat_score": {"value": 85}},
+        "meaningful_name": "evil-payload.exe",
+        "names": ["evil-payload.exe", "alt-name.bin"],
+        "last_analysis_stats": {"malicious": 40, "suspicious": 2},
+    },
+}
+s = extract_gti_summary(rel_item_basic)
+check("regression: gti_assessment extracted", s.get("gti_assessment", {}).get("threat_score", {}).get("value") == 85, f"got {s}")
+check("regression: meaningful_name extracted", s.get("meaningful_name") == "evil-payload.exe")
+check("regression: names extracted", s.get("names") == ["evil-payload.exe", "alt-name.bin"])
+check("regression: last_analysis_stats extracted", s.get("last_analysis_stats", {}).get("malicious") == 40)
+check("regression: gti_id/gti_type carried through", s.get("gti_id") == "evil.example" and s.get("gti_type") == "domain")
+
+# --- New fields ARE extracted when a richer attributes/context_attributes blob is present ---
+rel_item_rich = {
+    "id": "richdomain.example",
+    "type": "domain",
+    "attributes": {
+        "malware_families": ["Emotet"],
+        "related_threat_actors": ["APT29"],
+        "associations": ["campaign-x"],
+        "campaigns": ["campaign-x"],
+        "sandbox_verdicts": {"Zenbox": {"category": "malicious"}},
+        "behaviour_summary": {"processes_created": ["cmd.exe"]},
+        "crowdsourced_ids_results": [{"rule": "ET MALWARE"}],
+        "last_analysis_date": NOW,
+        "creation_date": NOW - 5 * DAY,
+        "tld": "xyz",
+        "first_seen_itw_date": NOW - 10 * DAY,
+        "first_submission_date": NOW - 3 * DAY,
+        "times_submitted": 2,
+        "last_https_certificate": {"issuer": "Let's Encrypt"},
+    },
+}
+s_rich = extract_gti_summary(rel_item_rich)
+for key in [
+    "malware_families", "related_threat_actors", "associations", "campaigns",
+    "sandbox_verdicts", "behaviour_summary", "crowdsourced_ids_results",
+    "last_analysis_date", "creation_date", "tld", "first_seen_itw_date",
+    "first_submission_date", "times_submitted", "last_https_certificate",
+]:
+    check(f"new field '{key}' extracted when present", key in s_rich, f"got {s_rich}")
+
+# --- Descriptor-shaped input WITHOUT the new fields doesn't crash / doesn't fabricate them ---
+rel_item_descriptor = {"id": "thin-descriptor.example", "type": "domain"}
+s_thin = extract_gti_summary(rel_item_descriptor)
+check("thin descriptor: no crash, returns dict", isinstance(s_thin, dict))
+check("thin descriptor: only gti_id/gti_type present", set(s_thin.keys()) == {"gti_id", "gti_type"}, f"got {s_thin}")
+
+# context_attributes shaped like a real GTI descriptor payload (non-dict, empty, etc.)
+check("non-dict input does not crash", extract_gti_summary("not a dict") == {})
+check("empty dict input does not crash", extract_gti_summary({}) == {})
+rel_item_context = {
+    "id": "ctxdomain.example",
+    "type": "domain",
+    "context_attributes": {"creation_date": NOW - 2 * DAY, "tld": "top"},
+}
+s_ctx = extract_gti_summary(rel_item_context)
+check("context_attributes fields extracted when attributes absent", s_ctx.get("creation_date") == NOW - 2 * DAY and s_ctx.get("tld") == "top", f"got {s_ctx}")
 
 print(); print("="*70)
 print(f"PASSED {len(PASS)} / {len(PASS)+len(FAIL)}")

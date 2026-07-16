@@ -45,21 +45,61 @@ def normalize_verdict(raw: Optional[Any]) -> Optional[str]:
     return None
 
 def extract_gti_summary(rel_item: dict) -> dict:
-    """Extract key GTI attributes from a relationship response item."""
+    """Extract key GTI attributes from a relationship response item.
+
+    NOTE ON A STRUCTURAL DATA LIMITATION (pivot-discovered entities):
+    Callers that populate `rel_item` from the GTI relationship-listing tools
+    (`get_entities_related_to_a_domain`/`_an_ip_address`/`_an_url`/`_a_file` in
+    backend/mcp/gti/tools/{netloc,files,urls}.py) are required by those tools'
+    own docstrings to pass `descriptors_only=True` whenever the *target*
+    object type is file/domain/url/ip_address/collection ("Must be True when
+    the target object type is one of file, domain, url, ip_address or
+    collection"). That is exactly the set of relationship targets that matter
+    for scoring (see verdict_engine.REAL_INDICATOR_TYPES). In descriptor mode
+    the GTI API returns a minimal object (essentially `type`/`id`, optionally
+    `context_attributes`) rather than the full `attributes` block a direct
+    per-entity report (get_domain_report/get_file_report/...) or triage.py's
+    "Super-Bundle" fetch (backend/tools/gti.py:_enrich_with_relationships,
+    which follows up each relationship's "related" link to fetch full
+    objects) would return. Extending the key list below only helps for the
+    fields that a descriptor response can actually carry (if any land in
+    `context_attributes`) — it CANNOT recover fields that the API simply does
+    not transmit in this mode. Getting the full set would require a
+    supplementary per-entity fetch (extra API calls per pivot-discovered
+    entity), which is an architecture/cost decision out of scope here — see
+    backend/agents/infrastructure.py call sites for the same note.
+    """
     summary = {}
     if not isinstance(rel_item, dict): return summary
-    
+
     # GTI sometimes nests the actual entity data under 'context_attributes' or leaves it at root
     attrs = rel_item.get("context_attributes", {}) or rel_item.get("attributes", {}) or rel_item
-    
-    for key in ["gti_assessment", "meaningful_name", "names", "last_analysis_stats"]:
+
+    # Core fields (pre-existing). Extended below with fields verdict_engine's
+    # attribution/sandbox/staleness heuristics read (_has_attribution,
+    # _has_sandbox_behavior, _is_stale in backend/utils/verdict_engine.py) plus
+    # a few extra descriptor-friendly fields (creation_date, tld,
+    # first_submission_date, times_submitted, last_https_certificate) that
+    # signal_filter.get_signal_reason reads for triage-discovered entities and
+    # that may occasionally be present on a richer descriptor/context_attributes
+    # payload even when the bulk `attributes` block is withheld. These are
+    # captured opportunistically; for the common descriptors_only=True case
+    # most will simply be absent (see module-level note above) and are
+    # harmlessly skipped by the `if key in attrs` guard.
+    for key in [
+        "gti_assessment", "meaningful_name", "names", "last_analysis_stats",
+        "malware_families", "related_threat_actors", "associations", "campaigns",
+        "sandbox_verdicts", "behaviour_summary", "crowdsourced_ids_results",
+        "last_analysis_date", "creation_date", "tld", "first_seen_itw_date",
+        "first_submission_date", "times_submitted", "last_https_certificate",
+    ]:
         if key in attrs:
             summary[key] = attrs[key]
-            
+
     # Also grab the raw ID/Type if it's there for context
     if "id" in rel_item: summary["gti_id"] = rel_item["id"]
     if "type" in rel_item: summary["gti_type"] = rel_item["type"]
-            
+
     return summary
 
 

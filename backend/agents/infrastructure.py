@@ -264,6 +264,19 @@ async def infrastructure_node(state: AgentState):
                 if job_id:
                     await emit_tool_call(job_id, "infrastructure", "get_entities_related_to_a_domain", {"domain": domain, "relationship": relationship})
                 try:
+                    # descriptors_only=True is not a style choice: the GTI MCP tool's own
+                    # docstring (backend/mcp/gti/tools/netloc.py) requires it whenever the
+                    # relationship's target type is file/domain/url/ip_address/collection —
+                    # which covers most relationships that matter for scoring (subdomains,
+                    # communicating_files, downloaded_files, urls, resolutions' domain/ip
+                    # context, etc). In that mode GTI returns a thin descriptor rather than
+                    # the full attribute blob triage.py gets via its separate "Super-Bundle"
+                    # full-object fetch (backend/tools/gti.py:_enrich_with_relationships).
+                    # Pivot-discovered entities are therefore thinner than triage-discovered
+                    # ones for verdict_engine's attribution/sandbox/staleness heuristics.
+                    # extract_gti_summary() (backend/utils/graph_cache.py) grabs whatever a
+                    # descriptor response does carry; recovering the rest would require an
+                    # extra per-entity report fetch, a separate cost/architecture decision.
                     res = await session.call_tool("get_entities_related_to_a_domain", arguments={"domain": domain, "relationship_name": relationship, "descriptors_only": True})
                     if not res.content: return "[]"
                     parsed = json.loads(res.content[0].text)
@@ -304,6 +317,11 @@ async def infrastructure_node(state: AgentState):
                 if job_id:
                     await emit_tool_call(job_id, "infrastructure", "get_entities_related_to_an_ip_address", {"ip_address": ip_address, "relationship": relationship})
                 try:
+                    # See the descriptors_only note in get_entities_related_to_a_domain
+                    # above — same structural limitation applies here (GTI MCP tool
+                    # requires descriptors_only=True for file/domain/url/ip_address/
+                    # collection targets, so pivot-discovered entities get thinner data
+                    # than triage-discovered ones).
                     res = await session.call_tool("get_entities_related_to_an_ip_address", arguments={"ip_address": ip_address, "relationship_name": relationship, "descriptors_only": True})
                     if not res.content: return "[]"
                     parsed = json.loads(res.content[0].text)
@@ -344,6 +362,11 @@ async def infrastructure_node(state: AgentState):
                 if job_id:
                     await emit_tool_call(job_id, "infrastructure", "get_entities_related_to_an_url", {"url": url, "relationship": relationship})
                 try:
+                    # See the descriptors_only note in get_entities_related_to_a_domain
+                    # above — same structural limitation applies here (GTI MCP tool
+                    # requires descriptors_only=True for file/domain/url/ip_address/
+                    # collection targets, so pivot-discovered entities get thinner data
+                    # than triage-discovered ones).
                     res = await session.call_tool("get_entities_related_to_an_url", arguments={"url": url, "relationship_name": relationship, "descriptors_only": True})
                     if not res.content: return "[]"
                     parsed = json.loads(res.content[0].text)

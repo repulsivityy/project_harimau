@@ -40,7 +40,7 @@ def build_peer_context(state: dict, iteration: int, self_agent: str, peer_agent:
     lines = [f"\n**PEER SPECIALIST FINDINGS ({peer_agent.upper()}):**\n"]
     lines.append(f"- Verdict: {peer_res.get('verdict', 'Unknown')}\n")
 
-    summary = peer_res.get("summary", "")
+    summary = peer_res.get("summary") or ""
     if len(summary) > 800:
         summary = summary[:800] + "..."
     lines.append(f"- Summary: {summary}\n")

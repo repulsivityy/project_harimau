@@ -84,19 +84,19 @@ async def run_tools_parallel(tool_dispatch: dict, tool_calls: list, agent_name: 
     return list(await asyncio.gather(*[_run(tc) for tc in tool_calls]))
 
 
-def cap_context_window(messages: list, system_count: int = 2, tail_size: int = 10) -> list:
-    """
-    Prevent unbounded message growth during the agent loop.
-
-    Keeps the first `system_count` messages (system prompt + initial task) and the
-    most recent `tail_size` messages. The tail is trimmed to start on an AIMessage
-    so no ToolMessage is left without its parent AIMessage, which the API rejects.
-    """
-    if len(messages) <= system_count + tail_size:
-        return messages
-    tail = messages[-tail_size:]
-    first_ai = next((i for i, m in enumerate(tail) if isinstance(m, AIMessage)), len(tail))
-    return messages[:system_count] + tail[first_ai:]
+# def cap_context_window(messages: list, system_count: int = 2, tail_size: int = 10) -> list:
+#     """
+#     Prevent unbounded message growth during the agent loop.
+# 
+#     Keeps the first `system_count` messages (system prompt + initial task) and the
+#     most recent `tail_size` messages. The tail is trimmed to start on an AIMessage
+#     so no ToolMessage is left without its parent AIMessage, which the API rejects.
+#     """
+#     if len(messages) <= system_count + tail_size:
+#         return messages
+#     tail = messages[-tail_size:]
+#     first_ai = next((i for i, m in enumerate(tail) if isinstance(m, AIMessage)), len(tail))
+#     return messages[:system_count] + tail[first_ai:]
 
 
 def reduce_messages(left: List[BaseMessage], right: List[BaseMessage]) -> List[BaseMessage]:

@@ -21,7 +21,7 @@ from backend.utils.transparency import emit_tool_call, emit_reasoning
 from backend.utils.agent_utils import (
     FINAL_ITERATION_PROMPT,
     reduce_messages,
-    cap_context_window,
+    # cap_context_window,
     push_to_rich_intel,
     build_peer_context,
     parse_indicator_string,
@@ -632,20 +632,20 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
             # Node 3: post_tool_node
             async def post_tool_node(sub_state: InfraSubgraphState):
                 updated_graph = cache.get_state()
-                messages = sub_state["messages"]
-                capped_messages = cap_context_window(messages)
-                
-                if len(capped_messages) < len(messages):
-                    logger.info("infra_subgraph_capping_context", original=len(messages), capped=len(capped_messages))
-                    # Use model_copy to avoid mutating the shared message object in place;
-                    # the in-place mutation would persist on the object across invocations.
-                    marker = capped_messages[0].model_copy(
-                        update={"additional_kwargs": {**capped_messages[0].additional_kwargs, "overwrite_history": True}}
-                    )
-                    return {
-                        "messages": [marker] + list(capped_messages[1:]),
-                        "investigation_graph": updated_graph
-                    }
+                # messages = sub_state["messages"]
+                # capped_messages = cap_context_window(messages)
+                # 
+                # if len(capped_messages) < len(messages):
+                #     logger.info("infra_subgraph_capping_context", original=len(messages), capped=len(capped_messages))
+                #     # Use model_copy to avoid mutating the shared message object in place;
+                #     # the in-place mutation would persist on the object across invocations.
+                #     marker = capped_messages[0].model_copy(
+                #         update={"additional_kwargs": {**capped_messages[0].additional_kwargs, "overwrite_history": True}}
+                #     )
+                #     return {
+                #         "messages": [marker] + list(capped_messages[1:]),
+                #         "investigation_graph": updated_graph
+                #     }
                 
                 return {
                     "investigation_graph": updated_graph

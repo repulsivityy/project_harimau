@@ -407,6 +407,9 @@ def generate_markdown_report_locally(analysis: dict, ioc: str, ioc_type: str, tr
         
         md += f"*   **GTI Verdict:** {v_emoji} **{verdict}**\n"
         md += f"*   **Threat Score:** {score_str}\n"
+        gti_desc = triage_data.get("description") if triage_data else None
+        if gti_desc:
+            md += f"*   **GTI Assessment:** {gti_desc}\n"
         
         if triage_data and triage_data.get("total_stats"):
             m = triage_data.get("malicious_stats", 0)

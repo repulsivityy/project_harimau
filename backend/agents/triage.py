@@ -1052,6 +1052,7 @@ async def triage_node(state: AgentState):
         
         # Maintain backward compatibility
         state["metadata"]["rich_intel"]["triage_summary"] = analysis.get("executive_summary")
+        state["metadata"]["rich_intel"]["gti_description"] = triage_data.get("description")
         state["metadata"]["risk_level"] = analysis.get("verdict", "Unknown")
         
         # [REPORT INIT] Initialize final_report with triage findings

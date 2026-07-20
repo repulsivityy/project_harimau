@@ -347,6 +347,17 @@ export default function InvestigatePage() {
         const jobData = await jobRes.json();
         setJob(jobData);
         setJobStatus(jobData.status ?? "running");
+        if (Array.isArray(jobData?.metadata?.transparency_log) && jobData.metadata.transparency_log.length > 0) {
+          const loadedLogs = jobData.metadata.transparency_log
+            .slice(-20)
+            .reverse()
+            .map((entry: any) => {
+              const time = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+              const icon = entry.tool ? "🔧" : "💭";
+              return `[${time}] ${icon} ${entry.agent || "system"}: ${entry.tool ? `EXECUTING_${entry.tool}` : "ANALYZING_DATA"}`;
+            });
+          setActivityLog(loadedLogs);
+        }
 
         if (graphRes.ok) {
           const graphData: GraphData = await graphRes.json();
@@ -802,7 +813,7 @@ export default function InvestigatePage() {
                     <h3 className="font-label text-outline-variant uppercase mb-2 text-xs tracking-widest">Triage Verdict</h3>
                     <button onClick={() => setModalContent({ 
                       title: "Triage Verdict", 
-                      content: `### GTI Verdict\n**${job?.risk_level || "UNKNOWN"}**\n\n### GTI Score\n**${job?.gti_score !== null && job?.gti_score !== undefined ? job.gti_score + "/100" : "Unknown"}**\n\n### VT Detections\n**${job?.rich_intel?.malicious_stats !== undefined ? `${job.rich_intel.malicious_stats}/${job.rich_intel.total_stats}` : "N/A"}**\n\n### GTI Analysis\n${job?.rich_intel?.triage_summary || "No summary available."}` 
+                      content: `### GTI Verdict\n**${job?.risk_level || "UNKNOWN"}**\n\n### GTI Score\n**${job?.gti_score !== null && job?.gti_score !== undefined ? job.gti_score + "/100" : "Unknown"}**\n\n### VT Detections\n**${job?.rich_intel?.malicious_stats !== undefined ? `${job.rich_intel.malicious_stats}/${job.rich_intel.total_stats}` : "N/A"}**\n\n${job?.rich_intel?.gti_description ? `### GTI Assessment\n${job.rich_intel.gti_description}\n\n` : ''}### GTI Analysis\n${job?.rich_intel?.triage_summary || "No summary available."}` 
                     })} className="text-slate-500 hover:text-[#00f7ff] cursor-pointer">
                       <span className="material-symbols-outlined text-sm">fullscreen</span>
                     </button>
@@ -825,6 +836,12 @@ export default function InvestigatePage() {
                       </span>
                     </div>
                   </div>
+                  {job?.rich_intel?.gti_description && (
+                    <div className="bg-surface-container-low p-2 border border-slate-800/50 flex flex-col">
+                      <span className="text-[10px] text-slate-500 uppercase mb-1">GTI Assessment</span>
+                      <p className="text-xs text-outline/90 font-body leading-relaxed">{job.rich_intel.gti_description}</p>
+                    </div>
+                  )}
                   <div className="bg-surface-container-low p-2 border border-slate-800/50 flex flex-col">
                     <span className="text-[10px] text-slate-500 uppercase mb-1">GTI Analysis</span>
                     <p className="text-xs text-outline/80 font-body leading-relaxed italic">"{job?.rich_intel?.triage_summary || "No summary available."}"</p>
@@ -841,13 +858,13 @@ export default function InvestigatePage() {
                         <span className="material-symbols-outlined text-secondary">bug_report</span>
                         <h4 className="font-headline text-sm font-semibold uppercase">{agent.replace('_', ' ')}</h4>
                       </div>
-                      <button onClick={() => setModalContent({ title: agent.replace('_', ' '), content: result.summary })} className="text-slate-500 hover:text-[#00f7ff] cursor-pointer">
+                      <button onClick={() => setModalContent({ title: agent.replace('_', ' '), content: result.markdown_report || result.summary || "No report available." })} className="text-slate-500 hover:text-[#00f7ff] cursor-pointer">
                         <span className="material-symbols-outlined text-sm">fullscreen</span>
                       </button>
                     </div>
                     <div className="flex-1 font-mono text-xs text-slate-400 leading-relaxed bg-[#0e0e10] p-3 border border-slate-800 overflow-y-auto max-h-[150px] custom-scrollbar">
                       <p className="text-secondary/80 mb-2">// Verdict: {result.verdict}</p>
-                      <p>{result.summary || "View detailed briefing..."}</p>
+                      <p className="line-clamp-4">{result.summary || (result.markdown_report ? result.markdown_report.slice(0, 250) + '...' : "View detailed briefing...")}</p>
                     </div>
                   </div>
                 )) : (

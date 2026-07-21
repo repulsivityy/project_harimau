@@ -569,6 +569,15 @@ async def get_investigation(job_id: str):
     job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    # Auto-resume orphaned running jobs if worker instance restarted
+    if job.get("status") == "running" and job_id not in ACTIVE_TASKS:
+        logger.info("resuming_orphaned_job", job_id=job_id)
+        ioc = job.get("ioc", "")
+        max_iters = job.get("max_iterations", DEFAULT_HUNT_ITERATIONS)
+        task = asyncio.create_task(_run_investigation_background(job_id, ioc, max_iters))
+        ACTIVE_TASKS[job_id] = task
+
     return job
 
 @app.get("/api/investigations/{job_id}/stream")

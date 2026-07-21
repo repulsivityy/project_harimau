@@ -468,15 +468,17 @@ export default function InvestigatePage() {
     };
 
     const startPolling = () => {
-      setStatusMessage("Stream failure. Initializing emergency polling...");
+      setStatusMessage("Live stream disconnected. Polling backend for updates...");
       pollInterval = setInterval(async () => {
         const status = await refetch();
         if (status === "completed" || status === "failed") {
           if (pollInterval) clearInterval(pollInterval);
           setProgress(100);
           setStatusMessage(status === "completed" ? "Investigation finalized." : "System error occurred.");
+        } else {
+          setStatusMessage("🤖 Investigating network & threat graph...");
         }
-      }, 10_000);
+      }, 5_000);
     };
 
     refetch().then((status) => {

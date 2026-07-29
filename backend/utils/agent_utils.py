@@ -1,7 +1,8 @@
 import asyncio
+import functools
 import json
 import re
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import BaseMessage
 from typing import List
 
 INDICATOR_PATTERN = re.compile(
@@ -62,41 +63,50 @@ FINAL_ITERATION_PROMPT = (
 )
 
 
-async def run_tools_parallel(tool_dispatch: dict, tool_calls: list, agent_name: str, logger, timeout: float = 20.0) -> list:
+DEFAULT_TOOL_TIMEOUT = 20.0
+
+
+def tool_timeout(seconds: float = DEFAULT_TOOL_TIMEOUT, logger=None):
     """
-    Execute a batch of LLM tool calls in parallel, each with an individual timeout.
-    Returns a list of result strings in the same order as tool_calls.
+    Bound an agent tool coroutine with a wall-clock timeout and a catch-all.
+
+    LangGraph's ToolNode has no timeout of its own; before the sub-graph refactor
+    both this budget and the catch-all below were enforced by run_tools_parallel.
+    Apply *under* @tool so the decorator still sees the original signature and
+    docstring:
+
+        @tool
+        @tool_timeout()
+        async def get_file_report(file_hash: str):
+            ...
+
+    Returns a JSON error string rather than raising, so the LLM sees a normal
+    tool result. The catch-all matters because ToolNode's default
+    handle_tool_errors (_default_handle_tool_errors) only converts
+    ToolInvocationError into a message and re-raises everything else — which
+    would abort the whole specialist. The tool bodies each have their own
+    try/except around the MCP call, but their `await emit_tool_call(...)`
+    transparency hop sits *outside* it, so an SSE failure (e.g. a browser tab
+    closing mid-hunt) would otherwise escape and fail the hunt.
+
+    CancelledError derives from BaseException, so genuine cancellation still
+    propagates untouched.
     """
-    async def _run(tc):
-        fn = tool_dispatch.get(tc["name"])
-        if fn is None:
-            logger.warning(f"{agent_name}_unknown_tool", tool=tc["name"])
-            return f"Error: Tool {tc['name']} not found"
-        try:
-            return await asyncio.wait_for(fn.ainvoke(tc["args"]), timeout=timeout)
-        except asyncio.TimeoutError:
-            logger.error(f"{agent_name}_tool_timeout", tool=tc["name"])
-            return f"Error: Tool {tc['name']} timed out after {timeout} seconds."
-        except Exception as e:
-            logger.error(f"{agent_name}_tool_error", tool=tc["name"], error=str(e))
-            return f"Error: Tool {tc['name']} failed - {str(e)}"
-
-    return list(await asyncio.gather(*[_run(tc) for tc in tool_calls]))
-
-
-# def cap_context_window(messages: list, system_count: int = 2, tail_size: int = 10) -> list:
-#     """
-#     Prevent unbounded message growth during the agent loop.
-# 
-#     Keeps the first `system_count` messages (system prompt + initial task) and the
-#     most recent `tail_size` messages. The tail is trimmed to start on an AIMessage
-#     so no ToolMessage is left without its parent AIMessage, which the API rejects.
-#     """
-#     if len(messages) <= system_count + tail_size:
-#         return messages
-#     tail = messages[-tail_size:]
-#     first_ai = next((i for i, m in enumerate(tail) if isinstance(m, AIMessage)), len(tail))
-#     return messages[:system_count] + tail[first_ai:]
+    def decorator(func):
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            try:
+                return await asyncio.wait_for(func(*args, **kwargs), timeout=seconds)
+            except asyncio.TimeoutError:
+                if logger:
+                    logger.error("tool_timeout", tool=func.__name__, timeout=seconds)
+                return json.dumps({"error": f"Tool {func.__name__} timed out after {seconds} seconds."})
+            except Exception as e:
+                if logger:
+                    logger.error("tool_error", tool=func.__name__, error=str(e))
+                return json.dumps({"error": f"Tool {func.__name__} failed - {str(e)}"})
+        return wrapper
+    return decorator
 
 
 def reduce_messages(left: List[BaseMessage], right: List[BaseMessage]) -> List[BaseMessage]:

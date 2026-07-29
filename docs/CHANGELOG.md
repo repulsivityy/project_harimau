@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Specialist Tool Timeout & Error Containment (S4-T2)**: Restored the per-tool 20s wall-clock budget and catch-all that `run_tools_parallel` enforced before the `ToolNode` sub-graph refactor, via a new `tool_timeout()` decorator in `backend/utils/agent_utils.py` applied under `@tool` on all 15 specialist tool closures. LangGraph's default `handle_tool_errors` (`_default_handle_tool_errors`) only converts `ToolInvocationError` into a message and re-raises everything else; because each tool awaits `emit_tool_call()` *outside* its own try/except, an SSE broadcast failure (e.g. a browser tab closing mid-hunt) could escape and collapse an entire specialist into a `System Error` verdict.
+- **Sub-graph Router Hardening (S4-T2)**: `route_after_agent` in both specialists now uses `getattr(last_message, "tool_calls", None)` and guards missing/empty `messages` instead of assuming the last message is an `AIMessage`.
+
+### Changed
+- **Sub-graph Routers Hoisted (S4-T2)**: `route_after_init` / `route_after_agent` moved from the per-invocation MCP-session closure to module scope in `backend/agents/malware.py` and `backend/agents/infrastructure.py`, making them unit-testable.
+- **Dead Code Removal (S4-T2)**: Deleted `run_tools_parallel` (zero callers since `9c3327f`) and the commented-out `cap_context_window` helper and its two call sites.
+
+### Documentation
+- **Sprint Drift Correction**: `S4-T2` was implemented on `main` in `9c3327f` + `a976cef` (2026-06-04) but never ticked in `sprint_1.md` or `docs/implementation_plan_v2.md`. Both now reflect reality. Note this file still has no entries for the ~30 commits on `main` between 2026-06-04 and 2026-07-21; backfilling them is out of scope for this branch.
+
 ## [0.6.5] - 2026-06-04
 
 ### Changed

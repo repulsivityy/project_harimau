@@ -92,9 +92,10 @@
 *   **Files:** `backend/agents/*.py`
 *   **Change:** Migrate JSON outputs from string-parsing to LangChain `with_structured_output()` using Pydantic schemas.
 
-### S4-T2 · Native LangGraph `ToolNode` for specialists
-*   **Files:** `backend/agents/malware.py`, `backend/agents/infrastructure.py`
+### [x] S4-T2 · Native LangGraph `ToolNode` for specialists
+*   **Files:** `backend/agents/malware.py`, `backend/agents/infrastructure.py`, `backend/utils/agent_utils.py`
 *   **Change:** Rip out the internal `while/for` loops inside the specialists. Replace with native LangGraph `ToolNode`s and conditional edges. Unlocks per-step checkpointing.
+*   **Note (2026-07-29):** The sub-graph refactor itself shipped on `main` in `9c3327f` + `a976cef` (2026-06-04) but was never ticked here. This tier closed the four gaps it left behind: restored the per-tool 20s timeout and catch-all that `run_tools_parallel` used to enforce (`ToolNode`'s default `handle_tool_errors` only converts `ToolInvocationError` and re-raises everything else); deleted the dead `run_tools_parallel` / `cap_context_window` code; hardened `route_after_agent` against non-`AIMessage` last messages; hoisted both routers to module scope so they are testable.
 
 ### S4-T3 · Deterministic Graphviz
 *   **Files:** `backend/agents/lead_hunter_synthesis.py`

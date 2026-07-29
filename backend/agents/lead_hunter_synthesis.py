@@ -6,10 +6,21 @@ from backend.graph.state import AgentState
 from backend.utils.graph_cache import InvestigationCache, normalize_verdict
 from backend.utils.verdict_engine import build_escalation_context
 from backend.utils.signal_filter import build_promotion_context
+from backend.utils.dot_builder import (
+    build_dot_skeleton,
+    extract_dot_block,
+    replace_dot_block,
+    validate_dot,
+)
 
 logger = get_logger("agent_lead_hunter_synthesis")
 
 HIGH_SIGNAL_THREAT_SCORE = 60
+# Upper bound on how many edges feed the attack-flow diagram (and its prose
+# mirror, the edge-tuple context block). Single cap shared by both consumers
+# via _select_diagram_edges so they can never disagree on which edges made
+# the cut.
+DIAGRAM_EDGE_LIMIT = 40
 IMPORTANT_RELATIONSHIPS = {
     "contacted_domains",
     "contacted_ips",
@@ -101,36 +112,21 @@ Map the threat infrastructure and identify patterns:
 - **Relationships**: How are the domains/IPs connected? (e.g., "Domain A and B both dropped File C")
 
 ### 5. Attack Flow Diagram
-Create a Graphviz diagram showing the complete infrastructure and attack chain.
-Where relevant, include the indicators that highlight that particular attack chain.
+You have been given an **Attack Flow Diagram Skeleton** in the context below — a complete, valid `digraph AttackChain { ... }` built directly from the investigation graph. Your job is to **annotate that skeleton**, not design a diagram from scratch.
 
 **CRITICAL Graphviz Rules:**
-- Use DOT language syntax
-- Wrap code in ```dot ... ``` block
-- Use quotes for labels with spaces
-- Show infrastructure relationships (domains -> IPs -> ASNs)
-- Show attack progression (example: delivery -> execution -> C2 -> objectives)
-- Show the full ioc (sha256, IP Address, URL, Domain), do not truncate them. 
+- Reproduce the skeleton's structure verbatim: every node and every edge it contains must appear in your output, with the exact same node ids and the exact same edges. Do NOT add, remove, or rename any node or edge.
+- Node ids in the skeleton are already the full, untruncated IOC (sha256, IP Address, URL, Domain) — never shorten, truncate, or re-label them.
+- Permitted changes ONLY:
+    - Styling attributes (colors, shapes, fonts, penwidth, etc.) to improve readability.
+    - Grouping nodes into `subgraph cluster_*` blocks to convey attack phases (e.g. delivery, execution, C2, objectives).
+    - Refining edge `label=` text to name the relationship more precisely (e.g. `resolves_to` -> "Resolves To C2").
+- Wrap the output in a ```dot ... ``` block.
+- Use quotes for any label with spaces.
 - **Layout Optimization:**
     - Use `rankdir=TB` (top to bottom) for a clearer, vertical flow.
     - Set `graph [splines=ortho];` for cleaner lines if many connections exist.
     - If the graph is too wide, use `unflatten` logic (grouping nodes) or suggest multiple connected subgraphs.
-
-**Example:**
-```dot
-digraph AttackChain {
-  rankdir=TB;
-  center=true;
-  concentrate=true;
-  bgcolor="ghostwhite"
-  node [shape=box, style=filled, fillcolor=lightgray, fontname="Arial", fontsize=10];
-  edge [fontname="Arial", fontsize=9];
-  
-  "Phishing Email" -> "malicious.doc" [label="Drops"];
-  "malicious.doc" -> "C2 Domain" [label="Connects"];
-  "C2 Domain" -> "IP: 1.2.3.4" [label="Resolves"];
-}
-```
 
 ### 6. Intelligence Gaps & Pivots
 *   Identify what is still unknown.
@@ -356,7 +352,38 @@ def _score_edges(cache, node_details: dict, high_signal_node_ids: set, root_ioc:
     return scored
 
 
-def _build_graph_summary(state: AgentState, cache: Optional[InvestigationCache] = None) -> str:
+def _select_diagram_edges(scored_edges: list, limit: int = DIAGRAM_EDGE_LIMIT) -> list:
+    """
+    Single source of truth for "which edges make it into the attack-flow
+    diagram (and its prose mirror)". Dedups on (source, target, relationship)
+    while preserving _score_edges' ordering (root-adjacent first, then by
+    descending relevance score), then caps at `limit`.
+
+    Both _build_edge_tuples (prose) and generate_final_report_llm's
+    build_dot_skeleton call (diagram) derive their edge set from this same
+    function over the same `scored_edges` list, so the diagram and the prose
+    can no longer disagree about which edges exist.
+    """
+    selected = []
+    seen = set()
+    for edge in scored_edges:
+        key = (edge["source"], edge["target"], edge["relationship"])
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append(edge)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _build_graph_summary(
+    state: AgentState,
+    cache: Optional[InvestigationCache] = None,
+    node_details: Optional[dict] = None,
+    high_signal_node_ids: Optional[set] = None,
+    scored_edges: Optional[list] = None,
+) -> str:
     """
     Summarize the investigation graph into compact, high-signal text for synthesis.
     This gives the Lead Hunter actual graph context without dumping the full cache.
@@ -365,6 +392,14 @@ def _build_graph_summary(state: AgentState, cache: Optional[InvestigationCache] 
     for backward compatibility with any caller that doesn't have an already-built
     cache on hand. Prefer passing an in-memory cache (e.g. one composite verdicts
     were already applied to) so this doesn't rebuild from pre-mutation state.
+
+    `node_details` / `high_signal_node_ids` / `scored_edges` are optional
+    precomputed values. When the caller (generate_final_report_llm) has
+    already run the _compute_node_details -> _compute_high_signal ->
+    _score_edges chain once (e.g. to also build the Graphviz skeleton), it
+    should pass those results in here instead of letting this function
+    silently redo the work with its own (potentially drifting) copy. Falls
+    back to computing them internally when not supplied.
     """
     if cache is None:
         graph_state = state.get("investigation_graph")
@@ -375,10 +410,21 @@ def _build_graph_summary(state: AgentState, cache: Optional[InvestigationCache] 
     stats = cache.get_stats()
     root_ioc = state.get("ioc")
 
-    node_details = _compute_node_details(cache)
-    high_signal_node_ids, important_relationships_by_node, bridges_malware_infra = (
+    if node_details is None:
+        node_details = _compute_node_details(cache)
+
+    # important_relationships_by_node / bridges_malware_infra are only needed
+    # for this function's own high-signal-node narrative fields; they aren't
+    # part of the shared precomputed-params contract, so they're always
+    # (cheaply — a single edge pass) derived here. When high_signal_node_ids
+    # IS supplied, it still wins over the freshly-derived set below so the
+    # node membership stays consistent with whatever the caller shared with
+    # the Graphviz skeleton.
+    computed_high_signal_node_ids, important_relationships_by_node, bridges_malware_infra = (
         _compute_high_signal(cache, node_details)
     )
+    if high_signal_node_ids is None:
+        high_signal_node_ids = computed_high_signal_node_ids
 
     relationship_counts = {}
     for _source, _target, data in cache.graph.edges(data=True):
@@ -400,7 +446,8 @@ def _build_graph_summary(state: AgentState, cache: Optional[InvestigationCache] 
         reverse=True
     )[:15]
 
-    scored_edges = _score_edges(cache, node_details, high_signal_node_ids, root_ioc)
+    if scored_edges is None:
+        scored_edges = _score_edges(cache, node_details, high_signal_node_ids, root_ioc)
     key_edges = [e for e in scored_edges if e["has_threat_signal"] and e["qualifiers"] >= 1][:25]
 
     root_neighbors = []
@@ -442,23 +489,32 @@ def _build_graph_summary(state: AgentState, cache: Optional[InvestigationCache] 
         )
     )
 
-def _build_edge_tuples(state: AgentState, cache: Optional[InvestigationCache] = None) -> str:
+def _build_edge_tuples(
+    state: AgentState,
+    cache: Optional[InvestigationCache] = None,
+    node_details: Optional[dict] = None,
+    high_signal_node_ids: Optional[set] = None,
+    scored_edges: Optional[list] = None,
+) -> str:
     """
-    Generate a machine-readable edge list for grounding the Graphviz diagram.
-    Each line is a DOT-compatible edge: "source_label" -> "target_label" [label="relationship"]
-    The LLM can use these directly instead of reconstructing edges from prose.
+    Generate a machine-readable edge list as narrative grounding for the Lead
+    Hunter's prose (attack narrative, infrastructure mapping, etc.) — NOT the
+    Graphviz diagram source; that's now generate_final_report_llm's
+    build_dot_skeleton, built from the same edge selection so the two can't
+    disagree. Each line is: "source_label" -> "target_label" [label="relationship"]
 
     Edges are relevance-sorted (root-adjacent first, then by score, via
-    _score_edges) before the cap is applied, so the highest-signal and
-    root-anchored edges always survive truncation instead of whatever
-    NetworkX happened to iterate first. Previously this took the first 40
-    edges in raw insertion order, which could exhaust the cap on benign
-    triage-phase noise before any specialist-discovered edge was considered.
+    _score_edges) before the shared _select_diagram_edges dedup+cap is
+    applied, so the highest-signal and root-anchored edges always survive
+    truncation instead of whatever NetworkX happened to iterate first.
 
     `cache` is optional and defaults to rebuilding from `state["investigation_graph"]`
     for backward compatibility with any caller that doesn't have an already-built
     cache on hand. Prefer passing an in-memory cache (e.g. one composite verdicts
     were already applied to) so this doesn't rebuild from pre-mutation state.
+
+    `node_details` / `high_signal_node_ids` / `scored_edges` are optional
+    precomputed values — see _build_graph_summary's docstring for why.
     """
     if cache is None:
         graph_state = state.get("investigation_graph")
@@ -468,23 +524,22 @@ def _build_edge_tuples(state: AgentState, cache: Optional[InvestigationCache] = 
 
     root_ioc = state.get("ioc")
 
-    node_details = _compute_node_details(cache)
-    high_signal_node_ids, _important_rels, _bridges = _compute_high_signal(cache, node_details)
-    scored_edges = _score_edges(cache, node_details, high_signal_node_ids, root_ioc)
+    if node_details is None:
+        node_details = _compute_node_details(cache)
+    if high_signal_node_ids is None:
+        high_signal_node_ids, _important_rels, _bridges = _compute_high_signal(cache, node_details)
+    if scored_edges is None:
+        scored_edges = _score_edges(cache, node_details, high_signal_node_ids, root_ioc)
+
+    diagram_edges = _select_diagram_edges(scored_edges)
 
     lines = []
-    seen = set()
-    for edge in scored_edges:
-        key = (edge["source"], edge["target"], edge["relationship"])
-        if key in seen:
-            continue
-        seen.add(key)
-
+    for edge in diagram_edges:
         src_label = node_details.get(edge["source"], {}).get("label", edge["source"])
         tgt_label = node_details.get(edge["target"], {}).get("label", edge["target"])
         lines.append(f'  "{src_label}" -> "{tgt_label}" [label="{edge["relationship"]}"];')
 
-    return "\n".join(lines[:40])  # Cap at 40 edges to limit token cost
+    return "\n".join(lines)
 
 
 async def generate_final_report_llm(state: AgentState, llm, cache: Optional[InvestigationCache] = None) -> str:
@@ -518,12 +573,47 @@ Please review the system logs for stack traces.
 No actionable intelligence could be synthesized. The original indicator may be malformed or external systems may be unreachable.
 """
 
+    # Compute the _compute_node_details -> _compute_high_signal -> _score_edges
+    # chain exactly once here, and share the results with _build_graph_summary,
+    # _build_edge_tuples, and the Graphviz skeleton below. Previously each of
+    # the first two recomputed this chain independently — harmless for the
+    # text-only summary, but for the diagram it meant the skeleton and the
+    # edge-tuple prose could drift apart. All three now see the same numbers.
+    root_ioc = state.get("ioc")
+    node_details = _compute_node_details(cache)
+    high_signal_node_ids, _important_rels, _bridges = _compute_high_signal(cache, node_details)
+    scored_edges = _score_edges(cache, node_details, high_signal_node_ids, root_ioc)
+
     triage_context = _build_triage_context(state)
     specialist_context = _build_specialist_context(state)
-    graph_summary = _build_graph_summary(state, cache)
-    edge_tuples = _build_edge_tuples(state, cache)
+    graph_summary = _build_graph_summary(
+        state, cache,
+        node_details=node_details,
+        high_signal_node_ids=high_signal_node_ids,
+        scored_edges=scored_edges,
+    )
+    edge_tuples = _build_edge_tuples(
+        state, cache,
+        node_details=node_details,
+        high_signal_node_ids=high_signal_node_ids,
+        scored_edges=scored_edges,
+    )
     escalation_context = build_escalation_context(cache)
     promotion_context = build_promotion_context(cache)
+
+    # Attack-flow diagram: the backend builds a deterministic, fully-grounded
+    # skeleton (real graph entity ids, never display labels) from the same
+    # edge selection as edge_tuples above, and the LLM is asked to annotate
+    # it rather than invent a diagram from scratch. Whatever comes back is
+    # validated against this exact node/edge set further down, with a
+    # deterministic fallback to the skeleton itself if validation fails.
+    diagram_edges = _select_diagram_edges(scored_edges)
+    skeleton = build_dot_skeleton(node_details, diagram_edges, root_ioc)
+
+    allowed_nodes = {edge["source"] for edge in diagram_edges} | {edge["target"] for edge in diagram_edges}
+    if root_ioc and root_ioc in node_details:
+        allowed_nodes.add(root_ioc)
+    allowed_edges = {(edge["source"], edge["target"]) for edge in diagram_edges}
 
     # Format context
     context = f"""
@@ -538,7 +628,12 @@ No actionable intelligence could be synthesized. The original indicator may be m
     **Investigation Graph Summary:**
     {graph_summary}
 
-    **Graph Edges (use these for your Graphviz diagram — do NOT invent edges):**
+    **Attack Flow Diagram Skeleton (annotate this — do NOT add, remove, or rename any node or edge):**
+    ```dot
+    {skeleton}
+    ```
+
+    **Machine-Readable Edge Reference (for narrative grounding — do NOT use as diagram source):**
     {edge_tuples}
 
     **Verdict Escalations (graph-context analysis):**
@@ -568,6 +663,35 @@ No actionable intelligence could be synthesized. The original indicator may be m
             raw_content = " ".join([b.get("text", "") if isinstance(b, dict) else str(b) for b in raw_content])
         elif not isinstance(raw_content, str):
             raw_content = str(raw_content)
+
+        # Deterministic Graphviz fallback (S4-T3): validate whatever ```dot
+        # block the LLM returned against the skeleton's own node/edge set.
+        # This MUST happen here, before returning — lead_hunter.py runs
+        # validate_and_annotate on the result next, and report_validator.py
+        # strips DOT blocks before IOC extraction, so the fence must already
+        # be final by the time this function returns. A bug in this step must
+        # never lose an otherwise-successful report, hence the broad except.
+        try:
+            extracted_dot = extract_dot_block(raw_content)
+            if extracted_dot is None:
+                logger.warning(
+                    "dot_validation_failed",
+                    job_id=job_id,
+                    reasons=["no ```dot fenced block found in LLM output"],
+                )
+                raw_content = replace_dot_block(raw_content, skeleton)
+            else:
+                ok, reasons = validate_dot(extracted_dot, allowed_nodes, allowed_edges)
+                if ok:
+                    logger.info("dot_validation_passed", job_id=job_id)
+                else:
+                    logger.warning("dot_validation_failed", job_id=job_id, reasons=reasons)
+                    raw_content = replace_dot_block(raw_content, skeleton)
+        except Exception as dot_error:
+            logger.error("dot_validation_error", job_id=job_id, error=str(dot_error))
+            # raw_content is returned unmodified — a validator bug must never
+            # lose a successfully generated report.
+
         return raw_content
     except Exception as e:
         logger.error("lead_hunter_synthesis_error", job_id=job_id, error=str(e))

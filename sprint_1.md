@@ -97,9 +97,10 @@
 *   **Change:** Rip out the internal `while/for` loops inside the specialists. Replace with native LangGraph `ToolNode`s and conditional edges. Unlocks per-step checkpointing.
 *   **Note (2026-07-29):** The sub-graph refactor itself shipped on `main` in `9c3327f` + `a976cef` (2026-06-04) but was never ticked here. This tier closed the four gaps it left behind: restored the per-tool 20s timeout and catch-all that `run_tools_parallel` used to enforce (`ToolNode`'s default `handle_tool_errors` only converts `ToolInvocationError` and re-raises everything else); deleted the dead `run_tools_parallel` / `cap_context_window` code; hardened `route_after_agent` against non-`AIMessage` last messages; hoisted both routers to module scope so they are testable.
 
-### S4-T3 · Deterministic Graphviz
-*   **Files:** `backend/agents/lead_hunter_synthesis.py`
+### [x] S4-T3 · Deterministic Graphviz
+*   **Files:** `backend/utils/dot_builder.py` (new), `backend/agents/lead_hunter_synthesis.py`
 *   **Change:** Generate the base DOT template directly from the `NetworkX` cache. Pass it as a structured template to the LLM for annotation to eliminate structural hallucinations.
+*   **Note (2026-07-29):** Added a validation step with a deterministic fallback, because the frontend's `d3-graphviz` `renderDot()` is worker-based — its surrounding `try/catch` never fires, so malformed DOT rendered a blank panel with no error. The skeleton is keyed on real (normalised) entity ids rather than `_node_label()` display names, which previously let two distinct entities collapse into one DOT node. `_select_diagram_edges` is now the single edge selection shared by the diagram and the prose edge list.
 
 ### S4-T4 · SSE error wrapping & dynamic progress
 *   **Files:** `backend/graph/sse_wrappers.py`

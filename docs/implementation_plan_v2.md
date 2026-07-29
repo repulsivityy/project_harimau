@@ -105,6 +105,7 @@ This document tracks the iterative evolution of the Harimau platform, organized 
 *   [x] **Triage Signal Filtering**: Implemented strict verdict/vendor-count filters to reduce noise.
 *   [x] **Iteration-Aware Context**: Added cumulative finding awareness to specialist prompts.
 *   [x] **Graph Grounding**: Implemented machine-readable edge tuples for the Lead Hunter to prevent diagram hallucinations.
+*   [x] **Deterministic Graphviz Skeleton**: (2026-07-29) New `backend/utils/dot_builder.py` builds a complete, deterministic `digraph` directly from the NetworkX cache — keyed on real normalised entity ids, not `_node_label()` display names (which could collapse two distinct entities into one DOT node). The LLM now annotates that skeleton instead of authoring a diagram, and its output is structurally validated against the cache's own node/edge set with a fallback to the skeleton. This closes a silent failure: the frontend's `d3-graphviz` `renderDot()` is worker-based, so its `try/catch` never fires and malformed DOT rendered a blank panel with no error.
 
 ---
 

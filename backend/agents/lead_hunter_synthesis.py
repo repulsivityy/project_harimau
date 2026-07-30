@@ -1,5 +1,5 @@
 import json
-from typing import Optional
+from typing import Any, Optional
 from langchain_core.messages import SystemMessage, HumanMessage
 from backend.utils.logger import get_logger
 from backend.graph.state import AgentState
@@ -39,6 +39,27 @@ MALWARE_TYPES = {"file"}
 INFRA_TYPES = {"domain", "ip_address", "url"}
 
 
+def _sanitise_label(label: Any) -> str:
+    """
+    Make an entity's display label safe to interpolate into a prompt context
+    line.
+
+    Labels are attacker-chosen: they come from `meaningful_name`, `names[0]`,
+    `last_final_url` and `host_name`, i.e. the filename the malware author
+    picked. The graph summary and the edge fact table render one line per
+    entity/edge, so a label containing a newline would render as an extra,
+    fully-formed line — letting a sample name fabricate a graph fact (a
+    high-signal edge between entities that don't exist) in the LLM's context.
+    Quotes are escaped for the same reason: they delimit the label field.
+    """
+    text = str(label)
+    text = text.replace("\\", "\\\\").replace('"', '\\"')
+    # Collapse anything that could start a new line or field in the rendering.
+    for ch in ("\r\n", "\r", "\n", "\t"):
+        text = text.replace(ch, " ")
+    return text.strip()
+
+
 def _node_label(node_id: str, data: dict) -> str:
     """Human-readable label for a graph node. Used in graph summary and edge tuples."""
     entity_type = data.get("entity_type", "unknown")
@@ -65,7 +86,7 @@ Your job is to connect the dots, identify the broader campaign context, and writ
 3.  **Investigation Graph:** The network of connections found.
 
 **Verdict Handling:**
-Some entities in the Investigation Graph carry an assessed verdict that differs from their raw GTI baseline verdict — this happens when graph context (e.g. adjacency to a confirmed-malicious entity) or corroborating evidence justified an escalation. When an entity's assessed verdict differs from its GTI baseline, state BOTH explicitly rather than presenting the escalation as if it were GTI's own finding (e.g. "GTI: undetected — assessed SUSPICIOUS because it resolves to a confirmed C2 IP"). Draw escalation reasons from the Verdict Escalations context block provided below; do not invent reasons that aren't listed there. If an entity's `stale_analysis_days` is present, note that its verdict may be outdated. This is additive context for narrating the investigation accurately — it does not change how threat scores are reported; threat scores are passed through from GTI as-is and should never be derived or adjusted.
+Some entities in the Investigation Graph carry an assessed verdict that differs from their raw GTI baseline verdict — this happens when graph context (e.g. adjacency to a confirmed-malicious entity) or corroborating evidence justified an escalation. When an entity's assessed verdict differs from its GTI baseline, state BOTH explicitly rather than presenting the escalation as if it were GTI's own finding (e.g. "GTI: undetected — assessed SUSPICIOUS because it resolves to a confirmed C2 IP"). Draw escalation reasons from the Verdict Escalations context block provided below; do not invent reasons that aren't listed there. If an entity's `stale_analysis_days` is present, note that its verdict may be outdated. This is additive context for narrating the investigation accurately — it does not change how threat scores are reported; threat scores are passed through from GTI as-is and should never be derived or adjusted. In the graph context below, `threat_score=unknown` means GTI returned no score for that entity at all — typically because it was discovered as a relationship descriptor rather than fetched directly — and must NOT be read as a low or benign score, nor substituted with a guess.
 
 **Goal:**
 Produce a comprehensive Markdown report that reads like a high-level Threat Intelligence product (e.g., similar to Mandiant or Red Canary reporting).
@@ -241,11 +262,41 @@ def _compute_node_details(cache) -> dict:
         gti_verdict_raw = verdict.get("value") if isinstance(verdict, dict) else None
         composite_verdict = data.get("composite_verdict")
 
+        # "score" coerces a missing threat_score.value to 0 because it feeds
+        # arithmetic comparisons (>= 80, > HIGH_SIGNAL_THREAT_SCORE) and
+        # sorted(...) keys elsewhere — making it None would raise TypeError
+        # there. That coercion is misleading for *rendering*, though: 0 reads
+        # as "confirmed benign" when it may really mean "GTI never scored
+        # this entity", which is the common case for pivot-discovered nodes
+        # (extract_gti_summary's docstring in graph_cache.py notes
+        # relationship-listing tools pass descriptors_only=True, so pivot
+        # entities usually arrive with no gti_assessment at all). "score_known"
+        # is the presentation-only sibling: True only when GTI actually
+        # supplied a value, so callers that render text (graph summary, edge
+        # fact table) can say "unknown" instead of a fabricated 0.
+        # Coerce to a real number rather than only None-guarding: GTI has been
+        # seen to return the score as a string ({"value": "85"}), which would
+        # otherwise flow into _compute_high_signal's `>= 80` and into
+        # sorted(key=(score, malicious_count)) and raise
+        # TypeError: '>=' not supported between 'str' and 'int'.
+        # (CHANGELOG 0.6.1 records the sibling {"value": None} crash.)
+        raw_score = threat_score.get("value") if isinstance(threat_score, dict) else None
+        try:
+            score_value = float(raw_score) if raw_score is not None else None
+        except (TypeError, ValueError):
+            logger.warning("threat_score_unparseable", node=node_id, raw=repr(raw_score))
+            score_value = None
+        # Render 92, not 92.0 — this value is shown to the LLM verbatim.
+        if score_value is not None and score_value.is_integer():
+            score_value = int(score_value)
+        score_known = score_value is not None
+
         node_details[node_id] = {
             "id": node_id,
             "type": entity_type,
             "label": _node_label(node_id, data),
-            "score": (threat_score.get("value") if isinstance(threat_score, dict) and threat_score.get("value") is not None else 0),
+            "score": score_value if score_known else 0,
+            "score_known": score_known,
             "verdict": composite_verdict if composite_verdict else normalize_verdict(gti_verdict_raw),
             "gti_verdict": gti_verdict_raw,
             "malicious_count": last_analysis_stats.get("malicious", 0) if isinstance(last_analysis_stats, dict) else 0,
@@ -346,27 +397,59 @@ def _score_edges(cache, node_details: dict, high_signal_node_ids: set, root_ioc:
             "has_threat_signal": has_threat_signal,
             "target_verdict": target_node.get("verdict") or "unknown",
             "target_malicious_count": vendor_count,
+            # S4-T5: carry the attribute set _build_edge_tuples needs to be a
+            # complete fact table, rather than computing source_type/target_type
+            # here and throwing them away as before.
+            "source_type": source_type,
+            "target_type": target_type,
+            "source_verdict": source_node.get("verdict") or "unknown",
+            "target_score": target_node.get("score", 0),
+            "target_score_known": target_node.get("score_known", False),
+            "source_score": source_node.get("score", 0),
+            "source_score_known": source_node.get("score_known", False),
         })
 
     scored.sort(key=lambda e: (e["root_adjacent"], e["score"]), reverse=True)
     return scored
 
 
+def _is_high_signal_edge(edge: dict) -> bool:
+    """
+    The predicate the (now-removed) "Key Edges" graph-summary block used to
+    select edges worth naming explicitly. Kept as one function so the edge
+    selection and the fact table's `high_signal` flag cannot drift apart.
+    """
+    return bool(edge.get("has_threat_signal")) and edge.get("qualifiers", 0) >= 1
+
+
 def _select_diagram_edges(scored_edges: list, limit: int = DIAGRAM_EDGE_LIMIT) -> list:
     """
     Single source of truth for "which edges make it into the attack-flow
-    diagram (and its prose mirror)". Dedups on (source, target, relationship)
-    while preserving _score_edges' ordering (root-adjacent first, then by
-    descending relevance score), then caps at `limit`.
+    diagram (and its prose fact table)". Dedups on (source, target,
+    relationship) and caps at `limit`.
 
-    Both _build_edge_tuples (prose) and generate_final_report_llm's
-    build_dot_skeleton call (diagram) derive their edge set from this same
-    function over the same `scored_edges` list, so the diagram and the prose
-    can no longer disagree about which edges exist.
+    High-signal edges get first claim on the budget. Without that reservation a
+    plain relevance-ordered cut loses them entirely on real hunts, because
+    _score_edges sorts `root_adjacent` ahead of everything and derives
+    node_score from `max(source_score, target_score)` — so a malicious root
+    hands its own high score to *all* of its edges, including edges to benign
+    zero-detection CDN domains, and those outrank confirmed-malicious
+    infrastructure several hops out. triage.py adds a root->entity edge for
+    every entity returned across 13 PRIORITY_RELATIONSHIPS at limit=10, so a
+    root with 40+ adjacent edges is the normal case, not an edge case.
+    Measured on a root with 45 benign adjacent edges plus 6 confirmed-malicious
+    distant ones: a plain cap surfaced 0 of the 6.
+
+    Within each tier _score_edges' ordering is preserved, so the diagram still
+    anchors on root-adjacent edges once the high-signal ones are in.
     """
+    high_signal, remainder = [], []
+    for edge in scored_edges:
+        (high_signal if _is_high_signal_edge(edge) else remainder).append(edge)
+
     selected = []
     seen = set()
-    for edge in scored_edges:
+    for edge in high_signal + remainder:
         key = (edge["source"], edge["target"], edge["relationship"])
         if key in seen:
             continue
@@ -448,7 +531,6 @@ def _build_graph_summary(
 
     if scored_edges is None:
         scored_edges = _score_edges(cache, node_details, high_signal_node_ids, root_ioc)
-    key_edges = [e for e in scored_edges if e["has_threat_signal"] and e["qualifiers"] >= 1][:25]
 
     root_neighbors = []
     if root_ioc and root_ioc in cache.graph:
@@ -466,8 +548,9 @@ def _build_graph_summary(
         f"High-Signal Nodes:\n" +
         (
             "\n".join(
-                f"- {n['type']}: {n['id']} | label={n['label']} | "
-                f"verdict={n['verdict'] or 'unknown'} | threat_score={n['score']} | "
+                f"- {n['type']}: {n['id']} | label={_sanitise_label(n['label'])} | "
+                f"verdict={n['verdict'] or 'unknown'} | "
+                f"threat_score={'unknown' if not n.get('score_known') else n['score']} | "
                 f"malicious_vendors={n['malicious_count']} | "
                 f"important_relationships={', '.join(n['important_relationships']) or 'none'} | "
                 f"bridges_malware_infra={n['bridges_malware_infra']}"
@@ -476,17 +559,7 @@ def _build_graph_summary(
             if high_signal_nodes else "- None"
         ) +
         "\nRoot IOC Relationships:\n" +
-        ("\n".join(root_neighbors[:15]) if root_neighbors else "- None") +
-        "\nKey Edges:\n" +
-        (
-            "\n".join(
-                f"- {edge['source']} -[{edge['relationship']}]-> {edge['target']} | "
-                f"target_verdict={edge['target_verdict']} | "
-                f"target_malicious_vendors={edge['target_malicious_count']}"
-                for edge in key_edges
-            )
-            if key_edges else "- None"
-        )
+        ("\n".join(root_neighbors[:15]) if root_neighbors else "- None")
     )
 
 def _build_edge_tuples(
@@ -497,11 +570,26 @@ def _build_edge_tuples(
     scored_edges: Optional[list] = None,
 ) -> str:
     """
-    Generate a machine-readable edge list as narrative grounding for the Lead
-    Hunter's prose (attack narrative, infrastructure mapping, etc.) — NOT the
-    Graphviz diagram source; that's now generate_final_report_llm's
-    build_dot_skeleton, built from the same edge selection so the two can't
-    disagree. Each line is: "source_label" -> "target_label" [label="relationship"]
+    Generate the edge fact table used as narrative grounding for the Lead
+    Hunter's prose (attack narrative, infrastructure mapping, relationship
+    naming, etc.) — NOT the Graphviz diagram source; that's now
+    generate_final_report_llm's build_dot_skeleton, built from the same edge
+    selection so the two can't disagree.
+
+    Keyed on real entity ids (matching the DOT skeleton's node ids — the
+    previous label-keyed rendering here was the last remaining identifier
+    inconsistency between the diagram and its prose mirror, since two
+    distinct entities can share a display label). Each line carries the full
+    attribute set _score_edges computes for both endpoints — entity type,
+    verdict, threat score — plus the relationship name, the target's
+    malicious-vendor count, and a high_signal flag preserving the same
+    predicate the old (now-removed) "Key Edges" graph-summary section used
+    (has_threat_signal and qualifiers >= 1), so that signal isn't lost by
+    consolidating the two blocks into this one. threat_score renders as
+    "unknown" rather than a misleading 0 when GTI supplied no score for that
+    entity (see _compute_node_details' score_known). Where a node's display
+    label differs from its id, the label is appended for that endpoint — file
+    names carry real analyst signal — but the id stays the primary key.
 
     Edges are relevance-sorted (root-adjacent first, then by score, via
     _score_edges) before the shared _select_diagram_edges dedup+cap is
@@ -533,11 +621,30 @@ def _build_edge_tuples(
 
     diagram_edges = _select_diagram_edges(scored_edges)
 
+    def _endpoint(entity_id: str) -> str:
+        label = node_details.get(entity_id, {}).get("label")
+        if label and label != entity_id:
+            return f'{entity_id} label="{_sanitise_label(label)}"'
+        return entity_id
+
+    def _render_score(known: bool, value) -> str:
+        return "unknown" if not known else value
+
     lines = []
     for edge in diagram_edges:
-        src_label = node_details.get(edge["source"], {}).get("label", edge["source"])
-        tgt_label = node_details.get(edge["target"], {}).get("label", edge["target"])
-        lines.append(f'  "{src_label}" -> "{tgt_label}" [label="{edge["relationship"]}"];')
+        high_signal = _is_high_signal_edge(edge)
+        source_score = _render_score(edge.get("source_score_known", False), edge.get("source_score", 0))
+        target_score = _render_score(edge.get("target_score_known", False), edge.get("target_score", 0))
+        lines.append(
+            f"- {_endpoint(edge['source'])} "
+            f"({edge.get('source_type', 'unknown')}, verdict={edge.get('source_verdict', 'unknown')}, "
+            f"threat_score={source_score}) "
+            f"-[{edge['relationship']}]-> "
+            f"{_endpoint(edge['target'])} "
+            f"({edge.get('target_type', 'unknown')}, verdict={edge['target_verdict']}, "
+            f"threat_score={target_score}, malicious_vendors={edge['target_malicious_count']}) "
+            f"| high_signal={'yes' if high_signal else 'no'}"
+        )
 
     return "\n".join(lines)
 
@@ -633,7 +740,7 @@ No actionable intelligence could be synthesized. The original indicator may be m
     {skeleton}
     ```
 
-    **Machine-Readable Edge Reference (for narrative grounding — do NOT use as diagram source):**
+    **Graph Edge Facts (high-signal edges first — use these to name relationships and entity types accurately; the diagram comes from the skeleton above):**
     {edge_tuples}
 
     **Verdict Escalations (graph-context analysis):**

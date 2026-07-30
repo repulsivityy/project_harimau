@@ -595,3 +595,64 @@ def test_synthesis_prompt_carries_the_skeleton():
     # Full, untruncated ids must reach the model — the bug the old
     # display-label grounding caused.
     assert FILE_HASH in human_message
+
+
+# ---------------------------------------------------------------------------
+# URL entity ids: found in review of S4-T5.
+#
+# parse_dot_structure stripped `//` comments with a regex, so a URL node id
+# ("http://evil.example/p") had the rest of its line eaten, destroying the
+# quote balance and leaving fragments like "http" and " -> " that read as
+# invented nodes. The skeleton then failed to validate against ITSELF, so every
+# report whose diagram contained a URL silently discarded the LLM's annotation
+# and fell back to the bare skeleton. contacted_urls / embedded_urls / urls are
+# all in triage's PRIORITY_RELATIONSHIPS, so this was most real hunts.
+# ---------------------------------------------------------------------------
+
+URL_ID = "http://u1.example.com/payload.bin"
+
+
+def _build_cache_with_url() -> InvestigationCache:
+    cache = _build_cache()
+    cache.add_entity(URL_ID, "url", {
+        "gti_assessment": {"verdict": {"value": "VERDICT_MALICIOUS"}, "threat_score": {"value": 88}},
+        "last_analysis_stats": {"malicious": 14},
+    })
+    cache.add_relationship(FILE_HASH, URL_ID, "contacted_urls")
+    return cache
+
+
+def test_parse_dot_structure_keeps_url_ids_intact():
+    nodes, edges = parse_dot_structure(
+        f'digraph G {{ "{FILE_HASH}" -> "{URL_ID}" [label="contacted_urls"]; }}'
+    )
+    assert URL_ID in nodes, sorted(nodes)
+    assert (FILE_HASH, URL_ID) in edges
+    # No fragments from the eaten line.
+    assert "http" not in nodes
+    assert not any(n.strip() == "->" for n in nodes)
+
+
+def test_skeleton_with_a_url_node_validates_against_itself():
+    """If the skeleton can't validate itself, the annotation step is dead."""
+    cache = _build_cache_with_url()
+    node_details, _scored, diagram_edges, skeleton = _pipeline(cache)
+    allowed_nodes, allowed_edges = _allowed_sets(node_details, diagram_edges, FILE_HASH)
+
+    assert URL_ID in skeleton
+    ok, reasons = validate_dot(skeleton, allowed_nodes, allowed_edges)
+    assert ok, reasons
+
+
+def test_real_comments_are_still_stripped_alongside_urls():
+    """The comment stripper must stay quote-aware in both directions."""
+    dot = (
+        f'digraph G {{\n'
+        f'  // see http://reference.example/notes for context\n'
+        f'  /* block comment with "quoted" text and http://x.example/y */\n'
+        f'  "{FILE_HASH}" -> "{URL_ID}" [label="contacted_urls"];  # trailing\n'
+        f'}}'
+    )
+    nodes, edges = parse_dot_structure(dot)
+    assert nodes == {FILE_HASH, URL_ID}, sorted(nodes)
+    assert edges == {(FILE_HASH, URL_ID)}

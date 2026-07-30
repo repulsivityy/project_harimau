@@ -200,8 +200,6 @@ def replace_dot_block(markdown: str, dot: str) -> str:
 # DOT structure parsing + validation
 # ---------------------------------------------------------------------------
 
-_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
-_LINE_COMMENT_RE = re.compile(r"(?://|#)[^\n]*")
 # HTML-like attribute values: label=<<B>x</B>>. Must be stripped before the
 # generic key=value pass, whose value alternation doesn't cover angle brackets.
 _HTML_VALUE_RE = re.compile(r"=\s*<(?:[^<>]|<[^>]*>)*>")
@@ -233,6 +231,53 @@ _ID_RE = re.compile(_ID)
 # Bare words that are DOT keywords, never node references. `node`/`edge`/`graph`
 # survive as bare tokens once their `[...]` attribute list has been stripped.
 _RESERVED_WORDS = {"node", "edge", "graph", "digraph", "subgraph", "strict"}
+
+
+def _strip_comments(text: str) -> str:
+    """
+    Remove DOT comments (``/* */``, ``//``, ``#``) that are NOT inside a quoted
+    string.
+
+    This cannot be a regex. A URL entity id contains ``//``
+    ("http://evil.example/p"), so a naive `//.*$` sweep eats the rest of the
+    line, destroys the quote balance, and leaves fragments like `http` and
+    ` -> ` that then read as invented node ids. The effect was that a skeleton
+    containing any URL node failed to validate against *itself*, so every
+    report with a URL in the diagram silently discarded the LLM's annotation
+    and fell back to the bare skeleton. `contacted_urls` / `embedded_urls` /
+    `urls` are all in triage's PRIORITY_RELATIONSHIPS, so that was most hunts.
+    """
+    out = []
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch == '"':
+            # Copy the quoted string verbatim, honouring backslash escapes.
+            out.append(ch)
+            i += 1
+            while i < n:
+                if text[i] == "\\" and i + 1 < n:
+                    out.append(text[i:i + 2])
+                    i += 2
+                    continue
+                out.append(text[i])
+                i += 1
+                if text[i - 1] == '"':
+                    break
+            continue
+        if text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            i = n if end == -1 else end + 2
+            out.append(" ")
+            continue
+        if text.startswith("//", i) or ch == "#":
+            end = text.find("\n", i)
+            i = n if end == -1 else end
+            out.append(" ")
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
 
 
 def _clean_id(raw: str) -> Optional[str]:
@@ -273,9 +318,7 @@ def parse_dot_structure(dot: str) -> Tuple[Set[str], Set[Tuple[str, str]]]:
          contribute both their pairwise edges and their endpoints; any other
          surviving identifier is a standalone node declaration.
     """
-    text = dot or ""
-    text = _BLOCK_COMMENT_RE.sub(" ", text)
-    text = _LINE_COMMENT_RE.sub(" ", text)
+    text = _strip_comments(dot or "")
     text = _HTML_VALUE_RE.sub(" ", text)
     text = _BRACKET_ATTRS_RE.sub(" ", text)
     text = _SUBGRAPH_NAME_RE.sub(" ", text)

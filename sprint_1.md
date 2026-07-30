@@ -84,7 +84,7 @@
 
 ---
 
-# TIER 4 — LangGraph Architecture Refactoring (Phase 4)
+# TIER 4 — LangGraph Architecture Refactoring (Phase 4) [COMPLETED]
 
 **Goal:** Fix structural debt. Run after Tiers 1-3 ship and soak.
 
@@ -108,9 +108,18 @@
 *   **Note (2026-07-30):** Guarded at the source (`emit_event` itself) as well as in `with_sse_events` and the three `transparency.py` helpers, which are awaited from inside `@tool` bodies. Two concrete progress bugs fixed alongside: `triage` returned 10 for both `started` and `completed` (dead ternary), and the band was divided by `max_iterations` when there are actually `max_iterations + 1` specialist passes — specialists at `iteration == max_iterations` computed **103%**, clamped only client-side. Monotonicity is now enforced centrally by a per-job clamp in `sse_manager`, so it also covers the hardcoded percentages emitted from `main.py`.
 *   **Correction:** the disconnect race this was written to prevent is not reachable today — `asyncio.Queue.put` on an unbounded queue never suspends, so the broadcast loop is atomic. The real pre-existing bug the snapshot fixes is a *silent drop* (a disconnecting client mutating the list mid-iteration caused later subscribers to be skipped, 1 of 3 delivered), not an exception. The guards remain as insurance for the day the queue gains a `maxsize`.
 
-### S4-T5 · Synthesis quality
-*   **Files:** `backend/agents/lead_hunter_synthesis.py`
+### [x] S4-T5 · Synthesis quality
+*   **Files:** `backend/agents/lead_hunter_synthesis.py`, `backend/utils/dot_builder.py`
 *   **Change:** Pass complete edge attributes (`source_type`, `target_verdict`, `rel_type`) into the synthesis context so LLM names relationships accurately.
+*   **Note (2026-07-30):** `_score_edges` already computed `source_type`/`target_type` and discarded them. The two conflicting edge blocks (`Key Edges` keyed on ids, `_build_edge_tuples` keyed on display labels) are collapsed into one id-keyed fact table carrying both endpoints' type, verdict and score, plus a `high_signal` flag preserving the old `Key Edges` predicate. A missing GTI threat score now renders `unknown` rather than a misleading `0` — presentation only, no score is derived.
+*   **Review fixes:** consolidating the two blocks initially made the fact table share the diagram's unfiltered 40-edge cap, which *lost every high-signal edge* on a realistic hunt (measured 0 of 6 surviving past a root with 45 benign adjacent edges — `_score_edges` sorts root-adjacent first and `max(source, target)` hands the root's own score to all its edges, so benign CDN edges outranked confirmed-malicious infrastructure). `_select_diagram_edges` now gives high-signal edges first claim on the budget. Also escaped attacker-controlled display labels (a newline in a `meaningful_name` could inject a whole fabricated fact-table row) and coerced string threat scores to numbers.
+
+### Blocker — none. See "Follow-ups" below for two issues found but deliberately not fixed.
+
+## §8 · Follow-ups identified during Tier 4 (not fixed — need a decision)
+
+1. **`_compute_high_signal` can never flag an entity GTI did not score.** The gate is `score >= 80 or (score > HIGH_SIGNAL_THREAT_SCORE and qualifiers >= 2)`, and an unknown score coerces to `0`, so no number of qualifiers (malicious-vendor count, important relationships, malware↔infra bridge, specialist discovery) can admit it. Per `extract_gti_summary`'s docstring, descriptor-only pivot entities normally arrive with no `gti_assessment` at all, so the High-Signal Nodes block effectively contains only triage-discovered root-adjacent entities. This appears to contradict S1-T2's stated intent ("relax synthesis gate so high-scoring items **or specialist-discovered items** surface cleanly") — the specialist-discovery qualifier was added but gated behind `score > 60`, which those entities can never reach. It also compounds edge ranking, since `_score_edges` gives `+1 qualifier` for `target in high_signal_node_ids`. Possible shapes: admit on `qualifiers >= 3` when `not score_known`, or treat an unknown score as neutral rather than `0` in the gate. **Not changed here** — it alters the tuned synthesis gate and is outside S4-T5's scope.
+2. **`backend/requirements.txt` leaves `mcp` and `langgraph` unpinned.** A fresh build today resolves `mcp` to 2.0.0, which removed `mcp.server.fastmcp` — `backend/mcp/gti/server.py:22` and `backend/mcp/shodan/server.py:4` would fail to import and both MCP servers would be dead on arrival. Pinning affects deploys, so left alone.
 
 ---
 

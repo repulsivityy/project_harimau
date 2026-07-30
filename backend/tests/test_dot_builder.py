@@ -656,3 +656,99 @@ def test_real_comments_are_still_stripped_alongside_urls():
     nodes, edges = parse_dot_structure(dot)
     assert nodes == {FILE_HASH, URL_ID}, sorted(nodes)
     assert edges == {(FILE_HASH, URL_ID)}
+
+
+# ---------------------------------------------------------------------------
+# Completeness, found walking the full flow after the tier was assembled.
+#
+# validate_dot originally only checked that nothing was INVENTED. An empty
+# `digraph AttackChain { }` invents nothing, so it validated, and the user got a
+# blank diagram — the exact failure the deterministic skeleton exists to
+# prevent. Dropping the graph is as wrong as fabricating it.
+# ---------------------------------------------------------------------------
+
+def test_validate_dot_rejects_an_empty_digraph_when_edges_are_required():
+    cache = _build_cache()
+    node_details, _scored, diagram_edges, _skeleton = _pipeline(cache)
+    allowed_nodes, allowed_edges = _allowed_sets(node_details, diagram_edges, FILE_HASH)
+
+    empty = "digraph AttackChain {\n}"
+    # Sound but empty: passes without the completeness check.
+    ok_without, _ = validate_dot(empty, allowed_nodes, allowed_edges)
+    assert ok_without, "an empty digraph invents nothing, so soundness alone accepts it"
+
+    ok, reasons = validate_dot(empty, allowed_nodes, allowed_edges,
+                              required_edges=allowed_edges)
+    assert not ok
+    assert any("required edge" in r for r in reasons), reasons
+
+
+def test_validate_dot_rejects_a_partial_diagram():
+    cache = _build_cache()
+    node_details, _scored, diagram_edges, skeleton = _pipeline(cache)
+    allowed_nodes, allowed_edges = _allowed_sets(node_details, diagram_edges, FILE_HASH)
+
+    # Drop exactly one real edge from an otherwise faithful diagram.
+    dropped = f'  "{DOMAIN_2}" -> "{IP}" [label="resolutions"];'
+    assert dropped in skeleton, skeleton
+    partial = skeleton.replace(dropped, "")
+
+    ok, reasons = validate_dot(partial, allowed_nodes, allowed_edges,
+                              required_edges=allowed_edges)
+    assert not ok
+    assert any(DOMAIN_2 in r and IP in r for r in reasons), reasons
+
+
+def test_validate_dot_still_accepts_a_complete_annotated_diagram():
+    """The completeness check must not reject legitimate annotation."""
+    cache = _build_cache()
+    node_details, _scored, diagram_edges, _skeleton = _pipeline(cache)
+    allowed_nodes, allowed_edges = _allowed_sets(node_details, diagram_edges, FILE_HASH)
+
+    edge_lines = "\n".join(
+        f'  "{e["source"]}" -> "{e["target"]}" [label="Annotated"];'
+        for e in diagram_edges
+    )
+    annotated = (
+        "digraph AttackChain {\n"
+        "  rankdir=TB;\n"
+        '  fontcolor="navy";\n'
+        '  subgraph cluster_a { label="Delivery"; }\n'
+        f"{edge_lines}\n"
+        "}"
+    )
+    ok, reasons = validate_dot(annotated, allowed_nodes, allowed_edges,
+                              required_edges=allowed_edges)
+    assert ok, reasons
+
+
+def test_synthesis_falls_back_when_llm_returns_an_empty_diagram():
+    cache = _build_cache()
+    llm = _StubLLM(_report_with_dot("digraph AttackChain {\n}"))
+    report = asyncio.run(generate_final_report_llm(_synthesis_state(), llm, cache=cache))
+
+    result = extract_dot_block(report)
+    # The skeleton, not the empty shell the model returned.
+    assert FILE_HASH in result
+    assert "->" in result
+
+
+def test_synthesis_error_guard_short_circuits_before_building_a_skeleton():
+    """
+    S1-T5's all-specialists-failed guard must still return its structured error
+    without touching the new skeleton/validation path.
+    """
+    cache = _build_cache()
+    state = dict(_synthesis_state())
+    state["specialist_results"] = {
+        "malware": {"verdict": "System Error"},
+        "infrastructure": {"verdict": "System Error"},
+    }
+
+    class _ExplodingLLM:
+        async def ainvoke(self, messages):
+            raise AssertionError("the LLM must not be called when all specialists failed")
+
+    report = asyncio.run(generate_final_report_llm(state, _ExplodingLLM(), cache=cache))
+    assert "Investigation Failed" in report
+    assert extract_dot_block(report) is None

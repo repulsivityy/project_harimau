@@ -352,15 +352,28 @@ def validate_dot(
     dot: str,
     allowed_nodes: Set[str],
     allowed_edges: Set[Tuple[str, str]],
+    required_edges: Optional[Set[Tuple[str, str]]] = None,
 ) -> Tuple[bool, List[str]]:
     """
-    Validate that ``dot`` only references nodes/edges from the allowed sets.
+    Validate that ``dot`` references nothing outside the allowed sets, and — when
+    ``required_edges`` is given — that it still contains everything it should.
 
     Fails if: there's no ``digraph`` header, braces are unbalanced, any
-    referenced node id is not in ``allowed_nodes``, or any referenced edge is
-    not in ``allowed_edges``. Comparisons are case-insensitive (graph entity
-    ids are normalised lowercase, but the LLM may re-case them when echoing
-    them back). ``reasons`` is capped at MAX_VALIDATION_REASONS entries.
+    referenced node id is not in ``allowed_nodes``, any referenced edge is not
+    in ``allowed_edges``, or any edge in ``required_edges`` is absent.
+
+    The completeness half matters as much as the soundness half. Without it,
+    `digraph AttackChain { }` validates perfectly — it invents nothing — and the
+    user gets a blank diagram, which is exactly the outcome the deterministic
+    skeleton exists to prevent. Dropping the graph is as wrong as fabricating
+    it, and the prompt already instructs the model to reproduce every node and
+    edge, so requiring coverage doesn't forbid anything it was allowed to do.
+    Falling back to the skeleton on a partial answer is the safe direction: the
+    reader still gets a complete, correct diagram, just without the annotation.
+
+    Comparisons are case-insensitive (graph entity ids are normalised
+    lowercase, but the LLM may re-case them when echoing them back).
+    ``reasons`` is capped at MAX_VALIDATION_REASONS entries.
     """
     reasons: List[str] = []
 
@@ -394,5 +407,20 @@ def validate_dot(
             break
         if (src.lower(), tgt.lower()) not in allowed_edges_lower:
             reasons.append(f"unknown edge referenced: {src} -> {tgt}")
+
+    if required_edges:
+        present = {(s.lower(), t.lower()) for s, t in edges}
+        missing = sorted(
+            (s, t) for s, t in required_edges
+            if (str(s).lower(), str(t).lower()) not in present
+        )
+        if missing:
+            reasons.append(
+                f"dropped {len(missing)} of {len(required_edges)} required edges"
+            )
+            for src, tgt in missing:
+                if len(reasons) >= MAX_VALIDATION_REASONS:
+                    break
+                reasons.append(f"missing required edge: {src} -> {tgt}")
 
     return (len(reasons) == 0), reasons[:MAX_VALIDATION_REASONS]

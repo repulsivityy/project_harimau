@@ -788,7 +788,14 @@ No actionable intelligence could be synthesized. The original indicator may be m
                 )
                 raw_content = replace_dot_block(raw_content, skeleton)
             else:
-                ok, reasons = validate_dot(extracted_dot, allowed_nodes, allowed_edges)
+                # required_edges makes this a completeness check as well as a
+                # soundness one: without it an empty `digraph AttackChain { }`
+                # validates (it invents nothing) and the user gets a blank
+                # diagram — the exact failure the skeleton exists to prevent.
+                ok, reasons = validate_dot(
+                    extracted_dot, allowed_nodes, allowed_edges,
+                    required_edges=allowed_edges,
+                )
                 if ok:
                     logger.info("dot_validation_passed", job_id=job_id)
                 else:

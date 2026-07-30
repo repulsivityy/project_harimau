@@ -102,9 +102,11 @@
 *   **Change:** Generate the base DOT template directly from the `NetworkX` cache. Pass it as a structured template to the LLM for annotation to eliminate structural hallucinations.
 *   **Note (2026-07-29):** Added a validation step with a deterministic fallback, because the frontend's `d3-graphviz` `renderDot()` is worker-based — its surrounding `try/catch` never fires, so malformed DOT rendered a blank panel with no error. The skeleton is keyed on real (normalised) entity ids rather than `_node_label()` display names, which previously let two distinct entities collapse into one DOT node. `_select_diagram_edges` is now the single edge selection shared by the diagram and the prose edge list.
 
-### S4-T4 · SSE error wrapping & dynamic progress
-*   **Files:** `backend/graph/sse_wrappers.py`
+### [x] S4-T4 · SSE error wrapping & dynamic progress
+*   **Files:** `backend/utils/sse_manager.py`, `backend/graph/sse_wrappers.py`, `backend/utils/transparency.py`
 *   **Change:** Wrap `emit_event` in try/except. Make progress curves dynamically driven by `len(state["subtasks"]) * current_iteration`.
+*   **Note (2026-07-30):** Guarded at the source (`emit_event` itself) as well as in `with_sse_events` and the three `transparency.py` helpers, which are awaited from inside `@tool` bodies. Two concrete progress bugs fixed alongside: `triage` returned 10 for both `started` and `completed` (dead ternary), and the band was divided by `max_iterations` when there are actually `max_iterations + 1` specialist passes — specialists at `iteration == max_iterations` computed **103%**, clamped only client-side. Monotonicity is now enforced centrally by a per-job clamp in `sse_manager`, so it also covers the hardcoded percentages emitted from `main.py`.
+*   **Correction:** the disconnect race this was written to prevent is not reachable today — `asyncio.Queue.put` on an unbounded queue never suspends, so the broadcast loop is atomic. The real pre-existing bug the snapshot fixes is a *silent drop* (a disconnecting client mutating the list mid-iteration caused later subscribers to be skipped, 1 of 3 delivered), not an exception. The guards remain as insurance for the day the queue gains a `maxsize`.
 
 ### S4-T5 · Synthesis quality
 *   **Files:** `backend/agents/lead_hunter_synthesis.py`

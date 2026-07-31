@@ -22,6 +22,7 @@ import asyncio
 from backend.utils.graph_cache import InvestigationCache
 from backend.utils.dot_builder import (
     build_dot_skeleton,
+    demote_extra_dot_blocks,
     extract_dot_block,
     replace_dot_block,
     parse_dot_structure,
@@ -752,3 +753,180 @@ def test_synthesis_error_guard_short_circuits_before_building_a_skeleton():
     report = asyncio.run(generate_final_report_llm(state, _ExplodingLLM(), cache=cache))
     assert "Investigation Failed" in report
     assert extract_dot_block(report) is None
+
+
+# ---------------------------------------------------------------------------
+# Code-review follow-ups on this tier. Three ways unvalidated or malformed DOT
+# still reached the renderer:
+#
+#   1. extract/validate/replace only ever touch the FIRST ```dot fence, but the
+#      frontend keys off the language tag (`match[1] === 'dot'`) and renders
+#      every one, so a second block was handed to d3-graphviz having been
+#      validated against nothing.
+#   2. build_dot_skeleton escaped backslashes and quotes but not newlines, so a
+#      raw newline in an attacker-chosen filename broke the skeleton's
+#      one-statement-per-line shape — inside the very block the LLM is asked to
+#      echo back verbatim.
+#   3. DOT port/compass syntax ("a":n -> "b":f:se) tokenised the port as an
+#      identifier of its own, which read as an unknown node and silently
+#      discarded a perfectly good annotation.
+# ---------------------------------------------------------------------------
+
+def test_demote_extra_dot_blocks_leaves_a_lone_block_alone():
+    markdown = "# Report\n\n```dot\ndigraph G { }\n```\n"
+    result, demoted = demote_extra_dot_blocks(markdown)
+    assert result == markdown
+    assert demoted == 0
+
+
+def test_demote_extra_dot_blocks_retags_everything_after_the_first():
+    markdown = (
+        '```dot\ndigraph First { "a" -> "b"; }\n```\n\n'
+        "Prose in between.\n\n"
+        '```dot\ndigraph Second { "rogue" -> "nodes"; }\n```\n\n'
+        "```dot\ndigraph Third { }\n```\n"
+    )
+    result, demoted = demote_extra_dot_blocks(markdown)
+
+    assert demoted == 2
+    # Exactly one renderable diagram survives, and it is the validated one.
+    assert result.count("```dot") == 1
+    assert extract_dot_block(result) == 'digraph First { "a" -> "b"; }'
+    # The extras stay in the report as readable listings rather than vanishing.
+    assert result.count("```text") == 2
+    assert "digraph Second" in result and "digraph Third" in result
+    assert "Prose in between." in result
+
+
+def test_demote_extra_dot_blocks_carries_bodies_through_verbatim():
+    """CRLF and backslash sequences must survive the retag untouched — the body
+    is DOT, and '\\n' line-breaks inside a label are routine."""
+    body = 'digraph G { "a" [label="FILE\\nabc123"]; }'
+    markdown = f"```dot\r\nfirst\r\n```\r\n\r\n```dot\r\n{body}\r\n```\r\n"
+    result, demoted = demote_extra_dot_blocks(markdown)
+
+    assert demoted == 1
+    assert body in result
+    assert "```text\r\n" in result
+
+
+def test_synthesis_demotes_a_second_dot_block_the_llm_slipped_in():
+    cache = _build_cache()
+    _nd, _scored, _edges, skeleton = _pipeline(cache)
+
+    llm = _StubLLM(
+        f"# Final Report\n\n### 5. Attack Flow Diagram\n\n```dot\n{skeleton}\n```\n\n"
+        "### 6. Appendix\n\n"
+        '```dot\ndigraph Rogue { "attacker-owned.invalid" -> "whatever"; }\n```\n'
+    )
+    report = asyncio.run(generate_final_report_llm(_synthesis_state(), llm, cache=cache))
+
+    # The faithful first block is untouched; the rogue one can no longer reach
+    # d3-graphviz, but is still readable.
+    assert report.count("```dot") == 1
+    assert extract_dot_block(report) == skeleton
+    assert "digraph Rogue" in report
+    assert "```dot\ndigraph Rogue" not in report
+
+
+def test_synthesis_replaces_the_first_block_and_demotes_the_rest():
+    """Fallback and demotion have to compose: the first block is swapped for the
+    skeleton, and the leftovers are still neutralised."""
+    cache = _build_cache()
+    invented = (
+        "digraph AttackChain {\n"
+        f'  "{FILE_HASH}" -> "attacker-owned.invalid" [label="fabricated"];\n'
+        "}"
+    )
+    llm = _StubLLM(
+        f"# Final Report\n\n```dot\n{invented}\n```\n\n"
+        '```dot\ndigraph Rogue { "also-invented.invalid" -> "x"; }\n```\n'
+    )
+    report = asyncio.run(generate_final_report_llm(_synthesis_state(), llm, cache=cache))
+
+    assert report.count("```dot") == 1
+    kept = extract_dot_block(report)
+    assert FILE_HASH in kept and IP in kept
+    assert "attacker-owned.invalid" not in kept
+    assert "also-invented.invalid" not in kept
+
+
+ROGUE_NAME = 'invoice\n"ROGUE" -> "FABRICATED";\n.exe'
+
+
+def _build_cache_with_a_newline_in_a_filename() -> InvestigationCache:
+    cache = InvestigationCache()
+    cache.add_entity(FILE_HASH, "file", {
+        "gti_assessment": {"verdict": {"value": "VERDICT_MALICIOUS"}, "threat_score": {"value": 90}},
+        "meaningful_name": ROGUE_NAME,
+    })
+    cache.add_entity(DOMAIN_1, "domain", {
+        "gti_assessment": {"verdict": {"value": "VERDICT_SUSPICIOUS"}, "threat_score": {"value": 65}},
+    })
+    cache.add_relationship(FILE_HASH, DOMAIN_1, "contacted_domains")
+    return cache
+
+
+def test_skeleton_collapses_newlines_in_attacker_chosen_labels():
+    """A sample's filename is attacker-controlled; a newline in it must not open
+    a new line inside the skeleton the LLM has to reproduce verbatim."""
+    cache = _build_cache_with_a_newline_in_a_filename()
+    node_details, _scored, diagram_edges, skeleton = _pipeline(cache)
+
+    assert node_details[FILE_HASH]["label"] == ROGUE_NAME, "fixture no longer exercises the bug"
+
+    # The whole label stays on the file's own declaration line.
+    rogue_lines = [line for line in skeleton.splitlines() if "ROGUE" in line]
+    assert len(rogue_lines) == 1, skeleton
+    assert rogue_lines[0].strip().startswith(f'"{FILE_HASH}"')
+    assert rogue_lines[0].rstrip().endswith("];")
+    # Nothing that reads as a fabricated statement is left standing on its own.
+    assert not any(line.strip().startswith('"FABRICATED"') for line in skeleton.splitlines())
+
+
+def test_skeleton_with_a_newline_label_still_validates_against_itself():
+    cache = _build_cache_with_a_newline_in_a_filename()
+    node_details, _scored, diagram_edges, skeleton = _pipeline(cache)
+    allowed_nodes, allowed_edges = _allowed_sets(node_details, diagram_edges, FILE_HASH)
+
+    ok, reasons = validate_dot(skeleton, allowed_nodes, allowed_edges,
+                              required_edges=allowed_edges)
+    assert ok, reasons
+
+
+def test_parse_dot_structure_reads_through_port_and_compass_suffixes():
+    nodes, edges = parse_dot_structure(
+        'digraph G {\n'
+        '  "a":n -> "b":port:se [label="x"];\n'
+        '  c:w -> "a";\n'
+        '  "d":sw [shape=box];\n'
+        '}'
+    )
+    assert nodes == {"a", "b", "c", "d"}, sorted(nodes)
+    assert edges == {("a", "b"), ("c", "a")}
+
+
+def test_port_stripping_leaves_colons_inside_quoted_url_ids_alone():
+    """The colons in "http://u1.example.com/..." belong to the id, not a port —
+    port stripping only applies to a colon that follows a complete token."""
+    nodes, edges = parse_dot_structure(
+        f'digraph G {{ "{FILE_HASH}":s -> "{URL_ID}":n:w [label="contacted_urls"]; }}'
+    )
+    assert nodes == {FILE_HASH, URL_ID}, sorted(nodes)
+    assert edges == {(FILE_HASH, URL_ID)}
+
+
+def test_validate_dot_accepts_an_annotation_that_uses_ports():
+    cache = _build_cache()
+    node_details, _scored, diagram_edges, _skeleton = _pipeline(cache)
+    allowed_nodes, allowed_edges = _allowed_sets(node_details, diagram_edges, FILE_HASH)
+
+    edge_lines = "\n".join(
+        f'  "{e["source"]}":s -> "{e["target"]}":n [label="Annotated"];'
+        for e in diagram_edges
+    )
+    annotated = f"digraph AttackChain {{\n  rankdir=TB;\n{edge_lines}\n}}"
+
+    ok, reasons = validate_dot(annotated, allowed_nodes, allowed_edges,
+                              required_edges=allowed_edges)
+    assert ok, reasons

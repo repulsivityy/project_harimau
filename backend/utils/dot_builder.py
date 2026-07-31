@@ -49,6 +49,13 @@ MAX_VALIDATION_REASONS = 10
 # ```dot block is the correct repair rather than something to paper over here.
 _DOT_FENCE_RE = re.compile(r"```dot[ \t]*\r?\n(.*?)```", re.DOTALL)
 
+# Extra ```dot blocks are retagged with this language instead of being deleted
+# (see demote_extra_dot_blocks). NOT an empty info string: the frontend treats a
+# fence with no language as *inline* code (`isInline = !match && !className`),
+# so a whole diagram would render as one run-on span; a named language keeps it
+# in the <pre> branch.
+_DEMOTED_FENCE_LANG = "text"
+
 # ---------------------------------------------------------------------------
 # Skeleton construction
 # ---------------------------------------------------------------------------
@@ -72,6 +79,25 @@ def _escape(value: Any) -> str:
     otherwise the backslash introduced by quote-escaping would itself get
     re-escaped."""
     return str(value).replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _collapse_label_whitespace(value: Any) -> str:
+    """Flatten line/field breaks out of a display label.
+
+    Display labels are attacker-chosen (``meaningful_name`` / ``last_final_url``
+    / ``host_name``), and _escape only handles backslashes and quotes — a raw
+    newline in a filename would therefore survive into the skeleton's
+    ``label="..."`` and break the one-statement-per-line shape of the very block
+    the LLM is asked to echo back verbatim, inviting a mangled re-emission that
+    then fails validation.
+
+    Mirrors ``_sanitise_label`` in lead_hunter_synthesis.py, reimplemented here
+    rather than imported: this module deliberately depends on nothing in
+    backend.agents (see the module docstring)."""
+    text = str(value)
+    for ch in ("\r\n", "\r", "\n", "\t"):
+        text = text.replace(ch, " ")
+    return text.strip()
 
 
 def _unescape(value: str) -> str:
@@ -137,8 +163,12 @@ def build_dot_skeleton(
         entity_type = node.get("type", "unknown")
         display_label = node.get("label")
 
-        label_lines = [str(entity_type).upper() or "UNKNOWN", str(real_id)]
-        if display_label and display_label != real_id:
+        label_lines = [
+            _collapse_label_whitespace(entity_type).upper() or "UNKNOWN",
+            _collapse_label_whitespace(real_id),
+        ]
+        display_label = _collapse_label_whitespace(display_label) if display_label else ""
+        if display_label and display_label != label_lines[1]:
             label_lines.append(f"({display_label})")
         label_text = "\\n".join(_escape(part) for part in label_lines)
 
@@ -196,6 +226,41 @@ def replace_dot_block(markdown: str, dot: str) -> str:
     return f"{markdown}\n\n### 5. Attack Flow Diagram\n\n```dot\n{dot}\n```\n"
 
 
+def demote_extra_dot_blocks(markdown: str) -> Tuple[str, int]:
+    """
+    Retag every ```dot block *after the first* as ```text, returning the
+    rewritten markdown and the number of blocks demoted.
+
+    extract_dot_block / validate_dot / replace_dot_block all act on the first
+    fence only, but the frontend keys off the language tag, not the position
+    (`match[1] === 'dot'`), and so hands EVERY dot block to d3-graphviz. A
+    second block would therefore reach the renderer having been validated
+    against nothing — precisely the failure this module exists to prevent — and
+    a malformed one renders as a silent blank panel.
+
+    Demoting rather than deleting keeps the report readable: the extra block is
+    usually a partial or restated diagram that still carries prose value, and
+    dropping content the model wrote is a bigger surprise than showing it as a
+    code listing. Only the opening fence's language tag is rewritten; the body
+    is carried through verbatim so backslashes in the DOT are untouched.
+    """
+    if not markdown:
+        return markdown, 0
+
+    seen = 0
+    demoted = 0
+
+    def _retag(match: re.Match) -> str:
+        nonlocal seen, demoted
+        seen += 1
+        if seen == 1:
+            return match.group(0)
+        demoted += 1
+        return f"```{_DEMOTED_FENCE_LANG}{match.group(0)[len('```dot'):]}"
+
+    return _DOT_FENCE_RE.sub(_retag, markdown), demoted
+
+
 # ---------------------------------------------------------------------------
 # DOT structure parsing + validation
 # ---------------------------------------------------------------------------
@@ -226,8 +291,18 @@ _ID = r'(?:"(?:[^"\\]|\\.)*"|[A-Za-z_0-9][\w.]*|-\.?\d[\d.]*)'
 # failed validation and silently discarded the LLM's whole annotation.
 _ATTR_ASSIGNMENT_RE = re.compile(rf"{_ID}\s*=\s*{_ID}")
 _EDGE_OP = r"(?:->|--)"
-_EDGE_CHAIN_RE = re.compile(rf"{_ID}(?:\s*{_EDGE_OP}\s*{_ID})+")
+# An endpoint may carry a port and an optional compass point ("a":n -> "b":f:se).
+# Without this the port tokenises as an identifier of its own, reads as an
+# unknown node, and validate_dot silently discards the LLM's whole annotation.
+# The suffix is matched only OUTSIDE the head token, so the colons inside a
+# quoted URL id ("http://evil.example/p") are still part of the id. Whitespace
+# around ":" is horizontal-only: allowing newlines would let a colon at the
+# start of a line glue two unrelated statements into one bogus token.
+_PORT = rf"(?:[ \t]*:[ \t]*{_ID}){{0,2}}"
+_ID_PORT = rf"{_ID}{_PORT}"
+_EDGE_CHAIN_RE = re.compile(rf"{_ID_PORT}(?:\s*{_EDGE_OP}\s*{_ID_PORT})+")
 _ID_RE = re.compile(_ID)
+_ID_PORT_RE = re.compile(_ID_PORT)
 # Bare words that are DOT keywords, never node references. `node`/`edge`/`graph`
 # survive as bare tokens once their `[...]` attribute list has been stripped.
 _RESERVED_WORDS = {"node", "edge", "graph", "digraph", "subgraph", "strict"}
@@ -280,6 +355,17 @@ def _strip_comments(text: str) -> str:
     return "".join(out)
 
 
+def _head_id(token: str) -> str:
+    """Drop a ``:port[:compass]`` suffix, keeping the node id itself.
+
+    Re-matching _ID against the head is what makes this quote-aware: a quoted id
+    is consumed whole (colons inside it belong to the id), so only a colon that
+    follows a *complete* token is treated as a port separator."""
+    stripped = token.strip()
+    match = _ID_RE.match(stripped)
+    return match.group(0) if match else stripped
+
+
 def _clean_id(raw: str) -> Optional[str]:
     """Normalise one parsed DOT identifier token, or None if it isn't a node ref."""
     token = raw.strip()
@@ -316,7 +402,8 @@ def parse_dot_structure(dot: str) -> Tuple[Set[str], Set[Tuple[str, str]]]:
       5. Strip ``key=value`` attribute statements *generically* — no allowlist.
       6. In what remains, edge chains (``a -> b -> c``, including ``--``)
          contribute both their pairwise edges and their endpoints; any other
-         surviving identifier is a standalone node declaration.
+         surviving identifier is a standalone node declaration. Endpoints keep
+         only their head id — a ``:port[:compass]`` suffix is not a node.
     """
     text = _strip_comments(dot or "")
     text = _HTML_VALUE_RE.sub(" ", text)
@@ -331,7 +418,7 @@ def parse_dot_structure(dot: str) -> Tuple[Set[str], Set[Tuple[str, str]]]:
     # Edge chains first, then blank them out so their endpoints aren't
     # re-counted by the standalone-declaration pass below.
     def _consume_chain(match: re.Match) -> str:
-        chain = [_clean_id(tok) for tok in _ID_RE.findall(match.group(0))]
+        chain = [_clean_id(_head_id(tok)) for tok in _ID_PORT_RE.findall(match.group(0))]
         chain = [c for c in chain if c is not None]
         for src, tgt in zip(chain, chain[1:]):
             edges.add((src, tgt))
@@ -340,8 +427,8 @@ def parse_dot_structure(dot: str) -> Tuple[Set[str], Set[Tuple[str, str]]]:
 
     text = _EDGE_CHAIN_RE.sub(_consume_chain, text)
 
-    for token in _ID_RE.findall(text):
-        cleaned = _clean_id(token)
+    for token in _ID_PORT_RE.findall(text):
+        cleaned = _clean_id(_head_id(token))
         if cleaned is not None:
             node_ids.add(cleaned)
 

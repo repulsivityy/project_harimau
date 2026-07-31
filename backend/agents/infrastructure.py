@@ -268,6 +268,11 @@ async def infrastructure_node(state: AgentState):
             session = await stack.enter_async_context(mcp_manager.get_session("gti"))
             shodan_session = await stack.enter_async_context(mcp_manager.get_session("shodan"))
             
+            # Every tool below reports failure as json.dumps({"error": ...}) —
+            # the same shape tool_timeout returns — so the model sees one
+            # parseable failure envelope rather than a bare exception string it
+            # has to guess at, and json.dumps (not an f-string) is what keeps a
+            # quote inside the message from producing invalid JSON.
             # Domain Tools
             @tool
             @tool_timeout(logger=logger)
@@ -279,7 +284,7 @@ async def infrastructure_node(state: AgentState):
                 try: 
                     res = await session.call_tool("get_domain_report", arguments={"domain": domain})
                     return res.content[0].text if res.content else "{}"
-                except Exception as e: return str(e)
+                except Exception as e: return json.dumps({"error": str(e)})
 
             @tool
             @tool_timeout(logger=logger)
@@ -321,7 +326,7 @@ async def infrastructure_node(state: AgentState):
                         cache.add_relationship(domain, eid, relationship, {"source": "infrastructure_analysis_tool"})
                         found.append(eid)
                     return json.dumps(found)
-                except Exception as e: return str(e)
+                except Exception as e: return json.dumps({"error": str(e)})
                 
             # IP Tools
             @tool
@@ -334,7 +339,7 @@ async def infrastructure_node(state: AgentState):
                 try: 
                     res = await session.call_tool("get_ip_address_report", arguments={"ip_address": ip_address})
                     return res.content[0].text if res.content else "{}"
-                except Exception as e: return str(e)
+                except Exception as e: return json.dumps({"error": str(e)})
 
             @tool
             @tool_timeout(logger=logger)
@@ -368,7 +373,7 @@ async def infrastructure_node(state: AgentState):
                         cache.add_relationship(ip_address, eid, relationship, {"source": "infrastructure_analysis_tool"})
                         found.append(eid)
                     return json.dumps(found)
-                except Exception as e: return str(e)
+                except Exception as e: return json.dumps({"error": str(e)})
 
             # URL Tools
             @tool
@@ -381,7 +386,7 @@ async def infrastructure_node(state: AgentState):
                 try: 
                     res = await session.call_tool("get_url_report", arguments={"url": url})
                     return res.content[0].text if res.content else "{}"
-                except Exception as e: return str(e)
+                except Exception as e: return json.dumps({"error": str(e)})
 
             @tool
             @tool_timeout(logger=logger)
@@ -415,7 +420,7 @@ async def infrastructure_node(state: AgentState):
                         cache.add_relationship(url, eid, relationship, {"source": "infrastructure_analysis_tool"})
                         found.append(eid)
                     return json.dumps(found)
-                except Exception as e: return str(e)
+                except Exception as e: return json.dumps({"error": str(e)})
 
             @tool
             @tool_timeout(logger=logger)
@@ -427,7 +432,7 @@ async def infrastructure_node(state: AgentState):
                 try:
                     res = await webrisk.evaluate_uri(url)
                     return json.dumps(res)
-                except Exception as e: return str(e)
+                except Exception as e: return json.dumps({"error": str(e)})
 
             @tool
             @tool_timeout(logger=logger)
@@ -439,7 +444,7 @@ async def infrastructure_node(state: AgentState):
                 try:
                     res = await shodan_session.call_tool("ip_lookup", arguments={"ip": ip})
                     return res.content[0].text if res.content else "{}"
-                except Exception as e: return str(e)
+                except Exception as e: return json.dumps({"error": str(e)})
 
             @tool
             @tool_timeout(logger=logger)
@@ -451,7 +456,7 @@ async def infrastructure_node(state: AgentState):
                 try:
                     res = await shodan_session.call_tool("dns_lookup", arguments={"hostnames": hostnames})
                     return res.content[0].text if res.content else "{}"
-                except Exception as e: return str(e)
+                except Exception as e: return json.dumps({"error": str(e)})
 
             @tool
             @tool_timeout(logger=logger)
@@ -463,7 +468,7 @@ async def infrastructure_node(state: AgentState):
                 try:
                     res = await shodan_session.call_tool("reverse_dns_lookup", arguments={"ips": ips})
                     return res.content[0].text if res.content else "{}"
-                except Exception as e: return str(e)
+                except Exception as e: return json.dumps({"error": str(e)})
 
             tools = [
                 get_domain_report, get_entities_related_to_a_domain,

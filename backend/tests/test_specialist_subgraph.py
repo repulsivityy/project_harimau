@@ -16,6 +16,7 @@ Plain pytest, no pytest-asyncio dependency: coroutines are driven with
 asyncio.run(...) inside ordinary sync test functions.
 """
 import asyncio
+import inspect
 import json
 
 import backend.utils.agent_utils as agent_utils
@@ -330,3 +331,27 @@ def test_infra_route_after_agent_routes_to_tools():
         "max_iterations": 10,
     }
     assert infrastructure.route_after_agent(sub_state) == "tools"
+
+
+# ---------------------------------------------------------------------------
+# 8. One error envelope across every specialist tool.
+#
+# tool_timeout already returns json.dumps({"error": ...}), but the tool bodies
+# disagreed with it and with each other: malware.py hand-built the JSON with an
+# f-string, so an exception message containing a double quote produced a
+# payload the model could not parse; infrastructure.py returned a bare str(e)
+# with no envelope at all, which reads as tool *output* rather than a failure.
+#
+# Asserted over the module source because the tool bodies are defined inside
+# the node function, closed over a live MCP session — there is no handle to the
+# error branch without standing up a session.
+# ---------------------------------------------------------------------------
+
+def test_specialist_tool_error_paths_use_one_json_envelope():
+    for module in (malware, infrastructure):
+        source = inspect.getsource(module)
+        name = module.__name__
+        assert 'return json.dumps({"error": str(e)})' in source, name
+        assert "return str(e)" not in source, name
+        # The old hand-built f-string envelope: unescaped interpolation.
+        assert '{{"error": "{str(e)}"}}' not in source, name

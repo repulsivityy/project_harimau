@@ -8,6 +8,7 @@ from backend.utils.verdict_engine import build_escalation_context
 from backend.utils.signal_filter import build_promotion_context
 from backend.utils.dot_builder import (
     build_dot_skeleton,
+    demote_extra_dot_blocks,
     extract_dot_block,
     replace_dot_block,
     validate_dot,
@@ -142,7 +143,7 @@ You have been given an **Attack Flow Diagram Skeleton** in the context below —
     - Styling attributes (colors, shapes, fonts, penwidth, etc.) to improve readability.
     - Grouping nodes into `subgraph cluster_*` blocks to convey attack phases (e.g. delivery, execution, C2, objectives).
     - Refining edge `label=` text to name the relationship more precisely (e.g. `resolves_to` -> "Resolves To C2").
-- Wrap the output in a ```dot ... ``` block.
+- Wrap the output in a ```dot ... ``` block. Emit exactly ONE such block in the whole report — any further ```dot block is demoted to a plain listing and will not render.
 - Use quotes for any label with spaces.
 - **Layout Optimization:**
     - Use `rankdir=TB` (top to bottom) for a clearer, vertical flow.
@@ -801,6 +802,13 @@ No actionable intelligence could be synthesized. The original indicator may be m
                 else:
                     logger.warning("dot_validation_failed", job_id=job_id, reasons=reasons)
                     raw_content = replace_dot_block(raw_content, skeleton)
+
+            # Everything above only ever touches the FIRST ```dot fence, but the
+            # frontend renders every one of them, so a second block would reach
+            # d3-graphviz unvalidated. Demote the extras to ```text listings.
+            raw_content, demoted = demote_extra_dot_blocks(raw_content)
+            if demoted:
+                logger.warning("dot_extra_blocks_demoted", job_id=job_id, count=demoted)
         except Exception as dot_error:
             logger.error("dot_validation_error", job_id=job_id, error=str(dot_error))
             # raw_content is returned unmodified — a validator bug must never

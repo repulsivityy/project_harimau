@@ -106,7 +106,7 @@ For detailed milestone tracking, see [Implementation Plan](docs/implementation_p
 2. **Store All**: Full attributes cached in NetworkX graph (LangGraph state)
 3. **Query Minimal**: LLM receives filtered summaries (token-efficient)
 4. **Enrich On-Demand**: Specialists pull from cache without re-fetching
-5. **Synthesize**: Lead Hunter combines triage findings, specialist summaries, and NetworkX graph-derived high-signal nodes and key edges into the final report
+5. **Synthesize**: Lead Hunter combines triage findings, specialist summaries, and a NetworkX graph-derived edge fact table into the final report, and annotates a deterministic Graphviz skeleton (built and validated by the backend, not authored freehand) for the attack-flow diagram
 
 ### Agent Philosophy
 

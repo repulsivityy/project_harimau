@@ -1,8 +1,10 @@
 # Agent Implementation Reference
 
-*Supplement to [architecture.md](./architecture.md) - Last updated: 2026-05-11*
+*Supplement to [architecture.md](./architecture.md) - Last updated: 2026-07-31*
 
 This document provides implementation-level details for the Harimau specialist agents.
+
+> **Note (2026-07-31)**: both specialists now run as native LangGraph `ToolNode` sub-graphs rather than the hand-rolled `while`/`for` agent loop shown in Phase 3 below (migrated 2026-06-04; see `docs/architecture.md` §4.2 and `docs/CHANGELOG.md`). `run_tools_parallel()` and `cap_context_window()`, referenced in a few places below, were dead code by that point and have since been deleted — per-tool timeout/error containment is now `tool_timeout()` (see "Shared Agent Utilities"), applied directly under each tool's `@tool` decorator instead of a shared dispatcher. The rest of this document (target identification, JSON parsing, error-envelope shape, tool argument mapping) still describes the current implementation.
 
 ---
 
@@ -25,6 +27,7 @@ async def specialist_node(state: AgentState):
 ```python
 async with mcp_manager.get_session("gti") as session:
     @tool
+    @tool_timeout(logger=logger)  # 20s wall-clock budget + catch-all (agent_utils.py)
     async def get_resource(identifier: str):
         """Tool description for LLM."""
         try:
@@ -45,7 +48,7 @@ async with mcp_manager.get_session("gti") as session:
             
             return json.dumps(found) # Return lightweight ID array to LLM
         except Exception as e:
-            return str(e)
+            return json.dumps({"error": str(e)})  # uniform envelope — same shape tool_timeout returns
 ```
 
 ### Phase 3: Agent Loop (10 Iterations)
@@ -155,19 +158,16 @@ Key behaviours:
 
 ## Shared Agent Utilities (`backend/utils/agent_utils.py`)
 
-All four functions below are imported by both specialist agents. Do not duplicate them locally.
+All functions below are imported by both specialist agents. Do not duplicate them locally.
 
 | Function | Purpose |
 |---|---|
 | `FINAL_ITERATION_PROMPT` | Standard string appended on the last iteration to force JSON output |
 | `parse_llm_json(content)` | Normalise Vertex content, strip fences, return `(raw_text, dict)` |
-| `run_tools_parallel(tool_dispatch, tool_calls, agent_name, logger, timeout=20.0)` | `asyncio.gather` with per-tool timeout; `agent_name` scopes log keys |
-| `cap_context_window(messages, system_count=2, tail_size=10)` | Keep first N + last N messages; trim tail to start on AIMessage |
+| `tool_timeout(seconds=20.0, logger=None)` | Decorator applied under `@tool` on every specialist tool. Bounds the call with `asyncio.wait_for` and a catch-all; on timeout or exception returns `json.dumps({"error": ...})` instead of raising, so LangGraph's `ToolNode` never aborts the sub-graph over one bad tool call. (`CancelledError` still propagates — it derives from `BaseException`.) |
 | `push_to_rich_intel(relationships_data, rel_name, entity_type, value, source_id, attributes)` | Deduplicating append — skips if same `id` + `source_id` already present |
 
-### `cap_context_window` — why it trims to AIMessage
-
-The LangGraph / Vertex API rejects a `ToolMessage` that has no preceding `AIMessage` in the same context slice. When slicing the tail, the function advances past any leading `ToolMessage`s so the window always opens on an `AIMessage`.
+`run_tools_parallel()` and `cap_context_window()` — the dispatcher and message-window trimmer this table used to document — were deleted as dead code once the `ToolNode` migration made them unreachable (no remaining callers). Per-tool timeout/error containment moved to `tool_timeout()` above; message-window management is now `ToolNode`'s.
 
 ---
 
@@ -188,6 +188,7 @@ The LangGraph / Vertex API rejects a `ToolMessage` that has no preceding `AIMess
 
 ```python
 @tool
+@tool_timeout(logger=logger)  # 20s wall-clock budget + catch-all (agent_utils.py)
 async def get_ip_address_report(ip_address: str):
     """
     Get threat intelligence report for an IP address.
@@ -206,7 +207,7 @@ async def get_ip_address_report(ip_address: str):
         return res.content[0].text 
     except Exception as e:
         logger.warning("tool_error", tool="get_ip_address_report", error=str(e))
-        return str(e)
+        return json.dumps({"error": str(e)})  # uniform envelope — same shape tool_timeout returns
 ```
 
 ---
@@ -218,8 +219,9 @@ async def get_ip_address_report(ip_address: str):
 1. **Tool Layer** (Graceful Degradation)
    ```python
    except Exception as e:
-       return str(e)  # Return error as string, let agent decide
+       return json.dumps({"error": str(e)})  # uniform envelope; let agent decide
    ```
+   All 15 specialist tool closures return this exact shape on failure (previously a mix of a bare exception string and an f-string-built pseudo-JSON object) — `tool_timeout()` (see "Shared Agent Utilities" above) returns the same shape on a timeout.
 
 2. **Parsing Layer** (Detailed Context)
    ```python

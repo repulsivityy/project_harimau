@@ -41,7 +41,7 @@ The Lead Hunter must produce a **comprehensive threat intelligence analysis**, n
 *   **Threat Profiling**: Attribution, sophistication assessment, campaign classification
 *   **Infrastructure Mapping**: DNS/IP relationships, hosting patterns, shared infrastructure
 *   **Malware Intelligence**: Capabilities, evasion techniques, code similarities, IOC expansion
-*   **Attack Flow Diagram**: Visual representation of infrastructure and attack chain  (Graphviz)
+*   **Attack Flow Diagram**: Visual representation of infrastructure and attack chain (Graphviz), deterministically grounded in the investigation graph — the backend builds the diagram's node/edge set directly from graph data, the LLM annotates it (styling, phase grouping, edge wording) rather than authoring it freehand, and the annotation is validated before it ships; an incomplete or invented diagram automatically falls back to the deterministic version so the diagram is never blank or inconsistent with the underlying findings
 *   **Intelligence Gaps**: Missing data, research pivots, recommended next steps
 *   **Attribution & Context**: Campaign indicators, related threat actors, MITRE ATT&CK mapping
 *   **IOC Summary**: High-confidence vs. low-confidence indicators for distribution
@@ -86,8 +86,9 @@ The Lead Hunter must produce a **comprehensive threat intelligence analysis**, n
     *   **Context**: All logs must carry a `trace_id` or `job_id` to correlate Backend actions with Frontend requests.
 *   **Resiliency**:
     *   **State Recovery**: LangGraph checkpoints are saved to Postgres via `AsyncPostgresSaver`.
+    *   **Tool Containment**: every specialist tool call is bounded by a wall-clock timeout with graceful degradation to a structured error result, so one slow or failing enrichment call cannot abort the surrounding investigation.
 *   **Frontend UX**:
-    *   **Real-time Updates**: Streaming architecture implemented using Server-Sent Events (SSE) providing sub-second updates of agent tasks and tool calls.
+    *   **Real-time Updates**: Streaming architecture implemented using Server-Sent Events (SSE) providing sub-second updates of agent tasks and tool calls. Progress updates are monotonic and bounded (0–100%) per investigation, and a transient event-delivery failure (e.g. a disconnecting client) never aborts the underlying hunt.
 
 ## 5. Testing Strategy
 We adopt a "Verify-as-we-Build" approach.

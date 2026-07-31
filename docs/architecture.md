@@ -49,8 +49,11 @@ graph TD
   - `main.py`: API Endpoints with enhanced graph visualization.
   - `graph/workflow.py`: LangGraph State Machine (Iterative Loop).
   - `graph/state.py`: AgentState definition (includes NetworkX graph).
-  - `agents/`: Agent implementations (Triage, Malware, Infrastructure).
+  - `agents/`: Agent implementations (Triage, Malware, Infrastructure, Lead Hunter).
   - `tools/`: Direct GTI API wrappers with async support.
+  - `utils/agent_utils.py`: Shared agent helpers, including `tool_timeout()` — wraps every specialist tool with a wall-clock budget and catch-all so a slow or failing tool degrades to a JSON error string instead of aborting the specialist's `ToolNode` sub-graph.
+  - `utils/dot_builder.py`: Builds and validates the deterministic attack-flow diagram (see §2.9).
+  - `utils/sse_manager.py`: SSE broadcast + progress tracking (see §2.7).
 * **Logging**: Structured JSON logging (`utils/logger.py`).
 
 #### Data Layer: Store First, Summarize Second
@@ -178,6 +181,7 @@ The frontend maps the `investigation_graph` JSONB from the backend into ReactFlo
   - Tool call tracing (status, entity counts, samples).
   - LLM reasoning capture (raw responses).
 * **Performance**: Sub-3s latency via parallel "Super-Bundle" enrichment.
+* **SSE Delivery Guarantees** (`utils/sse_manager.py`): `emit_event` never raises to its caller — a broadcast failure is logged, not propagated, so a browser tab closing mid-hunt cannot abort the investigation. Before broadcasting, it snapshots the subscriber list, which fixes a silent-drop bug where a client disconnecting mid-iteration shortened the list under the loop and caused later subscribers to be skipped. Progress values are clamped monotone and bounded to ≤100% centrally, per job (`_last_progress`, cleared by `clear_history`) — this covers both the dynamic curve computed by `get_progress_estimate()` (`graph/sse_wrappers.py`) and the hardcoded percentages emitted from `main.py`.
 
 ### 2.8 CI/CD Deployment Flow
 
@@ -194,6 +198,32 @@ To support selective and automated deployments, the application uses **Google Cl
 **Why BACKEND_URL is a runtime env var, not a build arg**: The frontend uses a catch-all App Router API route (`src/app/api/[...path]/route.ts`) that reads `process.env.BACKEND_URL` at request time — not during `next build`. This means the correct backend URL is always used without needing to rebuild the image when the backend URL changes. The old `next.config.ts` rewrites approach baked the URL at build time, which caused the proxy to permanently point to `http://localhost:8080`.
 
 This ensures that updating an agent (backend) does not trigger a needless rebuild of the frontend, keeping deployments fast and isolated.
+
+### 2.9 Deterministic Attack-Flow Diagram Pipeline
+
+The Lead Hunter's attack-flow diagram is no longer authored freehand by the LLM. `backend/utils/dot_builder.py` builds a complete, deterministic Graphviz `digraph` skeleton directly from the same edge selection used for the prose edge fact table (see §4.2 "Graph Grounding"), keyed on real, normalised (lowercase) entity ids rather than display labels — so two distinct entities can never collapse into a single DOT node.
+
+```mermaid
+graph LR
+    Graph[NetworkX Investigation Graph] -->|_select_diagram_edges| Skeleton[build_dot_skeleton]
+    Skeleton -->|embedded in synthesis prompt| LLM[Lead Hunter LLM annotates]
+    LLM -->|returns dot fenced block| Parse[parse_dot_structure]
+    Parse --> Validate{validate_dot: sound AND complete?}
+    Validate -->|pass| Ship[Ship the LLM's annotation]
+    Validate -->|fail or missing block| Fallback[replace_dot_block: substitute skeleton]
+    Ship --> Demote[demote_extra_dot_blocks]
+    Fallback --> Demote
+    Demote --> Frontend[d3-graphviz renderer]
+```
+
+1. **Build** (`build_dot_skeleton`): one node per entity referenced by the selected edges (plus the root IOC, even if it has no edges of its own), shaped and coloured by entity type and verdict; one edge per selected relationship. Deterministic — node declarations are sorted by id, so identical input always produces byte-identical output.
+2. **Annotate**: the skeleton is embedded in the synthesis prompt; the LLM is instructed to annotate it (styling, `subgraph cluster_*` phases, edge-label wording) rather than invent a diagram from scratch.
+3. **Parse** (`parse_dot_structure`): the returned ` ```dot ` block is parsed with a permissive-but-sound statement scanner — comments, HTML-like attribute values, generic `key=value` attributes, subgraph/graph headers, quoted and bare identifiers, and `node:port:compass` syntax are all handled — to recover the exact node/edge set the LLM referenced.
+4. **Validate** (`validate_dot`): checked for both soundness (nothing invented outside the skeleton's node/edge set) and completeness (no skeleton edge silently dropped). Comparisons are case-insensitive.
+5. **Fallback** (`replace_dot_block`): on any validation failure, or if the LLM omitted a ` ```dot ` block entirely, the skeleton itself is substituted in — so the diagram is never blank or inconsistent with the graph.
+6. **Demote extras** (`demote_extra_dot_blocks`): any ` ```dot ` fence after the first is retagged ` ```text ` before the report is returned. The frontend keys off the language tag, not fence position, and would otherwise hand a second, unvalidated diagram straight to the renderer.
+
+This closes a silent failure mode: the frontend's `d3-graphviz` `renderDot()` is worker-based, so its surrounding `try/catch` never fires — malformed DOT used to render a blank panel with no visible error.
 
 ---
 
@@ -280,7 +310,7 @@ This ensures that updating an agent (backend) does not trigger a needless rebuil
 2. **Store Everything**: NetworkX graph caches complete attributes.
 3. **Query Minimal**: LLM receives filtered 9-field summaries.
 4. **Enrich On-Demand**: Specialists pull full data from cache.
-5. **Synthesize with All Context**: Lead Hunter uses the persisted NetworkX investigation graph (via deterministic edge tuples) together with triage findings and specialist summaries to produce the final report.
+5. **Synthesize with All Context**: Lead Hunter uses the persisted NetworkX investigation graph (via an id-keyed edge fact table) together with triage findings and specialist summaries to produce the final report.
 
 **Benefits**:
 - No re-fetching (faster, fewer API calls)
@@ -307,11 +337,12 @@ This ensures that updating an agent (backend) does not trigger a needless rebuil
 - **Reporting Strategy**: Specialist Agents generate structured Python reports instead of embedding Markdown in JSON. This prevents parsing errors and ensures 100% stability.
 - **Data Sync**: Findings are "Double Committed" to the NetworkX cache (Data Layer) and the LangGraph state (Control Layer) for immediate frontend rendering.
 - **Token Budget**: No limits (focused analysis on 5-10 entities).
+- **Tool Containment**: every specialist tool call (both agents, 15 tools total) is wrapped with a 20s wall-clock timeout and catch-all (`tool_timeout()` in `utils/agent_utils.py`, applied under `@tool`). On timeout or exception it returns `json.dumps({"error": ...})` instead of raising, so LangGraph's `ToolNode` never aborts the sub-graph over one slow or failing tool — the specialist still completes with partial data rather than collapsing into a `System Error` verdict.
 
 **Lead Hunter** (Synthesis & Planning):
 - **Planning Mode**: Consumes triage findings and specialist reports to identify intelligence gaps and prioritize next-iteration leads.
 - **Synthesis Mode**: Consumes the triage executive summary, specialist summaries, and a compact graph summary.
-- **Graph Grounding**: Receives machine-readable edge tuples (`source -> target [label]`) from the actual NetworkX graph to prevent hallucination of relationships in the final Graphviz diagram.
+- **Graph Grounding**: An id-keyed edge fact table (`_build_edge_tuples` in `lead_hunter_synthesis.py`) gives the LLM one line per selected edge with both endpoints' type, verdict and threat score, the relationship, the target's malicious-vendor count, and a `high_signal` flag — replacing the old label-keyed edge list. The attack-flow diagram is grounded independently and more strictly: the LLM annotates a deterministic Graphviz skeleton built from the same edge selection and validated against it (see §2.9), rather than freehand-authoring a diagram from the edge tuples.
 - **High-Signal Node Rule**: Node must have `gti_score > 60`, and must satisfy at least 2 of: `malicious_count > 5`, appears in multiple important relationship types, or bridges malware and infrastructure entity types.
 - Produces the final Markdown intelligence report using all context layers.
 
@@ -418,6 +449,16 @@ This ensures that updating an agent (backend) does not trigger a needless rebuil
 - **Operator default**: `HUNT_ITERATIONS` env var on the Cloud Run service (no redeployment for tuning).
 - **User control**: Sidebar slider (1–5) passed as `max_iterations` in the POST payload.
 - **Impact**: Single source of truth for depth. Cost vs. thoroughness is now a per-investigation analyst decision.
+
+### Attack-Flow Diagram Grounding, Tool Containment & SSE Robustness (Jul 2026)
+- **Problem 1 — Diagram hallucination and silent blank panels**: the Lead Hunter's attack-flow diagram was authored entirely freehand by the LLM, grounded only by a label-keyed edge list nothing validated. Two distinct entities could collapse into one DOT node, and because the frontend's `d3-graphviz` `renderDot()` is worker-based, malformed DOT rendered a blank panel with no visible error.
+  - **Fix**: new `backend/utils/dot_builder.py` builds a deterministic DOT skeleton from the graph's real entity ids; the LLM annotates it; the annotation is parsed and validated for both soundness and completeness against the skeleton's own node/edge set, with a deterministic fallback to the skeleton on any failure. See §2.9.
+- **Problem 2 — A single failing specialist tool could abort the whole hunt**: the native `ToolNode` sub-graph migration (2026-06-04) dropped the per-tool timeout and catch-all that a prior helper used to enforce; `ToolNode`'s default error handling re-raises anything that isn't its own `ToolInvocationError`.
+  - **Fix**: `tool_timeout()` in `utils/agent_utils.py`, applied under `@tool` on all 15 specialist tool closures — bounds each call to 20s and converts any exception to a `json.dumps({"error": ...})` result instead of letting it propagate.
+- **Problem 3 — SSE broadcast failures and a broken progress curve**: `emit_event` could raise into callers (including the node-`_started` emit, which sat outside the node's own `try`, so a broadcast failure could stop a node from running at all), a disconnecting client could silently drop later subscribers mid-broadcast, and the progress estimate divided its 15–90% band by `max_iterations` when there are actually `max_iterations + 1` specialist passes — specialists at the final iteration could compute over 100%, clamped only client-side.
+  - **Fix**: `emit_event` never raises; the subscriber list is snapshotted before broadcast; progress is clamped monotone and ≤100% centrally, per job, in `sse_manager`. See §2.7.
+- **Also**: consolidated the two overlapping, drifting edge-context blocks the synthesis LLM used to see into a single id-keyed edge fact table (`_build_edge_tuples`); pinned `backend/requirements.txt` (previously fully unpinned) after `mcp`'s latest release removed the `mcp.server.fastmcp` module both embedded MCP servers import.
+- **Impact**: Full backend suite (115 tests, including four new suites for this work — `test_dot_builder.py`, `test_synthesis_edges.py`, `test_sse_robustness.py`, `test_specialist_subgraph.py`) passing.
 
 ---
 

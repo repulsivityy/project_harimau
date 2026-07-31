@@ -51,7 +51,21 @@ class InfrastructureSpecialistOutput(BaseModel):
     pivot_findings: Optional[List[str]] = Field(default_factory=list)
     related_indicators: Optional[List[str]] = Field(default_factory=list)
     analyzed_targets: Optional[List[AnalyzedTargetInfra]] = Field(default_factory=list)
-    summary: Optional[str] = None
+    summary: Optional[str] = "No summary provided."
+
+    @classmethod
+    def __get_pydantic_json_schema__(cls, core_schema, handler):
+        schema = super().__get_pydantic_json_schema__(core_schema, handler)
+        schema["required"] = [
+            "verdict",
+            "categories",
+            "associated_campaigns",
+            "pivot_findings",
+            "related_indicators",
+            "analyzed_targets",
+            "summary",
+        ]
+        return schema
 
 INFRA_ANALYSIS_PROMPT = """
 You are an Elite Network Infrastructure Hunter.

@@ -24,11 +24,14 @@ async def emit_tool_call(job_id: str, agent: str, tool: str, args: Dict[str, Any
     from backend.utils.sse_manager import sse_manager
 
     logger.info("tool_call_emitted", job_id=job_id, agent=agent, tool=tool)
-    await sse_manager.emit_event(job_id, "tool_invocation", {
-        "agent": agent,
-        "tool": tool,
-        "args": args
-    })
+    try:
+        await sse_manager.emit_event(job_id, "tool_invocation", {
+            "agent": agent,
+            "tool": tool,
+            "args": args
+        })
+    except Exception as exc:
+        logger.error("sse_emit_failed", job_id=job_id, agent=agent, tool=tool, error=str(exc))
 
 
 async def emit_reasoning(job_id: str, agent: str, thought: str):
@@ -43,10 +46,13 @@ async def emit_reasoning(job_id: str, agent: str, thought: str):
     from backend.utils.sse_manager import sse_manager
 
     logger.debug("reasoning_emitted", job_id=job_id, agent=agent, thought_preview=thought[:200])
-    await sse_manager.emit_event(job_id, "agent_reasoning", {
-        "agent": agent,
-        "thought": thought
-    })
+    try:
+        await sse_manager.emit_event(job_id, "agent_reasoning", {
+            "agent": agent,
+            "thought": thought
+        })
+    except Exception as exc:
+        logger.error("sse_emit_failed", job_id=job_id, agent=agent, error=str(exc))
 
 
 async def emit_tool_result(job_id: str, agent: str, tool: str, result_summary: str):
@@ -62,8 +68,11 @@ async def emit_tool_result(job_id: str, agent: str, tool: str, result_summary: s
     from backend.utils.sse_manager import sse_manager
 
     logger.debug("tool_result_emitted", job_id=job_id, agent=agent, tool=tool, result=result_summary)
-    await sse_manager.emit_event(job_id, "tool_result", {
-        "agent": agent,
-        "tool": tool,
-        "result": result_summary
-    })
+    try:
+        await sse_manager.emit_event(job_id, "tool_result", {
+            "agent": agent,
+            "tool": tool,
+            "result": result_summary
+        })
+    except Exception as exc:
+        logger.error("sse_emit_failed", job_id=job_id, agent=agent, tool=tool, error=str(exc))

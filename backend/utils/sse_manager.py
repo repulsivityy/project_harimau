@@ -25,44 +25,82 @@ class SSEEventManager:
     def __init__(self):
         self._subscribers: Dict[str, list] = {}  # job_id -> list of subscriber queues
         self._event_history: Dict[str, list] = {} # job_id -> list of past events
-    
+        self._last_progress: Dict[str, float] = {}  # job_id -> last emitted progress value
+
     def create_queue(self, job_id: str):
         """Create subscriber list and history for a new investigation."""
         if job_id not in self._subscribers:
             self._subscribers[job_id] = []
             self._event_history[job_id] = []
             logger.info("sse_subscriber_list_created", job_id=job_id)
-    
+
     async def emit_event(self, job_id: str, event_type: str, data: Dict[str, Any]):
         """
         Broadcast an event to all subscribers of this job_id.
         Also stores the event in history for timeline generation.
-        
+
         Args:
             job_id: Investigation job ID
             event_type: Type of event (e.g., 'triage_started', 'progress')
             data: Event payload
+
+        This method must never raise to its caller. Emitting progress is
+        cosmetic; aborting a hunt because a browser tab closed is not. The only
+        exception left uncaught is asyncio.CancelledError, which derives from
+        BaseException and so is not touched by the `except Exception` below.
+
+        On the snapshot below: with today's unbounded asyncio.Queue,
+        `Queue.put` never actually suspends (it only awaits inside
+        `while self.full()`), so the broadcast loop runs atomically and
+        subscribe()'s finally block cannot interleave with it. The bug the
+        snapshot fixes is therefore not an exception but a *silent drop*: a
+        disconnecting client mutating the list mid-iteration caused the loop to
+        skip later subscribers (measured: 1 of 3 delivered). The guards are
+        also insurance against the day this queue gains a maxsize — at which
+        point `put` would suspend and the interleaving would become real.
         """
-        if job_id not in self._subscribers:
-            # If no subscribers yet, create the entry so we can at least store history
-            self.create_queue(job_id)
-        
-        event = {
-            "event_type": event_type,
-            "timestamp": datetime.now().isoformat(),
-            "data": data
-        }
-        
-        # Store in history
-        if job_id in self._event_history:
-            self._event_history[job_id].append(event)
-        
-        # Broadcast to ALL subscribers
-        for subscriber_queue in self._subscribers[job_id]:
-            await subscriber_queue.put(event)
-        
-        logger.debug("sse_event_broadcast", job_id=job_id, event_type=event_type, 
-                    subscriber_count=len(self._subscribers[job_id]))
+        try:
+            if job_id not in self._subscribers:
+                # If no subscribers yet, create the entry so we can at least store history
+                self.create_queue(job_id)
+
+            # Monotone, bounded progress: never let the bar go backwards or over
+            # 100. Done here rather than in the callers so it also covers the
+            # hardcoded percentages emitted from main.py, and so it holds under
+            # the parallel specialist fan-out where two nodes emit for the same
+            # job. The read-modify-write and the history append below both
+            # complete before the first await, so they cannot interleave.
+            if isinstance(data.get("progress"), (int, float)):
+                last = self._last_progress.get(job_id, 0)
+                clamped = min(100, max(last, data["progress"]))
+                # Copy rather than mutate: the caller's dict is theirs.
+                data = {**data, "progress": clamped}
+                self._last_progress[job_id] = clamped
+
+            event = {
+                "event_type": event_type,
+                "timestamp": datetime.now().isoformat(),
+                "data": data
+            }
+
+            if job_id in self._event_history:
+                self._event_history[job_id].append(event)
+
+            subscriber_queues = list(self._subscribers.get(job_id, []))
+
+            delivered = 0
+            for subscriber_queue in subscriber_queues:
+                try:
+                    await subscriber_queue.put(event)
+                    delivered += 1
+                except Exception as put_exc:
+                    logger.error("sse_emit_failed", job_id=job_id, event_type=event_type,
+                               error=str(put_exc))
+
+            logger.debug("sse_event_broadcast", job_id=job_id, event_type=event_type,
+                        subscriber_count=delivered)
+        except Exception as exc:
+            logger.error("sse_emit_failed", job_id=job_id, event_type=event_type, error=str(exc))
 
     def get_events(self, job_id: str) -> list:
         """Retrieve the full event history for a job."""
@@ -132,10 +170,12 @@ class SSEEventManager:
 
 
     def clear_history(self, job_id: str):
-        """Clear event history for a job to free memory."""
+        """Clear event history (and progress tracking) for a job to free memory."""
         if job_id in self._event_history:
             del self._event_history[job_id]
             logger.debug("sse_history_cleared", job_id=job_id)
+        if job_id in self._last_progress:
+            del self._last_progress[job_id]
 
 
 # Global singleton instance

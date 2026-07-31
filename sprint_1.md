@@ -84,7 +84,7 @@
 
 ---
 
-# TIER 4 — LangGraph Architecture Refactoring (Phase 4)
+# TIER 4 — LangGraph Architecture Refactoring (Phase 4) [COMPLETED]
 
 **Goal:** Fix structural debt. Run after Tiers 1-3 ship and soak.
 
@@ -92,21 +92,44 @@
 *   **Files:** `backend/agents/*.py`
 *   **Change:** Migrate JSON outputs from string-parsing to LangChain `with_structured_output()` using Pydantic schemas.
 
-### S4-T2 · Native LangGraph `ToolNode` for specialists
-*   **Files:** `backend/agents/malware.py`, `backend/agents/infrastructure.py`
+### [x] S4-T2 · Native LangGraph `ToolNode` for specialists
+*   **Files:** `backend/agents/malware.py`, `backend/agents/infrastructure.py`, `backend/utils/agent_utils.py`
 *   **Change:** Rip out the internal `while/for` loops inside the specialists. Replace with native LangGraph `ToolNode`s and conditional edges. Unlocks per-step checkpointing.
+*   **Note (2026-07-29):** The sub-graph refactor itself shipped on `main` in `9c3327f` + `a976cef` (2026-06-04) but was never ticked here. This tier closed the four gaps it left behind: restored the per-tool 20s timeout and catch-all that `run_tools_parallel` used to enforce (`ToolNode`'s default `handle_tool_errors` only converts `ToolInvocationError` and re-raises everything else); deleted the dead `run_tools_parallel` / `cap_context_window` code; hardened `route_after_agent` against non-`AIMessage` last messages; hoisted both routers to module scope so they are testable.
 
-### S4-T3 · Deterministic Graphviz
-*   **Files:** `backend/agents/lead_hunter_synthesis.py`
+### [x] S4-T3 · Deterministic Graphviz
+*   **Files:** `backend/utils/dot_builder.py` (new), `backend/agents/lead_hunter_synthesis.py`
 *   **Change:** Generate the base DOT template directly from the `NetworkX` cache. Pass it as a structured template to the LLM for annotation to eliminate structural hallucinations.
+*   **Note (2026-07-29):** Added a validation step with a deterministic fallback, because the frontend's `d3-graphviz` `renderDot()` is worker-based — its surrounding `try/catch` never fires, so malformed DOT rendered a blank panel with no error. The skeleton is keyed on real (normalised) entity ids rather than `_node_label()` display names, which previously let two distinct entities collapse into one DOT node. `_select_diagram_edges` is now the single edge selection shared by the diagram and the prose edge list.
 
-### S4-T4 · SSE error wrapping & dynamic progress
-*   **Files:** `backend/graph/sse_wrappers.py`
+### [x] S4-T4 · SSE error wrapping & dynamic progress
+*   **Files:** `backend/utils/sse_manager.py`, `backend/graph/sse_wrappers.py`, `backend/utils/transparency.py`
 *   **Change:** Wrap `emit_event` in try/except. Make progress curves dynamically driven by `len(state["subtasks"]) * current_iteration`.
+*   **Note (2026-07-30):** Guarded at the source (`emit_event` itself) as well as in `with_sse_events` and the three `transparency.py` helpers, which are awaited from inside `@tool` bodies. Two concrete progress bugs fixed alongside: `triage` returned 10 for both `started` and `completed` (dead ternary), and the band was divided by `max_iterations` when there are actually `max_iterations + 1` specialist passes — specialists at `iteration == max_iterations` computed **103%**, clamped only client-side. Monotonicity is now enforced centrally by a per-job clamp in `sse_manager`, so it also covers the hardcoded percentages emitted from `main.py`.
+*   **Correction:** the disconnect race this was written to prevent is not reachable today — `asyncio.Queue.put` on an unbounded queue never suspends, so the broadcast loop is atomic. The real pre-existing bug the snapshot fixes is a *silent drop* (a disconnecting client mutating the list mid-iteration caused later subscribers to be skipped, 1 of 3 delivered), not an exception. The guards remain as insurance for the day the queue gains a `maxsize`.
 
-### S4-T5 · Synthesis quality
-*   **Files:** `backend/agents/lead_hunter_synthesis.py`
+### [x] S4-T5 · Synthesis quality
+*   **Files:** `backend/agents/lead_hunter_synthesis.py`, `backend/utils/dot_builder.py`
 *   **Change:** Pass complete edge attributes (`source_type`, `target_verdict`, `rel_type`) into the synthesis context so LLM names relationships accurately.
+*   **Note (2026-07-30):** `_score_edges` already computed `source_type`/`target_type` and discarded them. The two conflicting edge blocks (`Key Edges` keyed on ids, `_build_edge_tuples` keyed on display labels) are collapsed into one id-keyed fact table carrying both endpoints' type, verdict and score, plus a `high_signal` flag preserving the old `Key Edges` predicate. A missing GTI threat score now renders `unknown` rather than a misleading `0` — presentation only, no score is derived.
+*   **Review fixes:** consolidating the two blocks initially made the fact table share the diagram's unfiltered 40-edge cap, which *lost every high-signal edge* on a realistic hunt (measured 0 of 6 surviving past a root with 45 benign adjacent edges — `_score_edges` sorts root-adjacent first and `max(source, target)` hands the root's own score to all its edges, so benign CDN edges outranked confirmed-malicious infrastructure). `_select_diagram_edges` now gives high-signal edges first claim on the budget. Also escaped attacker-controlled display labels (a newline in a `meaningful_name` could inject a whole fabricated fact-table row) and coerced string threat scores to numbers.
+
+### Blocker — none. See "Follow-ups" below for two issues found but deliberately not fixed.
+
+## §8 · Follow-ups identified during Tier 4 (not fixed — need a decision)
+
+1. **`_compute_high_signal` can never flag an entity GTI did not score.** The gate is `score >= 80 or (score > HIGH_SIGNAL_THREAT_SCORE and qualifiers >= 2)`, and an unknown score coerces to `0`, so no number of qualifiers (malicious-vendor count, important relationships, malware↔infra bridge, specialist discovery) can admit it. Per `extract_gti_summary`'s docstring, descriptor-only pivot entities normally arrive with no `gti_assessment` at all, so the High-Signal Nodes block effectively contains only triage-discovered root-adjacent entities. This appears to contradict S1-T2's stated intent ("relax synthesis gate so high-scoring items **or specialist-discovered items** surface cleanly") — the specialist-discovery qualifier was added but gated behind `score > 60`, which those entities can never reach. It also compounds edge ranking, since `_score_edges` gives `+1 qualifier` for `target in high_signal_node_ids`. Possible shapes: admit on `qualifiers >= 3` when `not score_known`, or treat an unknown score as neutral rather than `0` in the gate. **Not changed here** — it alters the tuned synthesis gate and is outside S4-T5's scope.
+
+    Concrete evidence of the knock-on, measured on a 46-edge graph (malicious file root, 30 benign CDN domains, 8 descriptor-only dropped files, a malicious URL, a C2 domain resolving to 6 malicious IPs): **6 of the 8 specialist-discovered dropped files were evicted from the 40-edge budget while all 31 benign `contacted_domains` edges were kept.** Mechanism: `_score_edges` gives `+10` for a relationship in `IMPORTANT_RELATIONSHIPS` (which includes `contacted_domains` but not the `dropped` rel_type the malware tool writes), and every root-adjacent edge already inherits the root's own score via `max(source, target)`. So a zero-detection CDN domain scores 102 and a dropped malware artifact scores 92. Because a descriptor-only entity has neither a verdict nor a vendor count, it can never be `has_threat_signal`, so the high-signal reservation added in S4-T5 does not rescue it either. Two candidate fixes, both tuning decisions: add `dropped` to `IMPORTANT_RELATIONSHIPS`, and/or stop letting root-adjacency propagate the root's score to edges whose *target* carries no signal of its own.
+2. **`backend/requirements.txt` leaves `mcp` and `langgraph` unpinned, and there is no lockfile.** `backend/Dockerfile` runs a bare `pip install -r requirements.txt`, so every Cloud Build resolves latest. `mcp` latest is now **2.0.0, which removed `mcp.server.fastmcp`** — verified directly: `ModuleNotFoundError: No module named 'mcp.server.fastmcp'`. Eight files import it (`backend/mcp/gti/server.py:23`, `backend/mcp/shodan/server.py:4`, and all six `backend/mcp/gti/tools/*.py`), so both MCP servers would fail to import and every hunt would lose all GTI and Shodan tools. This is a live outage waiting on the next rebuild, not a future concern. Pinning affects deploys, so left for the owner to apply.
+
+    Researched 2026-07-30, all verified by running code:
+    - **`mcp`** — pin `==1.29.0` (last 1.x; confirmed it ships `mcp/server/fastmcp/` and that `FastMCP.__init__` accepts both `stateless_http` and `dependencies`, exactly what this repo passes). Zero code change.
+    - **`langgraph`** — pin `==1.2.10` (current latest). No code change needed: the full 104-test suite, including tests that compile and execute a real `StateGraph` with a `ToolNode`, passes on `langgraph 1.2.10` / `langgraph-prebuilt 1.1.0` / `langchain-core 1.5.2` / `langchain-google-genai 4.3.2`.
+    - **`langgraph-checkpoint-postgres`** — currently unpinned and it owns the checkpoint tables. Latest is 3.1.0, but `AsyncPostgresSaver.from_conn_string()` + `.setup()` (`backend/main.py:97-102`) was **not** verified against it, as no Postgres is available locally. Pin whatever the last known-good deploy used rather than 3.1.0 blind.
+    - **`langchain-core` / `langchain-google-genai`** — `>=1.2.4` and `>=4.1.0` would both accept a future major. Tighten to `>=1.5,<2` and `>=4.3,<5`.
+
+    **Migrating to `mcp` 2.x** is a separate task, mechanical but not free: `mcp.server.fastmcp.FastMCP` → `mcp.server.mcpserver.MCPServer` across those 8 files (`Context` moves with it); `dependencies=`, `lifespan=` and `.run(transport='stdio')` all survive unchanged; but **`stateless_http` was dropped** from `MCPServer.__init__` and `backend/mcp/gti/server.py:57` passes it, which needs a decision rather than a rename. The client side is unaffected — `ClientSession`, `StdioServerParameters` and `mcp.client.stdio.stdio_client` all still import cleanly under 2.0, so `backend/mcp/client.py` and the agents need no change.
 
 ---
 

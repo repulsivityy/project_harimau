@@ -5,7 +5,7 @@ import re
 from contextlib import AsyncExitStack
 from typing import Optional, List, Dict, Any, Annotated, TypedDict
 from pydantic import BaseModel, Field
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage, BaseMessage
+from langchain_core.messages import SystemMessage, HumanMessage, BaseMessage
 #from langchain_google_vertexai import ChatVertexAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.tools import tool
@@ -21,7 +21,7 @@ from backend.utils.transparency import emit_tool_call, emit_reasoning
 from backend.utils.agent_utils import (
     FINAL_ITERATION_PROMPT,
     reduce_messages,
-    # cap_context_window,
+    tool_timeout,
     push_to_rich_intel,
     build_peer_context,
     parse_indicator_string,
@@ -213,6 +213,26 @@ class InfraSubgraphState(TypedDict):
     max_iterations: int
     final_result: Optional[Dict[str, Any]]
 
+# Routers (pure functions of sub_state — hoisted to module scope so they aren't
+# redefined as closures on every infrastructure_node invocation)
+def route_after_init(sub_state: InfraSubgraphState):
+    if not sub_state.get("unique_targets"):
+        return "end"
+    return "agent"
+
+def route_after_agent(sub_state: InfraSubgraphState):
+    messages = sub_state.get("messages")
+    if not messages:
+        return "final"
+    last_message = messages[-1]
+    loop_step = sub_state["loop_step"]
+    max_iterations = sub_state["max_iterations"]
+
+    if getattr(last_message, "tool_calls", None) and loop_step < max_iterations:
+        return "tools"
+    else:
+        return "final"
+
 # Lazily cached LLM instance — stateless, safe to reuse across invocations.
 _infra_base_llm: Optional[ChatGoogleGenerativeAI] = None
 
@@ -248,8 +268,14 @@ async def infrastructure_node(state: AgentState):
             session = await stack.enter_async_context(mcp_manager.get_session("gti"))
             shodan_session = await stack.enter_async_context(mcp_manager.get_session("shodan"))
             
+            # Every tool below reports failure as json.dumps({"error": ...}) —
+            # the same shape tool_timeout returns — so the model sees one
+            # parseable failure envelope rather than a bare exception string it
+            # has to guess at, and json.dumps (not an f-string) is what keeps a
+            # quote inside the message from producing invalid JSON.
             # Domain Tools
             @tool
+            @tool_timeout(logger=logger)
             async def get_domain_report(domain: str):
                 """Get threat report for a domain."""
                 job_id = state.get("job_id")
@@ -258,9 +284,10 @@ async def infrastructure_node(state: AgentState):
                 try: 
                     res = await session.call_tool("get_domain_report", arguments={"domain": domain})
                     return res.content[0].text if res.content else "{}"
-                except Exception as e: return str(e)
+                except Exception as e: return json.dumps({"error": str(e)})
 
             @tool
+            @tool_timeout(logger=logger)
             async def get_entities_related_to_a_domain(domain: str, relationship: str):
                 """Get entities related to a domain. Relationships: resolutions, subdomains, communicating_files."""
                 job_id = state.get("job_id")
@@ -299,10 +326,11 @@ async def infrastructure_node(state: AgentState):
                         cache.add_relationship(domain, eid, relationship, {"source": "infrastructure_analysis_tool"})
                         found.append(eid)
                     return json.dumps(found)
-                except Exception as e: return str(e)
+                except Exception as e: return json.dumps({"error": str(e)})
                 
             # IP Tools
             @tool
+            @tool_timeout(logger=logger)
             async def get_ip_address_report(ip_address: str):
                 """Get threat report for an IP address."""
                 job_id = state.get("job_id")
@@ -311,9 +339,10 @@ async def infrastructure_node(state: AgentState):
                 try: 
                     res = await session.call_tool("get_ip_address_report", arguments={"ip_address": ip_address})
                     return res.content[0].text if res.content else "{}"
-                except Exception as e: return str(e)
+                except Exception as e: return json.dumps({"error": str(e)})
 
             @tool
+            @tool_timeout(logger=logger)
             async def get_entities_related_to_an_ip_address(ip_address: str, relationship: str):
                 """Get entities related to an IP. Relationships: resolutions, communicating_files, referrer_files."""
                 job_id = state.get("job_id")
@@ -344,10 +373,11 @@ async def infrastructure_node(state: AgentState):
                         cache.add_relationship(ip_address, eid, relationship, {"source": "infrastructure_analysis_tool"})
                         found.append(eid)
                     return json.dumps(found)
-                except Exception as e: return str(e)
+                except Exception as e: return json.dumps({"error": str(e)})
 
             # URL Tools
             @tool
+            @tool_timeout(logger=logger)
             async def get_url_report(url: str):
                 """Get threat report for a URL."""
                 job_id = state.get("job_id")
@@ -356,9 +386,10 @@ async def infrastructure_node(state: AgentState):
                 try: 
                     res = await session.call_tool("get_url_report", arguments={"url": url})
                     return res.content[0].text if res.content else "{}"
-                except Exception as e: return str(e)
+                except Exception as e: return json.dumps({"error": str(e)})
 
             @tool
+            @tool_timeout(logger=logger)
             async def get_entities_related_to_an_url(url: str, relationship: str):
                 """Get entities related to a URL. Relationships: downloaded_files, network_location."""
                 job_id = state.get("job_id")
@@ -389,9 +420,10 @@ async def infrastructure_node(state: AgentState):
                         cache.add_relationship(url, eid, relationship, {"source": "infrastructure_analysis_tool"})
                         found.append(eid)
                     return json.dumps(found)
-                except Exception as e: return str(e)
+                except Exception as e: return json.dumps({"error": str(e)})
 
             @tool
+            @tool_timeout(logger=logger)
             async def get_webrisk_report(url: str):
                 """Check URL against Google Web Risk (Social Engineering/Malware)."""
                 job_id = state.get("job_id")
@@ -400,9 +432,10 @@ async def infrastructure_node(state: AgentState):
                 try:
                     res = await webrisk.evaluate_uri(url)
                     return json.dumps(res)
-                except Exception as e: return str(e)
+                except Exception as e: return json.dumps({"error": str(e)})
 
             @tool
+            @tool_timeout(logger=logger)
             async def shodan_ip_lookup(ip: str):
                 """Look up an IP in Shodan. Returns open ports, services, banners, known vulnerabilities, and geolocation."""
                 job_id = state.get("job_id")
@@ -411,9 +444,10 @@ async def infrastructure_node(state: AgentState):
                 try:
                     res = await shodan_session.call_tool("ip_lookup", arguments={"ip": ip})
                     return res.content[0].text if res.content else "{}"
-                except Exception as e: return str(e)
+                except Exception as e: return json.dumps({"error": str(e)})
 
             @tool
+            @tool_timeout(logger=logger)
             async def shodan_dns_lookup(hostnames: str):
                 """Resolve one or more hostnames to IPs via Shodan DNS. Accepts comma-separated hostnames."""
                 job_id = state.get("job_id")
@@ -422,9 +456,10 @@ async def infrastructure_node(state: AgentState):
                 try:
                     res = await shodan_session.call_tool("dns_lookup", arguments={"hostnames": hostnames})
                     return res.content[0].text if res.content else "{}"
-                except Exception as e: return str(e)
+                except Exception as e: return json.dumps({"error": str(e)})
 
             @tool
+            @tool_timeout(logger=logger)
             async def shodan_reverse_dns_lookup(ips: str):
                 """Resolve one or more IPs to hostnames via Shodan. Accepts comma-separated IPs."""
                 job_id = state.get("job_id")
@@ -433,7 +468,7 @@ async def infrastructure_node(state: AgentState):
                 try:
                     res = await shodan_session.call_tool("reverse_dns_lookup", arguments={"ips": ips})
                     return res.content[0].text if res.content else "{}"
-                except Exception as e: return str(e)
+                except Exception as e: return json.dumps({"error": str(e)})
 
             tools = [
                 get_domain_report, get_entities_related_to_a_domain,
@@ -632,21 +667,7 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
             # Node 3: post_tool_node
             async def post_tool_node(sub_state: InfraSubgraphState):
                 updated_graph = cache.get_state()
-                # messages = sub_state["messages"]
-                # capped_messages = cap_context_window(messages)
-                # 
-                # if len(capped_messages) < len(messages):
-                #     logger.info("infra_subgraph_capping_context", original=len(messages), capped=len(capped_messages))
-                #     # Use model_copy to avoid mutating the shared message object in place;
-                #     # the in-place mutation would persist on the object across invocations.
-                #     marker = capped_messages[0].model_copy(
-                #         update={"additional_kwargs": {**capped_messages[0].additional_kwargs, "overwrite_history": True}}
-                #     )
-                #     return {
-                #         "messages": [marker] + list(capped_messages[1:]),
-                #         "investigation_graph": updated_graph
-                #     }
-                
+
                 return {
                     "investigation_graph": updated_graph
                 }
@@ -715,23 +736,6 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                 return {
                     "final_result": result
                 }
-
-            # Routers
-            def route_after_init(sub_state: InfraSubgraphState):
-                if not sub_state.get("unique_targets"):
-                    return "end"
-                return "agent"
-
-            def route_after_agent(sub_state: InfraSubgraphState):
-                messages = sub_state["messages"]
-                last_message = messages[-1]
-                loop_step = sub_state["loop_step"]
-                max_iterations = sub_state["max_iterations"]
-                
-                if last_message.tool_calls and loop_step < max_iterations:
-                    return "tools"
-                else:
-                    return "final"
 
             # Construct Sub-graph
             builder = StateGraph(InfraSubgraphState)

@@ -70,6 +70,7 @@ async def lead_hunter_node(state: AgentState):
     cache = InvestigationCache(state.get("investigation_graph"))
 
     # --- DETERMINE MODE ---
+    job_id = state.get("job_id")
     current_iteration = state.get("iteration", 0)
     MAX_ITERATIONS = state.get("max_iterations", DEFAULT_HUNT_ITERATIONS)
 
@@ -101,6 +102,17 @@ async def lead_hunter_node(state: AgentState):
                     logger.info("lead_hunter_early_exit", reason="convergence", entities=list(new_entity_ids))
                 else:
                     logger.info("lead_hunter_new_tasks", count=len(new_subtasks))
+                    # Emitted here, not in run_planning_phase: only at this point
+                    # have Layers 2 and 3 confirmed the planner's subtasks will
+                    # actually be dispatched rather than discarded.
+                    if job_id:
+                        subtask_summary = [
+                            f"CONVERGENCE_DECISION -> Initiating Iteration {current_iteration + 1} "
+                            f"with {len(new_subtasks)} subtask(s):"
+                        ]
+                        for t in new_subtasks:
+                            subtask_summary.append(f"  • [{t.get('agent')}] {t.get('entity_id')}: {t.get('task')}")
+                        await emit_reasoning(job_id, "lead_hunter_planning", "\n".join(subtask_summary))
                     return {
                         "subtasks": new_subtasks,
                         "iteration": current_iteration + 1,
@@ -108,6 +120,12 @@ async def lead_hunter_node(state: AgentState):
                     }
 
             logger.info("lead_hunter_no_new_tasks", reason="empty_subtasks_or_converged")
+            if job_id:
+                await emit_reasoning(
+                    job_id,
+                    "lead_hunter_planning",
+                    "CONVERGENCE_DECISION -> All hypotheses answered or no actionable targets remaining. Terminating planning loop.",
+                )
 
     # --- SYNTHESIS MODE (uses Pro) ---
     logger.info("lead_hunter_mode_synthesis")
@@ -141,19 +159,35 @@ async def lead_hunter_node(state: AgentState):
 
     # Annotate (never strip) any IOC cited in the report that isn't grounded in
     # the investigation graph or specialist findings. See report_validator.py.
-    final_report = validate_and_annotate(
+    final_report, validation = validate_and_annotate(
         report_md=final_report,
         cache=cache,
         specialist_results=state.get("specialist_results", {}),
         root_ioc=state.get("ioc"),
         job_id=state.get("job_id"),
     )
-    if state.get("job_id"):
-        await emit_reasoning(
-            state.get("job_id"),
-            "lead_hunter_synthesis",
-            "CITATION_AUDIT -> Verified all report IOC citations against the NetworkX investigation graph cache.",
-        )
+    if job_id:
+        # The trace must report what the audit actually found — a hardcoded
+        # success message would claim verification even when citations failed.
+        verified_count = validation.get("verified", 0)
+        unverified_count = len(validation.get("unverified") or [])
+        if validation.get("error"):
+            audit_message = (
+                "CITATION_AUDIT -> Citation verification could not be completed; "
+                "report IOC citations are UNAUDITED."
+            )
+        elif unverified_count:
+            audit_message = (
+                f"CITATION_AUDIT -> Verified {verified_count} indicator(s) against the NetworkX "
+                f"investigation graph cache; {unverified_count} unverified/hallucinated "
+                f"citation(s) flagged in the report."
+            )
+        else:
+            audit_message = (
+                f"CITATION_AUDIT -> Verified all {verified_count} report IOC citation(s) "
+                f"against the NetworkX investigation graph cache."
+            )
+        await emit_reasoning(job_id, "lead_hunter_synthesis", audit_message)
 
     # [CRITICAL] CLEAR SUBTASKS TO STOP INFINITE LOOP
     # investigation_graph IS now mutated (graph-context promotions and

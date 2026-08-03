@@ -241,7 +241,13 @@ def validate_and_annotate(
                 job_id=job_id,
                 verified_count=validation["verified"],
             )
-        return annotate_report(report_md, validation)
+        annotated = annotate_report(report_md, validation)
+        if not validation["unverified"] and validation["verified"] > 0 and "### 🛡️ Citation Integrity Audit" not in annotated:
+            annotated = (
+                f"{annotated}\n\n---\n\n### 🛡️ Citation Integrity Audit\n\n"
+                f"All **{validation['verified']} indicator(s)** cited in this report were verified against the NetworkX investigation graph and specialist tool outputs. Zero unverified or hallucinated IOCs detected.\n"
+            )
+        return annotated
     except Exception as e:
         logger.error("report_validation_failed", job_id=job_id, error=str(e))
         return report_md  # never block the report on a validator bug

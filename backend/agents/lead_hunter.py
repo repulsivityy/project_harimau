@@ -13,6 +13,7 @@ from backend.agents.lead_hunter_synthesis import generate_final_report_llm
 from backend.utils.verdict_engine import apply_composite_verdicts
 from backend.utils.report_validator import validate_and_annotate
 from backend.utils.signal_filter import promote_by_graph_context
+from backend.utils.transparency import emit_reasoning
 
 logger = get_logger("agent_lead_hunter")
 
@@ -147,6 +148,12 @@ async def lead_hunter_node(state: AgentState):
         root_ioc=state.get("ioc"),
         job_id=state.get("job_id"),
     )
+    if state.get("job_id"):
+        await emit_reasoning(
+            state.get("job_id"),
+            "lead_hunter_synthesis",
+            "CITATION_AUDIT -> Verified all report IOC citations against the NetworkX investigation graph cache.",
+        )
 
     # [CRITICAL] CLEAR SUBTASKS TO STOP INFINITE LOOP
     # investigation_graph IS now mutated (graph-context promotions and

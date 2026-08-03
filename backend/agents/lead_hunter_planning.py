@@ -5,6 +5,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from backend.utils.logger import get_logger
 from backend.utils.graph_cache import InvestigationCache
 from backend.graph.state import AgentState
+from backend.utils.transparency import emit_reasoning
 
 logger = get_logger("agent_lead_hunter_planning")
 
@@ -184,6 +185,14 @@ Please plan the next steps.
         
         task_count = len(result.get("subtasks", []))
         logger.info("lead_hunter_planning_complete", job_id=job_id, iteration=iteration, task_count=task_count)
+        if job_id:
+            if task_count == 0 or result.get("investigation_complete"):
+                await emit_reasoning(job_id, "lead_hunter_planning", "CONVERGENCE_DECISION -> All hypotheses answered or no actionable targets remaining. Terminating planning loop.")
+            else:
+                subtask_summary = [f"CONVERGENCE_DECISION -> Initiating Iteration {iteration + 1} with {task_count} subtask(s):"]
+                for t in result.get("subtasks", []):
+                    subtask_summary.append(f"  • [{t.get('agent')}] {t.get('entity_id')}: {t.get('task')}")
+                await emit_reasoning(job_id, "lead_hunter_planning", "\n".join(subtask_summary))
         return result
     except Exception as e:
         logger.error("lead_hunter_planning_error", job_id=job_id, iteration=iteration, error=str(e))

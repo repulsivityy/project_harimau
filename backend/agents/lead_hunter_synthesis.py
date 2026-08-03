@@ -3,6 +3,7 @@ from typing import Any, Optional
 from langchain_core.messages import SystemMessage, HumanMessage
 from backend.utils.logger import get_logger
 from backend.graph.state import AgentState
+from backend.utils.transparency import emit_reasoning
 from backend.utils.graph_cache import InvestigationCache, normalize_verdict
 from backend.utils.verdict_engine import build_escalation_context
 from backend.utils.signal_filter import build_promotion_context
@@ -667,6 +668,8 @@ async def generate_final_report_llm(state: AgentState, llm, cache: Optional[Inve
     """
     job_id = state.get("job_id")
     logger.info("lead_hunter_synthesis_start", job_id=job_id)
+    if job_id:
+        await emit_reasoning(job_id, "lead_hunter_synthesis", "SYNTHESIS_START -> Compiling cross-agent findings, composite verdicts, and attack-chain relationships into final executive summary.")
 
     cache = cache if cache is not None else InvestigationCache(state.get("investigation_graph"))
 
@@ -815,6 +818,9 @@ No actionable intelligence could be synthesized. The original indicator may be m
             logger.error("dot_validation_error", job_id=job_id, error=str(dot_error))
             # raw_content is returned unmodified — a validator bug must never
             # lose a successfully generated report.
+
+        if job_id:
+            await emit_reasoning(job_id, "lead_hunter_synthesis", "SYNTHESIS_COMPLETE -> Final intelligence report synthesized. Executing automated graph-citation verification.")
 
         return raw_content
     except Exception as e:

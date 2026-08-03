@@ -176,7 +176,7 @@ def merge_metadata(a: Optional[Dict[str, Any]], b: Optional[Dict[str, Any]]) -> 
     and infrastructure_node (genuine parallel LangGraph branches fanned out
     from `gate`) both returned updated `metadata`. Both branches write into
     state["metadata"]["rich_intel"]["relationships"] under different rel_name
-    keys ("communicates_with"/"dropped" for malware, "related_infrastructure"
+    keys ("communicates_with"/"dropped_files" for malware, "related_infrastructure"
     for infrastructure) via push_to_rich_intel, but since both start from the
     same pre-fan-out metadata snapshot, a shallow top-level merge would let
     whichever branch's update was folded in second silently replace the

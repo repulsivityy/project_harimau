@@ -344,7 +344,9 @@ def _compute_high_signal(cache, node_details: dict):
         if "malware_context" in node.get("raw_attributes", {}) or "infra_context" in node.get("raw_attributes", {}):
             qualifiers += 1
 
-        qualifies = node["score"] >= 80 or (node["score"] > HIGH_SIGNAL_THREAT_SCORE and qualifiers >= 2)
+        score_ok = node["score"] >= 80 or (node["score"] > HIGH_SIGNAL_THREAT_SCORE and qualifiers >= 2)
+        unknown_but_specialist_discovered = (not node["score_known"]) and (qualifiers >= 1)
+        qualifies = score_ok or unknown_but_specialist_discovered
         if qualifies:
             high_signal_node_ids.add(node_id)
 

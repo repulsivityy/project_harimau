@@ -305,6 +305,15 @@ def generate_initial_subtasks(
     subtasks: list[dict] = []
     seen_entities: set[str] = set()
 
+    # Build lookup of entity ID -> signal_reason for deterministic qualification explainability
+    reason_map: dict[str, str] = {}
+    for entities in relationships_data.values():
+        for entity in entities:
+            eid = entity.get("id")
+            sreason = entity.get("signal_reason")
+            if eid and sreason:
+                reason_map[str(eid).strip().lower()] = str(sreason)
+
     def _agent_for_type(entity_type: str) -> str | None:
         t = entity_type.lower()
         if t in MALWARE_ENTITY_TYPES:
@@ -320,6 +329,13 @@ def generate_initial_subtasks(
         if not agent:
             return
         seen_entities.add(entity_id)
+
+        # Explainability: attach deterministic qualification rule if known and not already present
+        norm_id = str(entity_id).strip().lower()
+        signal_reason = reason_map.get(norm_id)
+        if signal_reason and "[Rule:" not in context:
+            context = f"{context} [Rule: {signal_reason}]"
+
         subtasks.append({
             "agent": agent,
             "entity_id": entity_id,
@@ -1036,6 +1052,16 @@ async def triage_node(state: AgentState):
             priority_entities=analysis.get("priority_entities", []),
         )
         state["tasked_entities"] = [str(t["entity_id"]).strip().lower() for t in state["subtasks"] if t.get("entity_id")]
+
+        # [EXPLAINABILITY — OPTION C] Emit deterministic routing explainability trace
+        job_id = state.get("job_id")
+        if job_id and state["subtasks"]:
+            routing_summary_lines = [
+                f"ROUTING_DECISION -> Generated {len(state['subtasks'])} initial subtask(s) via deterministic qualification rules:"
+            ]
+            for st in state["subtasks"]:
+                routing_summary_lines.append(f"  • [{st['agent']}] {st['entity_id']}: {st.get('context', 'No context')}")
+            await emit_reasoning(job_id, "triage", "\n".join(routing_summary_lines))
         
         # Store comprehensive triage findings
         state["metadata"]["rich_intel"]["triage_analysis"] = {

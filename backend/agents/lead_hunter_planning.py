@@ -184,6 +184,9 @@ Please plan the next steps.
         
         task_count = len(result.get("subtasks", []))
         logger.info("lead_hunter_planning_complete", job_id=job_id, iteration=iteration, task_count=task_count)
+        # CONVERGENCE_DECISION traces are emitted by lead_hunter_node, not here:
+        # these subtasks are still subject to the Layer-2/Layer-3 convergence
+        # checks and may be discarded, ending the hunt instead.
         return result
     except Exception as e:
         logger.error("lead_hunter_planning_error", job_id=job_id, iteration=iteration, error=str(e))

@@ -11,7 +11,7 @@ worse than flagging them, and stripping mid-sentence breaks the Markdown.
 """
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from backend.utils.graph_cache import InvestigationCache, _normalise_id
 from backend.utils.logger import get_logger
@@ -222,8 +222,16 @@ def validate_and_annotate(
     specialist_results: Dict[str, Any],
     root_ioc: str,
     job_id: Optional[str] = None,
-) -> str:
-    """Convenience wrapper used by lead_hunter.py. Never raises."""
+) -> Tuple[str, Dict[str, Any]]:
+    """
+    Convenience wrapper used by lead_hunter.py. Never raises.
+
+    Returns (annotated_report, validation) where validation is the dict produced
+    by validate_report_iocs ({"unverified", "verified", "extracted"}), so callers
+    can report the *actual* audit outcome instead of assuming success. If the
+    validator itself fails, the returned validation carries an "error" key and
+    zeroed counts.
+    """
     try:
         validation = validate_report_iocs(report_md, cache, specialist_results, root_ioc)
         if validation["unverified"]:
@@ -241,8 +249,15 @@ def validate_and_annotate(
                 job_id=job_id,
                 verified_count=validation["verified"],
             )
-        return annotate_report(report_md, validation)
+        annotated = annotate_report(report_md, validation)
+        if not validation["unverified"] and validation["verified"] > 0 and "### 🛡️ Citation Integrity Audit" not in annotated:
+            annotated = (
+                f"{annotated}\n\n---\n\n### 🛡️ Citation Integrity Audit\n\n"
+                f"All **{validation['verified']} indicator(s)** cited in this report were verified against the NetworkX investigation graph and specialist tool outputs. Zero unverified or hallucinated IOCs detected.\n"
+            )
+        return annotated, validation
     except Exception as e:
         logger.error("report_validation_failed", job_id=job_id, error=str(e))
-        return report_md  # never block the report on a validator bug
+        # never block the report on a validator bug
+        return report_md, {"unverified": [], "verified": 0, "extracted": 0, "error": str(e)}
 

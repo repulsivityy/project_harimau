@@ -669,6 +669,21 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                 logger.info("infra_agent_iteration", iteration=loop_step, max_iterations=max_iterations)
                 response = await llm.ainvoke(messages)
                 
+                # [EXPLAINABILITY — OPTION A] Emit real-time step-by-step reasoning trace
+                job_id = sub_state.get("job_id")
+                if job_id:
+                    thought_text = ""
+                    if response.content:
+                        if isinstance(response.content, list):
+                            thought_text = " ".join([b.get("text", "") if isinstance(b, dict) else str(b) for b in response.content]).strip()
+                        else:
+                            thought_text = str(response.content).strip()
+                    if thought_text:
+                        await emit_reasoning(job_id, "infrastructure", f"[Step {loop_step + 1}/{max_iterations}] {thought_text}")
+                    elif getattr(response, "tool_calls", None):
+                        tool_names = [tc.get("name", "unknown") for tc in response.tool_calls]
+                        await emit_reasoning(job_id, "infrastructure", f"[Step {loop_step + 1}/{max_iterations}] Selecting investigation tools: {', '.join(tool_names)}")
+                
                 new_messages = []
                 if loop_step == max_iterations - 1:
                     new_messages.append(HumanMessage(content=FINAL_ITERATION_PROMPT))

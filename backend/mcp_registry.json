@@ -14,5 +14,12 @@
             "-m",
             "backend.mcp.shodan.server"
         ]
+    },
+    "ghidra": {
+        "transport": "http",
+        "url": "${GHIDRA_MCP_URL}",
+        "headers": {
+            "X-API-Key": "${GHIDRA_MCP_API_KEY}"
+        }
     }
 }

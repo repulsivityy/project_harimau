@@ -60,9 +60,43 @@ class MCPClientManager:
                     await session.initialize()
                     yield session
                     
-        elif transport_type == "sse":
-            # Roadmap feature
-            raise NotImplementedError("SSE transport not yet implemented.")
+        elif transport_type in ("http", "streamable-http", "sse"):
+            # Prepare remote HTTP / SSE client parameters
+            url = config.get("url")
+            if not url:
+                raise ValueError(f"MCP Server '{server_name}' requires 'url' in registry config.")
+            
+            # Resolve environment variable placeholder in url (e.g., "${GHIDRA_MCP_URL}")
+            if isinstance(url, str) and url.startswith("${") and url.endswith("}"):
+                env_key = url[2:-1]
+                url = os.environ.get(env_key, "")
+            if not url:
+                raise ValueError(f"MCP Server '{server_name}' has an empty or unresolved url. Ensure GHIDRA_MCP_URL environment variable is set.")
+
+            # Resolve environment variable placeholders in headers (e.g., "${GHIDRA_MCP_API_KEY}")
+            raw_headers = config.get("headers", {})
+            headers = {}
+            for k, v in raw_headers.items():
+                if isinstance(v, str) and v.startswith("${") and v.endswith("}"):
+                    env_key = v[2:-1]
+                    headers[k] = os.environ.get(env_key, "")
+                else:
+                    headers[k] = v
+
+            logger.info("connecting_mcp_remote", server=server_name, url=url, transport=transport_type)
+
+            if transport_type == "sse":
+                from mcp.client.sse import sse_client
+                async with sse_client(url, headers=headers) as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        yield session
+            else:
+                from mcp.client.streamable_http import streamable_http_client
+                async with streamable_http_client(url, headers=headers) as (read, write, _):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        yield session
         else:
             raise ValueError(f"Unknown transport type: {transport_type}")
 

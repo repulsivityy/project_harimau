@@ -357,8 +357,23 @@ else
     DETECTION_AGENT_VARS=",DETECTION_AGENT_ENABLED=false"
 fi
 
+# 5b. Ghidra MCP Integration (optional / auto-lookup)
+if [ -z "$GHIDRA_MCP_URL" ]; then
+    GHIDRA_MCP_URL=$(gcloud run services describe $GHIDRA_SERVICE --region $REGION --format 'value(status.url)' --quiet 2>/dev/null || echo "")
+    if [ -n "$GHIDRA_MCP_URL" ]; then
+        GHIDRA_MCP_URL="${GHIDRA_MCP_URL}/mcp"
+    fi
+fi
+if [ -n "$GHIDRA_MCP_URL" ]; then
+    echo "🔗 Ghidra MCP URL found: $GHIDRA_MCP_URL"
+    GHIDRA_MCP_VARS=",GHIDRA_MCP_URL=${GHIDRA_MCP_URL}"
+else
+    echo "ℹ️  GHIDRA_MCP_URL not set and service not found. Ghidra MCP disabled."
+    GHIDRA_MCP_VARS=""
+fi
+
 # 6. Deploy Logic
-if [[ "$TARGET" == "backend" || "$TARGET" == "all" ]]; then
+if [[ "$TARGET" == "backend" || "$TARGET" == "all" || "$TARGET" == "all-with-ghidra" ]]; then
     echo "🚀 Deploying Backend..."
     gcloud builds submit --tag asia-southeast1-docker.pkg.dev/${PROJECT_ID}/harimau/backend:latest backend
     
@@ -370,7 +385,7 @@ if [[ "$TARGET" == "backend" || "$TARGET" == "all" ]]; then
         --memory="2048Mi" \
         --cpu="2" \
         --no-cpu-throttling \
-        --set-env-vars "LOG_LEVEL=DEBUG,MAX_DEPTH=2,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_REGION=${REGION}${DETECTION_AGENT_VARS}" \
+        --set-env-vars "LOG_LEVEL=DEBUG,MAX_DEPTH=2,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_REGION=${REGION}${DETECTION_AGENT_VARS}${GHIDRA_MCP_VARS}" \
         --set-secrets "VT_APIKEY=${SECRET_NAME}:latest,GTI_API_KEY=${SECRET_NAME}:latest,WEBRISK_API_KEY=${WEBRISK_SECRET_NAME}:latest,SHODAN_API_KEY=${SHODAN_SECRET_NAME}:latest,DATABASE_URL=${DB_URL_SECRET}:latest,GHIDRA_MCP_API_KEY=${GHIDRA_SECRET_NAME}:latest" \
         --add-cloudsql-instances ${PROJECT_ID}:${REGION}:${DB_INSTANCE} \
         --command "uvicorn" \

@@ -4,12 +4,14 @@
 # =============================================================================
 #
 # USAGE:
-#   ./deploy.sh [backend|frontend|all|cleanup]
+#   ./deploy.sh [backend|frontend|ghidra|all|all-with-ghidra|cleanup]
 #
-#   backend   — Deploy backend Cloud Run service only
-#   frontend  — Deploy frontend Cloud Run service only
-#   all       — Deploy both (default)
-#   cleanup   — Run the database cleanup menu directly without deploying
+#   backend          — Deploy backend Cloud Run service only
+#   frontend         — Deploy frontend Cloud Run service only
+#   ghidra           — Deploy Ghidra MCP reverse engineering service only
+#   all              — Deploy backend and frontend (default)
+#   all-with-ghidra  — Deploy backend, frontend, and Ghidra MCP
+#   cleanup          — Run the database cleanup menu directly without deploying
 #
 # REQUIRED ENV VARS (export before running):
 #   GTI_API_KEY        Google Threat Intelligence API key
@@ -47,6 +49,7 @@ TARGET=${1:-all}
 REGION="asia-southeast1" # Change if needed
 BACKEND_SERVICE="harimau-backend"
 FRONTEND_SERVICE="harimau-frontend"
+GHIDRA_SERVICE="ghidra-mcp"
 
 function run_cleanup_menu() {
     local force_menu=$1
@@ -111,6 +114,7 @@ gcloud services enable run.googleapis.com artifactregistry.googleapis.com cloudb
 SECRET_NAME="harimau-gti-api-key"
 WEBRISK_SECRET_NAME="harimau-webrisk-api-key"
 SHODAN_SECRET_NAME="harimau-shodan-api-key"
+GHIDRA_SECRET_NAME="ghidra-mcp-api-key"
 DB_URL_SECRET="harimau-db-url"
 DB_INSTANCE="harimau-db"
 DB_NAME="harimau"
@@ -167,6 +171,23 @@ if [ -n "$SHODAN_API_KEY" ]; then
     fi
 else
     echo "⚠️  SHODAN_API_KEY not set locally. Assuming secret exists..."
+fi
+
+# Ensure Secret Manager secret exists for GHIDRA_MCP_API_KEY
+if [[ "$TARGET" == "ghidra" || "$TARGET" == "all-with-ghidra" ]]; then
+    echo "🔐 Checking Secret Manager for $GHIDRA_SECRET_NAME..."
+    if ! gcloud secrets describe $GHIDRA_SECRET_NAME --quiet > /dev/null 2>&1; then
+        echo "🆕 Secret '$GHIDRA_SECRET_NAME' not found."
+        if [ -z "$GHIDRA_MCP_API_KEY" ]; then
+            GHIDRA_MCP_API_KEY=$(LC_ALL=C tr -dc 'A-Za-z0-9!@#$%^&*()_+' < /dev/urandom | head -c 32)
+            echo "✨ Generated secure API Key: $GHIDRA_MCP_API_KEY"
+            echo "⚠️  SAVE THIS SECURELY — you will need it for Harimau's backend!"
+        fi
+        printf "$GHIDRA_MCP_API_KEY" | gcloud secrets create $GHIDRA_SECRET_NAME --data-file=- --quiet
+        echo "✅ Created secret $GHIDRA_SECRET_NAME."
+    else
+        echo "✅ Existing secret $GHIDRA_SECRET_NAME found."
+    fi
 fi
 
 # 3. Setup Cloud SQL (PostgreSQL)
@@ -350,11 +371,31 @@ if [[ "$TARGET" == "backend" || "$TARGET" == "all" ]]; then
         --cpu="2" \
         --no-cpu-throttling \
         --set-env-vars "LOG_LEVEL=DEBUG,MAX_DEPTH=2,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_REGION=${REGION}${DETECTION_AGENT_VARS}" \
-        --set-secrets "VT_APIKEY=${SECRET_NAME}:latest,GTI_API_KEY=${SECRET_NAME}:latest,WEBRISK_API_KEY=${WEBRISK_SECRET_NAME}:latest,SHODAN_API_KEY=${SHODAN_SECRET_NAME}:latest,DATABASE_URL=${DB_URL_SECRET}:latest" \
+        --set-secrets "VT_APIKEY=${SECRET_NAME}:latest,GTI_API_KEY=${SECRET_NAME}:latest,WEBRISK_API_KEY=${WEBRISK_SECRET_NAME}:latest,SHODAN_API_KEY=${SHODAN_SECRET_NAME}:latest,DATABASE_URL=${DB_URL_SECRET}:latest,GHIDRA_MCP_API_KEY=${GHIDRA_SECRET_NAME}:latest" \
         --add-cloudsql-instances ${PROJECT_ID}:${REGION}:${DB_INSTANCE} \
         --command "uvicorn" \
         --args "backend.main:app,--host,0.0.0.0,--port,8080" \
         --quiet
+fi
+
+if [[ "$TARGET" == "ghidra" || "$TARGET" == "all-with-ghidra" ]]; then
+    echo "🚀 Deploying Ghidra MCP Service..."
+    gcloud builds submit --tag asia-southeast1-docker.pkg.dev/${PROJECT_ID}/harimau/ghidra-mcp:latest services/ghidra_mcp --quiet
+    
+    gcloud run deploy $GHIDRA_SERVICE \
+        --image asia-southeast1-docker.pkg.dev/${PROJECT_ID}/harimau/ghidra-mcp:latest \
+        --region $REGION \
+        --allow-unauthenticated \
+        --memory="4096Mi" \
+        --cpu="2" \
+        --no-cpu-throttling \
+        --timeout="300" \
+        --concurrency="4" \
+        --set-secrets "GHIDRA_MCP_API_KEY=${GHIDRA_SECRET_NAME}:latest,GTI_API_KEY=${SECRET_NAME}:latest,VT_API_KEY=${SECRET_NAME}:latest" \
+        --quiet
+
+    GHIDRA_URL=$(gcloud run services describe $GHIDRA_SERVICE --region $REGION --format 'value(status.url)' --quiet)
+    echo "✅ Ghidra Live at: $GHIDRA_URL"
 fi
 
 # Always fetch Backend URL if deploying Frontend or needed

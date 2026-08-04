@@ -22,7 +22,7 @@ The application takes an IOC such as a file hash, URL, or IP address and kicks o
 * **Frontend**: Next.js (React, Tailwind CSS v4) - interactive investigation dashboard
 * **Backend**: FastAPI + LangGraph (Cloud Run service) - multi-agent orchestration
 * **MCP**: Embedded GTI + Shodan MCP servers (`stdio`) - threat intelligence and internet exposure data
-* **Brain**: Gemini 2.5 Flash / Pro - advanced AI reasoning
+* **Brain**: Gemini 3.5 Flash / Pro - advanced AI reasoning
 * **Database**: Cloud SQL (PostgreSQL) - persistent investigation results and LangGraph checkpoints
 * **Investigation Cache**: NetworkX (in-memory graph per investigation) with Cloud SQL JSONB persistence for completed investigation graphs
 
@@ -88,7 +88,7 @@ You can still use the legacy `deploy.sh` script for manual deployments if needed
 | Authentication (Cloud IAP) | Planned |
 | A2A Integration | Planned |
 
-For detailed milestone tracking, see [Implementation Plan](docs/implementation_plan_v2.md).
+For detailed milestone tracking, see [Implementation Plan](docs/implementation_plan.md).
 
 ## Architecture Principles
 
@@ -129,7 +129,7 @@ For detailed milestone tracking, see [Implementation Plan](docs/implementation_p
 * **Orchestration**: LangGraph
 * **API**: FastAPI
 * **UI**: Next.js
-* **LLM**: Vertex AI (Gemini 2.5)
+* **LLM**: Vertex AI (Gemini 3.5)
 * **Cache**: NetworkX (in-memory, per investigation) with Cloud SQL JSONB graph persistence
 * **Deployment**: Google Cloud Run
 * **Secrets**: Google Secret Manager

@@ -51,123 +51,104 @@ async with mcp_manager.get_session("gti") as session:
             return json.dumps({"error": str(e)})  # uniform envelope — same shape tool_timeout returns
 ```
 
-### Phase 3: Agent Loop (10 Iterations)
+### Phase 3: Sub-graph Assembly (ToolNode Architecture)
 ```python
-    llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", temperature=0)
-    llm_with_tools = llm.bind_tools([tool1, tool2, ...])
-
-    # Iteration Context: informs LLM of its cumulative role in a multi-round hunt
-    iteration_context = "**Iteration Context:** You may be called multiple times..."
-    
-    # PEER CONTEXT: Inject findings from the other specialist (if any)
-    peer_context = build_peer_context(
-        state, state.get("iteration", 0), "agent_name", "peer_name",
-        extra_fields=[...], count_key="..."
+    # 1. Base LLM and bound tools
+    base_llm = ChatGoogleGenerativeAI(
+        model="gemini-3.1-pro-preview",
+        temperature=0.0,
+        thinking_level="medium",
+        include_thoughts=True
     )
+    llm = base_llm.bind_tools(specialist_tools)
 
-    messages = [
-        SystemMessage(content=PROMPT + "\n\n" + iteration_context),
-        HumanMessage(content=f"Task: {task}\n\n{peer_context}")
-    ]
-    final_content = None
-    max_iterations = malware_iterations  # or infra_iterations = 10
+    # 2. Build LangGraph Subgraph
+    builder = StateGraph(SpecialistSubgraphState)
+    builder.add_node("init", init_node)
+    builder.add_node("agent", agent_node)
+    builder.add_node("tools", ToolNode(specialist_tools))
+    builder.add_node("post_tool", post_tool_node)
+    builder.add_node("final", final_output_node)
 
-    for iteration in range(max_iterations):
-        messages = cap_context_window(messages)  # prevent unbounded growth
+    # 3. Wire edges and conditional routing
+    builder.add_edge(START, "init")
+    builder.add_conditional_edges("init", route_after_init, {"agent": "agent", "end": END})
+    builder.add_conditional_edges("agent", route_after_agent, {"tools": "tools", "final": "final"})
+    builder.add_edge("tools", "post_tool")
+    builder.add_edge("post_tool", "agent")
+    builder.add_edge("final", END)
 
-        if iteration == max_iterations - 1:
+    subgraph = builder.compile(checkpointer=checkpointer_registry.checkpointer)
+```
+
+### Phase 4: Reasoning Loop (`agent_node`)
+```python
+    async def agent_node(sub_state: SpecialistSubgraphState):
+        messages = list(sub_state["messages"])
+        loop_step = sub_state["loop_step"]
+        max_iterations = sub_state["max_iterations"]
+
+        if loop_step == max_iterations - 1:
             messages.append(HumanMessage(content=FINAL_ITERATION_PROMPT))
 
-        response = await llm_with_tools.ainvoke(messages)
-        messages.append(response)
+        response = await llm.ainvoke(messages)
+        
+        # Real-time transparency trace
+        if sub_state.get("job_id"):
+            await emit_reasoning(job_id, "specialist_name", f"[Step {loop_step + 1}] ...")
 
-        if response.tool_calls:
-            # All tool calls in this turn run concurrently with a 20s per-tool timeout
-            results = await run_tools_parallel(tool_dispatch, response.tool_calls, "agent_name", logger)
-            for tc, result in zip(response.tool_calls, results):
-                messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
+        return {
+            "messages": [response],
+            "loop_step": loop_step + 1
+        }
+```
+
+### Phase 5: Structured Output Parsing (`final_output_node`)
+```python
+    async def final_output_node(sub_state: SpecialistSubgraphState):
+        # Strict Pydantic schema parsing replaces legacy string/bracket parsing
+        structured_llm = base_llm.with_structured_output(SpecialistOutputSchema, include_raw=True)
+        response_obj = await structured_llm.ainvoke(sub_state["messages"])
+
+        if isinstance(response_obj, dict) and not response_obj.get("parsing_error"):
+            result = response_obj["parsed"].model_dump()
         else:
-            final_content = response.content
-            if final_content:
-                break
-```
+            result = response_obj.model_dump()
 
-### Phase 4: Fallback Content Capture
-```python
-    # If loop exits without clean break
-    if not final_content and messages:
-        for msg in reversed(messages):
-            if isinstance(msg, AIMessage) and msg.content and not msg.tool_calls:
-                final_content = msg.content
-                break
-```
-
-### Phase 5: JSON Parsing (Flexible)
-```python
-    from backend.utils.agent_utils import parse_llm_json
-
-    raw_text, result = parse_llm_json(final_content)
-```
-
-### Phase 6: Report Generation
-```python
-    result["markdown_report"] = generate_specialist_markdown_report(result, ioc)
-```
-
-### Phase 7: State Updates
-```python
-    # Store results
-    if "specialist_results" not in state:
-        state["specialist_results"] = {}
-    state["specialist_results"]["specialist_name"] = result
-    
-    # Update graph
-    sync_findings_to_graph(state, result, target)
-    
-    # Mark subtask complete
-    for task in state.get("subtasks", []):
-        if task.get("agent") == "specialist_name":
-            task["status"] = "completed"
-            task["result_summary"] = result.get("summary")
-    
-    return state
+        # Code-enforced accumulation: merge previous findings so prior leads are never dropped
+        accumulate_findings(sub_state, result)
+        return {"result": result}
 ```
 
 ---
 
-## JSON Parsing Implementation
+## Structured Output Implementation
 
-### `parse_llm_json` (`backend/utils/agent_utils.py`)
+### Strict Schema Enforcement (`with_structured_output`)
 
-Handles Gemini/Vertex content that may arrive as a plain string or a list of content blocks. Strips markdown fences, detects array vs object format, and returns `(raw_text, parsed_dict)`. For arrays it returns the first element.
+Project Harimau specialist agents use LangChain's native `with_structured_output()` with strict Pydantic models (`MalwareSpecialistOutput` and `InfrastructureSpecialistOutput`). This completely replaces fragile regex or string bracket slicing (`.replace("```json")`).
 
-```python
-from backend.utils.agent_utils import parse_llm_json
-
-raw_text, result = parse_llm_json(response.content)
-# result is always a dict; raw_text is the original string for error context
-```
-
-Key behaviours:
-- Accepts `str` or `list[dict]` (Vertex content block format)
-- Strips ` ```json ` and bare ` ``` ` fences
-- For `[{...}]` arrays, extracts first element
-- Raises `ValueError` with a 100-char content preview if no JSON is found
+Key benefits:
+- Strict JSON Schema generated directly from Pydantic `BaseModel`.
+- Automatic retry / formatting handling by `ChatGoogleGenerativeAI`.
+- Code-enforced accumulation: findings from previous hunt rounds are merged in Python (`final_output_node`), preventing LLM forgetting across multi-round investigations.
 
 ---
 
 ## Shared Agent Utilities (`backend/utils/agent_utils.py`)
 
-All functions below are imported by both specialist agents. Do not duplicate them locally.
+All functions below are imported by specialist agents. Do not duplicate them locally.
 
-| Function | Purpose |
+| Function / Constant | Purpose |
 |---|---|
-| `FINAL_ITERATION_PROMPT` | Standard string appended on the last iteration to force JSON output |
-| `parse_llm_json(content)` | Normalise Vertex content, strip fences, return `(raw_text, dict)` |
-| `tool_timeout(seconds=20.0, logger=None)` | Decorator applied under `@tool` on every specialist tool. Bounds the call with `asyncio.wait_for` and a catch-all; on timeout or exception returns `json.dumps({"error": ...})` instead of raising, so LangGraph's `ToolNode` never aborts the sub-graph over one bad tool call. (`CancelledError` still propagates — it derives from `BaseException`.) |
-| `push_to_rich_intel(relationships_data, rel_name, entity_type, value, source_id, attributes)` | Deduplicating append — skips if same `id` + `source_id` already present |
+| `tool_timeout(seconds=20.0, logger=None)` | Decorator applied under `@tool` on every specialist tool. Bounds the call with `asyncio.wait_for` and a catch-all; on timeout or exception returns `json.dumps({"error": ...})` instead of raising, so LangGraph's `ToolNode` never aborts the sub-graph over one bad tool call. |
+| `build_peer_context(state, iteration, self_agent, peer_agent, extra_fields, count_key, logger)` | Injects cross-domain findings from the other specialist agent (from prior iterations) into the prompt. |
+| `parse_indicator_string(indicator)` | Parses `'Type: value'` indicator strings with regex, returning `(entity_type, value)`. |
+| `reduce_messages(left, right)` | ID-based deduplication message reducer for sub-graph state history. |
+| `push_to_rich_intel(relationships_data, rel_name, entity_type, value, source_id, attributes)` | Deduplicating append to `rich_intel` — skips if same `id` + `source_id` already present. |
+| `FINAL_ITERATION_PROMPT` | Standard prompt appended on the last iteration forcing final structured synthesis. |
 
-`run_tools_parallel()` and `cap_context_window()` — the dispatcher and message-window trimmer this table used to document — were deleted as dead code once the `ToolNode` migration made them unreachable (no remaining callers). Per-tool timeout/error containment moved to `tool_timeout()` above; message-window management is now `ToolNode`'s.
+> **Note**: `parse_llm_json()`, `run_tools_parallel()`, and `cap_context_window()` were deleted as dead code when the agents migrated to `ToolNode` subgraphs and strict `with_structured_output()`.
 
 ---
 

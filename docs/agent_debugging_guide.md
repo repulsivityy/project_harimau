@@ -60,6 +60,8 @@ elif object_start != -1:
 
 **Status**: ✅ Fixed in both agents (Rev 139)
 
+> **Modern Architecture Note (June 2026+)**: While the manual bracket extraction above solved raw string parsing in Rev 136–139, the codebase has since migrated to LangChain's native `base_llm.with_structured_output(SpecialistOutputSchema, include_raw=True)`. If an unexpected token stream occurs, `include_raw=True` preserves raw content in `response_obj["raw"]`, with regex/json fallback directly in `final_output_node`.
+
 ---
 
 ### 2. "LLM Returned Empty Content"
@@ -267,10 +269,11 @@ Always use `state.get("iteration", 0)` to retrieve the current iteration count f
 ## Best Practices
 
 ### Tool Definition Pattern
+*(For individual specialist tools decorated with `@tool`)*
 
-**❌ Avoid Pydantic Schemas** (Causes deployment crashes):
+**❌ Avoid Pydantic Schemas for `@tool` Inputs** (Causes deployment crashes and serialization failures in LangGraph ToolNode):
 ```python
-# DON'T
+# DON'T: Do not use args_schema for tool arguments
 class IpInput(BaseModel):
     ip_address: str = Field(...)
 
@@ -279,14 +282,17 @@ async def get_ip_address_report(ip_address: str):
     ...
 ```
 
-**✅ Use Simple Function Signatures**:
+**✅ Use Simple Function Signatures for Tools**:
 ```python
-# DO
+# DO: Use native python type hints with docstrings
 @tool
+@tool_timeout(logger=logger)
 async def get_ip_address_report(ip_address: str):
     """Get threat report for an IP address."""
     ...
 ```
+
+*(Note: For **Agent Final Outputs**, Pydantic schemas ARE used and recommended via `base_llm.with_structured_output(SpecialistOutputSchema)`).*
 
 ### Error Visibility
 
@@ -369,6 +375,8 @@ python3 -c "from backend.agents import infrastructure, malware; print('✅ OK')"
 | 137 | 2026-01-30 | MCP `ip_address` argument mapping |
 | 136 | 2026-01-30 | Fallback logic for empty content |
 | 135 | 2026-01-30 | Pydantic removal, structural alignment |
+
+> **For subsequent version history (v0.6.0 through v0.6.5+ including ToolNode subgraph migration, deterministic dot builder, and SSE robustness)**, see [CHANGELOG.md](./CHANGELOG.md).
 
 ---
 

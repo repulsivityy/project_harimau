@@ -119,17 +119,23 @@ For detailed milestone tracking, see [Implementation Plan](docs/implementation_p
 
 ## Documentation
 
+* [Documentation Index](docs/README.md)
 * [Product Requirements (PRD)](docs/PRD.md)
-* [Architecture Proposal](docs/architecture.md)
-* [Implementation Plan](docs/implementation_plan_v2.md)
+* [System Architecture](docs/architecture.md)
+* [Implementation Plan](docs/implementation_plan.md)
+* [Agent Implementation Guide](docs/agent_implementation.md)
+* [Agent Debugging & Troubleshooting](docs/agent_debugging_guide.md)
+* [Changelog](docs/CHANGELOG.md)
+* [Dependency Graph](docs/dependency_graph.md)
 * [Documentation Framework](docs/FRAMEWORK.md)
+* [Roadmap: Rethinking Attack Chain](docs/roadmap_rethinking_attack_chain.md)
 
 ## Technology Stack
 
 * **Orchestration**: LangGraph
 * **API**: FastAPI
-* **UI**: Next.js
-* **LLM**: Vertex AI (Gemini 3.5)
+* **UI**: Next.js (React, Tailwind CSS v4)
+* **LLM**: Gemini 3.5 Flash & Gemini 3.1 Pro Preview (via `langchain-google-genai`)
 * **Cache**: NetworkX (in-memory, per investigation) with Cloud SQL JSONB graph persistence
 * **Deployment**: Google Cloud Run
 * **Secrets**: Google Secret Manager

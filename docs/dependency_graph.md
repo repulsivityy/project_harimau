@@ -1,6 +1,6 @@
 # Codebase Dependency Graph
 
-This document outlines the classes, functions, and dependencies for each Python file in the `project_harimau` codebase.
+This document outlines the architecture, components, and module dependencies for the `project_harimau` codebase.
 
 ## Semantic Knowledge Graph
 
@@ -10,13 +10,18 @@ This section provides a detailed semantic graph of the codebase relationships, f
 
 ```mermaid
 graph TD
-    subgraph Frontend [App / Next.js]
-        app_main["app/main.py"] --> api_client["app/api_client.py"]
-        app_main --> comp_tracker["app/components/investigation_tracker.py"]
-        app_main --> comp_tabs["app/components/results_tabs.py"]
-        app_main --> comp_sidebar["app/components/sidebar.py"]
+    subgraph Frontend [App / Next.js 15+ App Router]
+        page["src/app/page.tsx (Landing & Search)"]
+        investigate["src/app/investigate/[id]/page.tsx (Tactical Dashboard)"]
+        proxy["src/app/api/[...path]/route.ts (Runtime API Proxy)"]
         
-        api_client -->|HTTP API| b_main["backend/main.py"]
+        page -->|POST /api/investigate| proxy
+        page -->|GET /api/investigations| proxy
+        investigate -->|GET /api/investigations/:id| proxy
+        investigate -->|GET /api/investigations/:id/graph| proxy
+        investigate -->|SSE /api/investigations/:id/stream| proxy
+        
+        proxy -->|Runtime BACKEND_URL| b_main["backend/main.py"]
     end
 
     subgraph Backend [FastAPI / LangGraph]
@@ -30,6 +35,10 @@ graph TD
         workflow --> infra["backend/agents/infrastructure.py"]
         workflow --> lead_hunter["backend/agents/lead_hunter.py"]
         
+        lead_hunter --> lh_plan["backend/agents/lead_hunter_planning.py"]
+        lead_hunter --> lh_synth["backend/agents/lead_hunter_synthesis.py"]
+        lh_synth --> dot_builder["backend/utils/dot_builder.py"]
+        
         triage --> graph_cache["backend/utils/graph_cache.py"]
         malware --> graph_cache
         infra --> graph_cache
@@ -39,12 +48,10 @@ graph TD
         malware --> mcp_client
         
         triage --> gti_tool["backend/tools/gti.py"]
-        malware --> gti_tool
-        
         triage --> webrisk_tool["backend/tools/webrisk.py"]
         infra --> webrisk_tool
         
-        b_main --> db[(Cloud SQL)]
+        b_main --> db[(Cloud SQL - PostgreSQL)]
         workflow --> db
     end
 
@@ -56,182 +63,190 @@ graph TD
 
 ### Detailed Node Descriptions
 
-*   **`app/main.py`**: Streamlit/Next.js entry point for the UI. Renders components and uses `api_client` to talk to backend.
-*   **`app/api_client.py`**: Wrapper for API calls to the backend.
-*   **`backend/main.py`**: FastAPI entry point. Handles HTTP requests, database operations (Cloud SQL), and initiates the LangGraph workflow.
-*   **`backend/graph/workflow.py`**: Defines the LangGraph state machine, adding nodes for each agent and edges for transitions.
-*   **`backend/graph/state.py`**: Defines the `AgentState` dictionary used to pass data between nodes in the graph.
-*   **`backend/agents/triage.py`**: Triage Agent. Performs breadth-first search of IOCs, populates the graph cache, and assigns subtasks to specialists.
-*   **`backend/agents/malware.py`**: Malware Specialist Agent. Performs deep dive into file artifacts, attribution, and behavior.
-*   **`backend/agents/infrastructure.py`**: Infrastructure Specialist Agent. Pivots on domains/IPs to map adversary infrastructure.
-*   **`backend/agents/lead_hunter.py`**: Lead Hunter Agent. Synthesizes findings from all agents and graph cache to produce final report.
-*   **`backend/utils/graph_cache.py`**: Implements the `InvestigationCache` using NetworkX `MultiDiGraph`. Crucial for token optimization (Dual-Layer Data Model).
-*   **`backend/mcp/client.py`**: Manages sessions with embedded MCP servers (GTI and Shodan).
+*   **`src/app/page.tsx`**: Next.js client component. Tactical landing page with centered IOC search input, investigation depth slider (1–5 `max_iterations`), and past investigation table fetched from `/api/investigations`.
+*   **`src/app/investigate/[id]/page.tsx`**: Next.js dynamic route rendering the **Tiled Tactical Dashboard**:
+    - **Attack-Flow Diagram**: Graphviz renderer using `d3-graphviz` with fallback error containment.
+    - **Knowledge Graph**: Interactive graph via `@xyflow/react` and `d3-force` simulation with node styling by entity type.
+    - **Specialist Dossiers**: Side-by-side markdown reports for Malware and Infrastructure agents.
+    - **Agent Transparency**: Live EventSource listener streaming real-time thoughts and tool execution logs from `/api/investigations/{id}/stream`.
+*   **`src/app/api/[...path]/route.ts`**: App Router catch-all proxy route. Evaluates `BACKEND_URL` dynamically at request time (Cloud Run runtime env var), forwarding all `/api/*` traffic to the FastAPI backend.
+*   **`backend/main.py`**: FastAPI entry point. Handles HTTP requests, database lifecycle (Cloud SQL connection pool via `asyncpg`), checkpointer setup (`AsyncPostgresSaver`), background task dispatch (`_run_investigation_background`), and SSE streaming endpoints.
+*   **`backend/graph/workflow.py`**: Defines the LangGraph investigation workflow: `triage` -> `gate` -> `malware_specialist` & `infrastructure_specialist` (parallel fan-out) -> `lead_hunter` -> (loop or `END`).
+*   **`backend/graph/state.py`**: Defines `AgentState` with deep reducers: `merge_metadata` (recursive rich-intel merging), `merge_graphs` (NetworkX MultiDiGraph merging), `union_lists` (case-insensitive dedup), and `last_value`.
+*   **`backend/agents/triage.py`**: Triage Agent. Performs initial breadth-first relationship queries via direct GTI API fast-path, evaluates risk levels, filters high-signal entities, and deterministically generates subtasks.
+*   **`backend/agents/malware.py`**: Malware Specialist Agent. Runs as a LangGraph `ToolNode` sub-graph with 5 specialist tools (`get_file_behavior`, `get_dropped_files`, `get_network_activity`, `get_attribution`, `get_file_report`), structured Pydantic output, and cumulative iteration memory.
+*   **`backend/agents/infrastructure.py`**: Infrastructure Specialist Agent. Runs as a LangGraph `ToolNode` sub-graph with 10 tools across GTI (domains, IPs, URLs), WebRisk, and Shodan (IP/DNS lookups), with structured output.
+*   **`backend/agents/lead_hunter.py`**: Lead Hunter Orchestrator. Coordinates planning rounds (`run_planning_phase`) and final intelligence synthesis (`generate_final_report_llm`), enforcing early convergence exit rules.
+*   **`backend/agents/lead_hunter_synthesis.py`**: Synthesizes the final intelligence report, builds the grounded edge fact table, and coordinates attack-flow diagram annotation with `dot_builder.py`.
+*   **`backend/utils/dot_builder.py`**: Generates deterministic Graphviz DOT skeletons directly from NetworkX cache, parses returned DOT fences, and strictly validates node/edge consistency.
+*   **`backend/utils/graph_cache.py`**: Wraps NetworkX `MultiDiGraph` with canonical entity ID normalization (`_normalise_id`), deep node/edge attribute merging, and minimal field extraction.
+*   **`backend/mcp/client.py`**: Manages stdio sessions for embedded GTI and Shodan FastMCP servers.
 
 ### Key Relationships (Edges)
 
-*   **Frontend -> Backend**: `api_client.py` makes REST API calls to `backend/main.py` (e.g., `/api/investigate`, `/api/investigations/{id}`).
-*   **Orchestration**: `workflow.py` orchestrates the execution flow between `triage`, `malware`, `infra`, and `lead_hunter` based on the state.
-*   **Data Sharing**: All agents read from and write to `graph_cache.py` to share detailed intel without blowing up the LLM token context in `AgentState`.
-*   **Tool Access**: Agents use `mcp_client.py` to invoke tools exposed by the embedded MCP servers.
+*   **Frontend -> Backend**: Next.js client fetches from `/api/*`, which `src/app/api/[...path]/route.ts` proxies at runtime to `backend/main.py`.
+*   **SSE Streaming**: `/api/investigations/{id}/stream` streams JSON events from `backend/utils/sse_manager.py` directly to the Next.js `EventSource` subscriber.
+*   **Orchestration**: `workflow.py` orchestrates state transitions between `triage`, `gate`, specialists, and `lead_hunter`.
+*   **Data Sharing**: Specialists commit raw findings directly to `graph_cache.py` and `metadata["rich_intel"]`, preserving full data for downstream synthesis while passing compact summaries to LLMs.
+*   **Tool Execution**: Specialist agents invoke MCP tools bounded by `@tool_timeout(20.0)` in `backend/utils/agent_utils.py`.
 
+## Frontend (`/app`)
 
-## `app/api_client.py`
-**Imports:**
-- `os`
-- `requests`
-- `time`
-- `typing`
+### `app/src/app/page.tsx`
+**Role:** Main landing page and IOC search interface.
+**Dependencies:**
+- `next/navigation` (`useRouter`)
+- `next/image`
+- React hooks (`useState`, `useEffect`)
+**Endpoints Consumed:**
+- `GET /api/investigations` (fetch past search history)
+- `POST /api/investigate` (submit new investigation with `ioc` and `max_iterations`)
 
-**Classes:**
-- `HarimauAPIClient`
-  - `__init__()`
-  - `health_check()`
-  - `submit_investigation()`
-  - `get_investigation()`
-  - `get_investigations()`
-  - `get_graph_data()`
-  - `get_report()`
-  - `stream_investigation_events()`
+### `app/src/app/investigate/[id]/page.tsx`
+**Role:** Tactical Investigation Dashboard (Tiled layout).
+**Dependencies:**
+- `@xyflow/react` (`ReactFlow`, `Controls`, `MiniMap`, `Background`)
+- `d3-graphviz` & `d3` (attack-flow Graphviz diagram rendering)
+- `react-markdown` & `remark-gfm` (report and dossier rendering)
+- `dagre` (graph layout helper)
+**Endpoints Consumed:**
+- `GET /api/investigations/:id` (poll/fetch status and results)
+- `GET /api/investigations/:id/graph` (fetch nodes and edges for ReactFlow)
+- `GET /api/investigations/:id/stream` (SSE real-time event listener)
 
-## `app/components/__init__.py`
-## `app/components/investigation_tracker.py`
-**Imports:**
-- `api_client`
-- `streamlit`
-- `time`
-
-**Top-level Functions:**
-- `render_investigation_tracker()`
-
-## `app/components/results_tabs.py`
-**Imports:**
-- `api_client`
-- `datetime`
-- `re`
-- `streamlit`
-
-**Top-level Functions:**
-- `_render_graph_tab()`
-- `_render_report_tab()`
-- `_render_specialist_tab()`
-- `_render_timeline_tab()`
-- `_render_transparency_tab()`
-- `_render_triage_tab()`
-- `render_tabs()`
-
-## `app/components/sidebar.py`
-**Imports:**
-- `api_client`
-- `streamlit`
-
-**Top-level Functions:**
-- `render_sidebar()`
-
-## `app/main.py`
-**Imports:**
-- `api_client`
-- `components.investigation_tracker`
-- `components.results_tabs`
-- `components.sidebar`
-- `requests`
-- `streamlit`
+### `app/src/app/api/[...path]/route.ts`
+**Role:** Dynamic Next.js App Router catch-all proxy.
+**Dependencies:**
+- `next/server` (`NextRequest`, `NextResponse`)
+- Runtime env var `BACKEND_URL` (default: `http://localhost:8080`)
+**HTTP Methods Handled:** `GET`, `POST`, `DELETE`
 
 ## `backend/__init__.py`
 ## `backend/agents/__init__.py`
 ## `backend/agents/infrastructure.py`
 **Imports:**
-- `backend.graph.state`
-- `backend.mcp.client`
+- `asyncio`
+- `contextlib.AsyncExitStack`
+- `pydantic` (`BaseModel`, `Field`)
+- `langchain_core.messages` (`SystemMessage`, `HumanMessage`, `BaseMessage`)
+- `langchain_core.tools` (`tool`)
+- `langchain_google_genai` (`ChatGoogleGenerativeAI`)
+- `langgraph.graph` (`StateGraph`, `START`, `END`)
+- `langgraph.prebuilt` (`ToolNode`)
+- `backend.graph.state` (`AgentState`)
+- `backend.mcp.client` (`mcp_manager`)
 - `backend.tools.webrisk`
-- `backend.utils.graph_cache`
+- `backend.utils.agent_utils` (`tool_timeout`, `build_peer_context`, `push_to_rich_intel`, `reduce_messages`, `parse_indicator_string`)
+- `backend.utils.checkpointer_registry`
+- `backend.utils.graph_cache` (`InvestigationCache`, `extract_gti_summary`)
 - `backend.utils.logger`
-- `backend.utils.transparency`
-- `contextlib`
-- `json`
-- `langchain_core.messages`
-- `langchain_core.tools`
-- `langchain_google_vertexai`
-- `os`
+- `backend.utils.transparency` (`emit_tool_call`, `emit_reasoning`)
+
+**Classes & Schemas:**
+- `InfrastructureSpecialistOutput` (Pydantic model for structured output)
+- `AnalyzedTargetInfra`
 
 **Top-level Functions:**
-- `generate_infrastructure_markdown_report()`
-- `infrastructure_node()`
+- `infrastructure_node()`: Main entry point for the Infrastructure Agent (compiles and runs `StateGraph(InfrastructureSubgraphState)` with `ToolNode` and `@tool_timeout(20.0)` wrappers)
+- `generate_infrastructure_markdown_report()`: Generates standalone specialist dossier markdown
 
 ## `backend/agents/lead_hunter.py`
+**Role:** Active orchestrator for Project Harimau (`run_planning_phase` + `generate_final_report_llm`).
 **Imports:**
-- `backend.agents.lead_hunter_planning`
-- `backend.agents.lead_hunter_synthesis`
-- `backend.config`
-- `backend.graph.state`
-- `backend.utils.graph_cache`
+- `langchain_google_genai` (`ChatGoogleGenerativeAI`)
+- `backend.agents.lead_hunter_planning` (`run_planning_phase`)
+- `backend.agents.lead_hunter_synthesis` (`generate_final_report_llm`)
+- `backend.config` (`DEFAULT_HUNT_ITERATIONS`)
+- `backend.graph.state` (`AgentState`)
+- `backend.utils.graph_cache` (`InvestigationCache`)
 - `backend.utils.logger`
-- `langchain_google_vertexai`
-- `os`
+- `backend.utils.report_validator` (`validate_and_annotate`)
+- `backend.utils.signal_filter` (`promote_by_graph_context`)
+- `backend.utils.transparency` (`emit_reasoning`)
+- `backend.utils.verdict_engine` (`apply_composite_verdicts`)
 
 **Top-level Functions:**
-- `lead_hunter_node()`
+- `lead_hunter_node()`: Decides between Planning Mode (`run_planning_phase`) and Synthesis Mode (`generate_final_report_llm`) based on iteration limits and 3-layer convergence exit conditions.
 
 ## `backend/agents/lead_hunter_planning.py`
 **Imports:**
 - `backend.graph.state`
 - `backend.utils.graph_cache`
 - `backend.utils.logger`
-- `json`
+- `backend.utils.transparency`
 - `langchain_core.messages`
+- `langchain_google_genai`
+- `pydantic`
 
 **Top-level Functions:**
-- `run_planning_phase()`
+- `run_planning_phase()`: Queries NetworkX cache for uninvestigated entities, evaluates pivot opportunities, and generates next-round subtasks.
 
 ## `backend/agents/lead_hunter_synthesis.py`
 **Imports:**
 - `backend.graph.state`
-- `backend.utils.logger`
-- `json`
-- `langchain_core.messages`
-
-**Top-level Functions:**
-- `generate_final_report_llm()`
-
-## `backend/agents/malware.py`
-**Imports:**
-- `backend.graph.state`
-- `backend.mcp.client`
-- `backend.tools.gti`
+- `backend.utils.dot_builder` (`build_dot_skeleton`, `parse_dot_structure`, `validate_dot`, `replace_dot_block`, `demote_extra_dot_blocks`)
 - `backend.utils.graph_cache`
 - `backend.utils.logger`
 - `backend.utils.transparency`
-- `json`
 - `langchain_core.messages`
-- `langchain_core.tools`
-- `langchain_google_vertexai`
-- `os`
+- `langchain_google_genai`
 
 **Top-level Functions:**
-- `generate_malware_markdown_report()`
-- `malware_node()`
+- `generate_final_report_llm()`: Synthesizes findings across triage, specialist dossiers, and the persisted graph into a comprehensive intelligence report with a validated Graphviz attack-flow diagram.
+- `_score_edges()`: Computes multi-attribute relevance scores for graph edges.
+- `_select_diagram_edges()`: Shared edge selection enforcing the 40-edge cap with high-signal prioritization.
+
+## `backend/agents/malware.py`
+**Imports:**
+- `asyncio`
+- `pydantic` (`BaseModel`, `Field`)
+- `langchain_core.messages` (`SystemMessage`, `HumanMessage`, `BaseMessage`)
+- `langchain_core.tools` (`tool`)
+- `langchain_google_genai` (`ChatGoogleGenerativeAI`)
+- `langgraph.graph` (`StateGraph`, `START`, `END`)
+- `langgraph.prebuilt` (`ToolNode`)
+- `backend.graph.state` (`AgentState`)
+- `backend.mcp.client` (`mcp_manager`)
+- `backend.utils.agent_utils` (`tool_timeout`, `build_peer_context`, `push_to_rich_intel`, `reduce_messages`, `parse_indicator_string`)
+- `backend.utils.checkpointer_registry`
+- `backend.utils.graph_cache` (`InvestigationCache`, `extract_gti_summary`)
+- `backend.utils.logger`
+- `backend.utils.transparency` (`emit_tool_call`, `emit_reasoning`)
+
+**Classes & Schemas:**
+- `MalwareSpecialistOutput` (Pydantic model for structured output)
+- `AnalyzedTarget`
+- `IntelligenceNotes`
+
+**Top-level Functions:**
+- `malware_node()`: Main entry point for the Malware Agent (runs `StateGraph(MalwareSubgraphState)` with `ToolNode` and 5 specialized analysis tools)
+- `generate_malware_markdown_report()`: Generates standalone specialist dossier markdown
 
 ## `backend/agents/triage.py`
 **Imports:**
 - `asyncio`
-- `backend.graph.state`
+- `pydantic` (`BaseModel`, `Field`)
+- `langchain_core.messages` (`SystemMessage`, `HumanMessage`)
+- `langchain_google_genai` (`ChatGoogleGenerativeAI`)
+- `backend.graph.state` (`AgentState`)
 - `backend.tools.gti`
 - `backend.tools.webrisk`
-- `backend.utils.graph_cache`
+- `backend.utils.graph_cache` (`InvestigationCache`, `normalize_verdict`)
 - `backend.utils.logger`
-- `backend.utils.transparency`
-- `json`
-- `langchain_core.messages`
-- `langchain_google_vertexai`
-- `os`
-- `re`
+- `backend.utils.signal_filter` (`get_signal_reason`)
+- `backend.utils.transparency` (`emit_tool_call`, `emit_reasoning`)
+
+**Classes & Schemas:**
+- `TriageAnalysisOutput`
+- `ThreatContext`
+- `PriorityEntity`
 
 **Top-level Functions:**
+- `triage_node()`: Orchestrates breadth-first initial enrichment, signal filtering, verdict determination, and deterministic subtask generation.
 - `comprehensive_triage_analysis()`
 - `extract_triage_data()`
 - `generate_markdown_report_locally()`
 - `prepare_detailed_context_for_llm()`
-- `triage_node()`
 
 ## `backend/config.py`
 **Imports:**
@@ -563,6 +578,28 @@ graph TD
 - `get_webrisk_api_key()`
 
 ## `backend/utils/__init__.py`
+
+## `backend/utils/agent_utils.py`
+**Imports:**
+- `asyncio`
+- `functools`
+- `json`
+- `re`
+- `langchain_core.messages` (`BaseMessage`)
+- `typing` (`List`)
+
+**Top-level Functions & Constants:**
+- `tool_timeout(seconds=20.0, logger=None)`: Wall-clock timeout decorator with catch-all returning uniform `json.dumps({"error": ...})` envelope. Applied under `@tool` on all 15 specialist tool closures.
+- `build_peer_context()`: Builds formatted string of the other specialist's findings from prior iterations for cross-domain context injection.
+- `parse_indicator_string()`: Parses `'Type: value'` indicator strings with regex into `(entity_type, value)`.
+- `reduce_messages()`: LangGraph message list reducer with ID-based deduplication and overwrite history support.
+- `push_to_rich_intel()`: Deduplicating append to relationship entity lists based on `(id, source_id)`.
+- `FINAL_ITERATION_PROMPT`: Standard prompt forcing structured conclusion on the final specialist iteration.
+
+## `backend/utils/checkpointer_registry.py`
+**Global State:**
+- `checkpointer`: Holds the initialized `AsyncPostgresSaver` instance or `None`.
+
 ## `backend/utils/config.py`
 **Imports:**
 - `os`
@@ -570,38 +607,60 @@ graph TD
 - `yaml`
 
 **Top-level Functions:**
-- `load_agents_config()`
+- `load_agents_config()`: Helper to load agent hyperparameters.
+
+## `backend/utils/dot_builder.py`
+**Imports:**
+- `re`
+- `typing` (`Dict`, `List`, `Set`, `Tuple`, `Optional`)
+- `backend.utils.logger`
+
+**Top-level Functions:**
+- `build_dot_skeleton()`: Deterministically builds a complete Graphviz `digraph` skeleton directly from the NetworkX cache, styled and clustered by entity type and verdict.
+- `parse_dot_structure()`: Permissive, quote-aware scanner extracting all referenced node IDs and directed edges from a DOT string.
+- `validate_dot()`: Validates that an LLM-annotated DOT block is structurally sound (no hallucinated nodes/edges) and complete (retains all required skeleton edges).
+- `extract_dot_block()`: Extracts the first ` ```dot ` fenced block from markdown text.
+- `replace_dot_block()`: Replaces the first ` ```dot ` block in markdown text with a validated or fallback block.
+- `demote_extra_dot_blocks()`: Retags any secondary ` ```dot ` blocks to ` ```text ` to prevent unvalidated diagrams from reaching the frontend renderer.
 
 ## `backend/utils/graph_cache.py`
 **Imports:**
 - `json`
-- `networkx`
+- `networkx` as `nx`
 - `typing`
 
 **Classes:**
 - `InvestigationCache`
-  - `__init__()`
-  - `get_state()`
-  - `add_entity()`
-  - `add_relationship()`
-  - `get_entity_minimal()`
-  - `get_entity_full()`
-  - `get_neighbors()`
-  - `get_neighbors_with_data()`
-  - `get_all_entities_by_type()`
-  - `has_entity()`
+  - `__init__(graph_data=None)`
+  - `get_state()`: Serializes graph via `nx.node_link_data()`.
+  - `add_entity(entity_id, entity_type, **attributes)`: Normalized ID insertion.
+  - `add_relationship(source_id, target_id, relationship, **attributes)`: Pre-insertion deduplicating edge insertion.
+  - `get_entity_minimal(entity_id)`: Extracts 9 compact fields for token-optimized LLM context.
+  - `get_entity_full(entity_id)`: Retrieves complete raw attributes.
+  - `get_neighbors(entity_id)`
+  - `get_neighbors_with_data(entity_id)`
+  - `get_all_entities_by_type(entity_type)`
+  - `has_entity(entity_id)`
   - `get_stats()`
-  - `mark_as_investigated()`
+  - `mark_as_investigated(entity_id, agent_name)`
   - `get_uninvestigated_nodes()`
   - `export_for_visualization()`
+
+**Top-level Functions:**
+- `_normalise_id(raw_id)`: Canonical lowercase, trimmed string normalization.
+- `normalize_verdict(val)`: Coerces arbitrary GTI verdict values into uppercase standards (`MALICIOUS`, `SUSPICIOUS`, `BENIGN`, `UNKNOWN`).
+- `extract_gti_summary(entity)`: Helper extracting vendor detections and threat scores.
 
 ## `backend/utils/graph_formatter.py`
 **Imports:**
 - `backend.utils.logger`
+- `backend.utils.graph_cache` (`InvestigationCache`, `normalize_verdict`)
 - `json`
+- `os`
 
 **Top-level Functions:**
-- `format_investigation_graph()`
+- `format_graph_from_cache(job_id, job)`: Builds frontend graph data directly from the persisted NetworkX `investigation_graph` JSONB, providing rich tooltips, typed colors, `isMalicious`, `entityType`, and `isRoot` flags.
+- `format_investigation_graph(job_id, job)`: Legacy reconstruction fallback using `rich_intel`.
 
 ## `backend/utils/logger.py`
 **Imports:**
@@ -611,31 +670,58 @@ graph TD
 - `sys`
 
 **Top-level Functions:**
-- `configure_logger()`
-- `get_logger()`
+- `configure_logger()`: Configures structured JSON logging for Cloud Logging compatibility.
+- `get_logger(name)`: Returns a structured logger instance with contextual binding.
+
+## `backend/utils/report_validator.py`
+**Imports:**
+- `re`
+- `typing` (`Dict`, `List`, `Any`)
+- `backend.utils.logger`
+
+**Top-level Functions:**
+- `validate_and_annotate(report_text, graph_cache, root_ioc)`: Validates that the synthesized Markdown report contains all required sections and annotates missing indicators.
+
+## `backend/utils/signal_filter.py`
+**Imports:**
+- `typing` (`Dict`, `Any`, `List`, `Optional`)
+
+**Top-level Functions:**
+- `get_signal_reason(entity_data, entity_type)`: Heuristics evaluating whether an entity is high-signal based on vendor counts, verdicts, and suspicious attributes.
+- `promote_by_graph_context(cache, uninvestigated_nodes)`: Identifies nodes that bridge malware and infrastructure domains for prioritization.
 
 ## `backend/utils/sse_manager.py`
 **Imports:**
 - `asyncio`
-- `backend.utils.logger`
 - `datetime`
 - `json`
-- `typing`
+- `typing` (`Dict`, `List`, `Any`, `Optional`)
+- `backend.utils.logger`
 
 **Classes:**
 - `SSEEventManager`
   - `__init__()`
-  - `create_queue()`
-  - `emit_event()`
-  - `get_events()`
-  - `subscribe()`
-  - `clear_history()`
+  - `create_queue(job_id)`: Registers a subscriber queue.
+  - `emit_event(job_id, event_type, data)`: Non-raising broadcast with subscriber snapshotting and monotone progress clamping (0–100%).
+  - `get_events(job_id)`: Historical event retrieval.
+  - `subscribe(job_id)`: Async generator yielding formatted SSE events.
+  - `clear_history(job_id)`: Frees event queues and clears progress tracking state.
 
 ## `backend/utils/transparency.py`
 **Imports:**
+- `backend.utils.sse_manager`
+- `backend.utils.logger`
 - `typing`
 
 **Top-level Functions:**
-- `emit_reasoning()`
-- `emit_tool_call()`
-- `emit_tool_result()`
+- `emit_reasoning(job_id, agent_name, thought)`: Emits LLM reasoning thoughts to SSE stream.
+- `emit_tool_call(job_id, agent_name, tool_name, tool_input)`: Emits tool invocation trace to SSE stream.
+- `emit_tool_result(job_id, agent_name, tool_name, result_summary)`: Emits tool result summary to SSE stream.
+
+## `backend/utils/verdict_engine.py`
+**Imports:**
+- `typing` (`Dict`, `Any`, `List`)
+- `backend.utils.logger`
+
+**Top-level Functions:**
+- `apply_composite_verdicts(cache, triage_verdict)`: Calculates comprehensive risk scores and weighted composite verdicts across all graph nodes.

@@ -232,6 +232,34 @@ This closes a silent failure mode: the frontend's `d3-graphviz` `renderDot()` is
 
 ### 3.1 Investigation Endpoints
 
+#### GET /health
+**Health and infrastructure check.**
+Verifies database connectivity and service availability. Returns `{"status": "ok", "database": "connected"}`.
+
+#### GET /api/investigations
+**List past investigations.**
+Retrieves a paginated list of recent investigations from Cloud SQL, ordered by creation date descending. Consumed by the Next.js home page for recent search history.
+
+**Query Parameters**:
+* `limit`: integer (default: 20, max: 100)
+* `offset`: integer (default: 0)
+
+**Response** (200 OK):
+```json
+[
+  {
+    "job_id": "abc-123",
+    "status": "completed",
+    "ioc": "44d88612fea8a8f36de82e1278abb02f",
+    "ioc_type": "File",
+    "risk_level": "HIGH",
+    "gti_score": 85,
+    "created_at": "2026-08-01T10:00:00Z",
+    "completed_at": "2026-08-01T10:04:30Z"
+  }
+]
+```
+
 #### POST /api/investigate
 **Submit new investigation (Async Pattern).**
 
@@ -254,10 +282,10 @@ This closes a silent failure mode: the frontend's `d3-graphviz` `renderDot()` is
 }
 ```
 
-**Note**: Investigation runs in background. Poll the GET endpoint below for completion status.
+**Note**: Investigation runs asynchronously in the background via `asyncio.create_task`. Poll the GET endpoint or subscribe to the SSE stream below.
 
 #### GET /api/investigations/{job_id}
-**Get investigation status and results.**
+**Get investigation status, reports, and metadata.**
 
 **Response** (200 OK):
 ```json
@@ -276,30 +304,70 @@ This closes a silent failure mode: the frontend's `d3-graphviz` `renderDot()` is
 }
 ```
 
+#### GET /api/investigations/{job_id}/stream
+**Real-time Server-Sent Events (SSE) stream.**
+Provides sub-second updates of agent tasks, progress percentage (0–100% monotonically bounded), tool calls, reasoning thoughts, and status transitions. Consumed by the Next.js Tactical Dashboard.
+
+**Event Format**:
+```
+event: progress
+data: {"job_id": "abc-123", "progress": 45, "step": "Malware Analysis", "phase": "specialists"}
+
+event: reasoning
+data: {"job_id": "abc-123", "agent": "malware", "thought": "Selecting investigation tools: get_file_behavior"}
+
+event: completed
+data: {"job_id": "abc-123", "status": "completed"}
+```
+
 #### GET /api/investigations/{job_id}/graph
-**Get graph data with rich tooltips.**
+**Get interactive knowledge graph data.**
+Constructed from the persisted NetworkX investigation graph via `format_graph_from_cache()`, with fallback to `rich_intel`. Uses real normalised entity IDs and rich typed metadata.
 
 **Response** (200 OK):
 ```json
 {
   "nodes": [
     {
-      "id": "contacted_domains_evil.com",
+      "id": "evil.com",
       "label": "evil.com",
       "color": "#E67E22",
-      "size": 20,
-      "title": "Threat Score: 85\n42 vendors detected as malicious\nVerdict: MALICIOUS"
+      "size": 18,
+      "title": "Threat Score: 85\n42 vendors detected as malicious",
+      "isMalicious": true,
+      "entityType": "domain",
+      "isRoot": false
     }
   ],
-  "edges": [...]
+  "edges": [
+    {
+      "source": "44d88612fea8a8f36de82e1278abb02f",
+      "target": "evil.com",
+      "label": "contacted_domains"
+    }
+  ]
 }
 ```
 
-#### GET /api/debug/investigation/{job_id}
-**Debug endpoint for investigation state inspection.**
+#### GET /api/investigations/{job_id}/history
+**Get LangGraph checkpoint history across hunt iterations.**
+Extracts iterative reports for each completed loop from the PostgreSQL checkpointer. Used by `download_reports.py` to trace cumulative report progression.
 
-#### GET /api/diagnostic/pipeline/{ioc}
-**Test each pipeline step independently.**
+#### POST /api/investigations/{job_id}/cancel
+**Cancel an active investigation.**
+Terminates the running LangGraph background task and transitions status to `cancelled`.
+
+#### POST /api/admin/bulk-cancel & DELETE /api/admin/jobs
+**Administrative maintenance endpoints.**
+Cancel running jobs or delete investigation records from Cloud SQL.
+
+### 3.2 Diagnostic Endpoints
+
+* `GET /api/debug/investigation/{job_id}`: Inspect raw in-memory or persisted state dictionary.
+* `GET /api/diagnostic/pipeline/{ioc}`: Test each pipeline stage independently without persisting to Cloud SQL.
+* `GET /api/diagnostic/test-iocs`: Retrieve curated test IOCs across file, domain, IP, and URL types.
+* `GET /api/diagnostic/tool-test/{ioc}`: Validate individual MCP tool execution against a target indicator.
+* `GET /api/test/sse`: Test client connection to the SSE event manager.
 
 ---
 

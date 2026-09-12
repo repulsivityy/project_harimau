@@ -10,11 +10,11 @@
 *   **Observable**: Deep visibility into agent reasoning and threat data exploration
 
 ## 2. Technical Stack
-*   **Frontend (`/app`)**: ~~Streamlit (Cloud Run Service) - Interactive investigation dashboard ~~ Next.js (updated April 2026)
-*   **Backend (`/backend`)**: FastAPI + LangGraph (Cloud Run Service) - Multi-agent orchestration
-*   **Cache**: NetworkX (in-memory graph per investigation)
+*   **Frontend (`/app`)**: Next.js (React, Tailwind CSS v4, @xyflow/react, d3-graphviz) - interactive investigation dashboard
+*   **Backend (`/backend`)**: FastAPI + LangGraph (Cloud Run Service) - multi-agent orchestration
+*   **Cache**: NetworkX (in-memory graph per investigation) with Cloud SQL JSONB persistence
 *   **MCP Servers**: Google Threat Intelligence + Shodan (Embedded Python subprocesses, registry-driven)
-*   **Models**: Gemini 2.5 Flash (Triage) / Pro (Deep Analysis)
+*   **Models**: Gemini 3.5 Flash (Triage & Planning) / Gemini 3.1 Pro Preview (Specialists & Synthesis) via `langchain-google-genai`
 
 ## 3. Core Features
 
@@ -59,7 +59,7 @@ The Lead Hunter must produce a **comprehensive threat intelligence analysis**, n
     - **Clustering**: Hierarchical clustering for high-volume nodes (e.g., "Contacted Domains").
     - **Smart Truncation**: Filenames are truncated (24 chars + ext) to preserve SHA256 hashes.
     - **Filtering**: Contextual metadata (`attack_techniques`, etc.) analyzed but not visualized.
-    - **Capacity**: 15 entities per relationship, 150 total.
+    - **Capacity**: 10 entities per relationship sent to LLM context (`MAX_ENTITIES_PER_RELATIONSHIP = 10`), 150 total.
     
 ### 3.3.1 Data Flow Strategy (Memory Architecture)
 *   **Dual-Layer Memory**:
@@ -92,11 +92,15 @@ The Lead Hunter must produce a **comprehensive threat intelligence analysis**, n
 
 ## 5. Testing Strategy
 We adopt a "Verify-as-we-Build" approach.
-*   **Unit Tests (`pytest`)**:
-    *   **Agents**: Test logic with *Mocked* LLM outputs (don't waste money).
-    *   **Tools**: Test MCP Client parsing logic (Mocked MCP responses).
+*   **Unit Tests (`pytest` in `backend/tests/`)**:
+    *   `test_dot_builder.py`: Deterministic Graphviz skeleton generation and AST validation.
+    *   `test_specialist_subgraph.py`: LangGraph `ToolNode` sub-graph execution, routing, and resumption.
+    *   `test_sse_robustness.py`: Event emission resilience, subscriber isolation, and monotonic progress bounds.
+    *   `test_state_merge.py`: Deep merging of parallel specialist findings into state without data loss.
+    *   `test_synthesis_edges.py`: Edge scoring, high-signal node admission, and fact table grounding.
+    *   `test_accuracy_fixes.py`: Threat score handling and entity normalization invariants.
 *   **Integration Tests**:
-    *   **Workflow**: Run a full "Dry Run" investigation with a Mocked Graph to ensure edges traverse correctly.
+    *   **Workflow**: End-to-end multi-agent execution with mock checkpointer and mock MCP fixtures.
 *   **Infrastructure Tests**:
-    *   **MCP**: Script to spin up the subprocess and verify it responds to `list_tools` via stdio.
-    *   **DB**: Simple connection/write/read check.
+    *   **MCP**: Verify embedded subprocesses respond to `list_tools` via stdio.
+    *   **DB**: Cloud SQL connectivity and checkpointer session initialization check.

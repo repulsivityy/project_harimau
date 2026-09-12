@@ -1,6 +1,6 @@
 # Project Harimau — Documentation Framework
 
-Rules for maintaining `implementation_plan_v2.md`.
+Rules for maintaining `implementation_plan.md`.
 
 ---
 

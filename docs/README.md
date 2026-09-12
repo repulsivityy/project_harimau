@@ -13,7 +13,11 @@ Welcome to the Project Harimau documentation. This index helps you navigate the 
 | [agent_implementation.md](./agent_implementation.md) | Agent coding patterns and examples | Developers |
 | [agent_debugging_guide.md](./agent_debugging_guide.md) | Troubleshooting and fixes | DevOps, On-call Engineers |
 | [implementation_plan.md](./implementation_plan.md) | Feature development plan | Development Team |
-| [../CHANGELOG.md](../CHANGELOG.md) | Version history and releases | All stakeholders |
+| [CHANGELOG.md](./CHANGELOG.md) | Version history and releases | All stakeholders |
+| [dependency_graph.md](./dependency_graph.md) | Codebase architecture and module dependency map | Developers, Architects |
+| [FRAMEWORK.md](./FRAMEWORK.md) | Standards for maintaining the implementation plan | Developers |
+| [roadmap_rethinking_attack_chain.md](./roadmap_rethinking_attack_chain.md) | Architectural roadmap for open agent context & synthetic scoring | Architects, Researchers |
+| [reference_report/etherrat_tuktuk_yardstick.md](./reference_report/etherrat_tuktuk_yardstick.md) | Canonical sample threat intelligence report | Analysts, Stakeholders |
 
 ---
 
@@ -21,7 +25,7 @@ Welcome to the Project Harimau documentation. This index helps you navigate the 
 
 ### 🛠️ "I'm debugging a production issue"
 1. Start with [agent_debugging_guide.md](./agent_debugging_guide.md)
-2. Check [CHANGELOG.md](../CHANGELOG.md) for recent changes
+2. Check [CHANGELOG.md](./CHANGELOG.md) for recent changes
 3. Reference [agent_implementation.md](./agent_implementation.md) for expected behavior
 
 ### 📝 "I'm implementing a new feature"
@@ -33,26 +37,23 @@ Welcome to the Project Harimau documentation. This index helps you navigate the 
 1. Read [PRD.md](./PRD.md) - Understand what and why
 2. Study [architecture.md](./architecture.md) - Understand how
 3. Skim [agent_implementation.md](./agent_implementation.md) - See code patterns
+4. Inspect [dependency_graph.md](./dependency_graph.md) - Understand module relationships
 
 ### 🚀 "I'm deploying changes"
 1. Check deployment checklist in [agent_debugging_guide.md](./agent_debugging_guide.md)
-2. Update [CHANGELOG.md](../CHANGELOG.md) with your changes
+2. Update [CHANGELOG.md](./CHANGELOG.md) with your changes
 3. Verify against patterns in [agent_implementation.md](./agent_implementation.md)
 
 ---
 
-## Recent Updates (2026-01-30)
+## Recent Updates (2026-08-03)
 
-### New Documents
-- ✨ **agent_debugging_guide.md**: Comprehensive troubleshooting reference
-- ✨ **agent_implementation.md**: Agent coding patterns and templates
-- ✨ **CHANGELOG.md**: Version history and deployment tracking
-
-### Updated Sections
-- Enhanced error handling documentation
-- Added MCP tool integration patterns
-- Documented JSON parsing strategies
-- Included deployment best practices
+### Core Architectural Enhancements
+- ✨ **Deterministic Graphviz Skeleton**: Integrated `dot_builder.py` directly from NetworkX cache with structural validation to prevent diagram hallucinations.
+- ✨ **LangGraph ToolNode Subgraphs**: Migrated specialist agents to native `ToolNode` subgraphs with strict Pydantic `with_structured_output()`.
+- ✨ **Tool Containment & SSE Robustness**: Added `@tool_timeout(20.0)` guardrails and guarded SSE broadcast with monotonic progress clamping.
+- ✨ **Next.js 15+ App Router Dashboard**: Full interactive tactical UI with D3 Graphviz, ReactFlow knowledge graph, and real-time SSE streaming.
+- ✨ **Pinned Dependency Matrix**: Pinned all backend dependencies in `requirements.txt` to prevent breaking upstream releases.
 
 ---
 
@@ -69,41 +70,50 @@ Product Requirements Document covering:
 ### architecture.md
 Technical architecture including:
 - High-level system design
-- Component breakdown (Frontend, Backend, LangGraph)
-- Data layer and caching strategy
-- Token optimization approach
-- API specifications
+- Component breakdown (Next.js Frontend, FastAPI Backend, LangGraph)
+- Data layer (NetworkX cache, Cloud SQL persistence, AsyncPostgresSaver checkpointer)
+- Token optimization and dual-layer data model
+- Complete API specifications
 
 ### agent_implementation.md
 Implementation reference with:
-- Specialist agent structure pattern
-- JSON parsing implementation
-- MCP tool integration guide
-- Error handling strategies
-- Testing checklists
+- Specialist agent structure pattern (ToolNode subgraphs)
+- Structured output via Pydantic schemas
+- MCP tool integration and uniform error envelopes
+- Error handling strategies and tool timeout guards
+- Shared agent utilities (`agent_utils.py`)
 
 ### agent_debugging_guide.md
 Debugging handbook covering:
 - Common issues and solutions
-- JSON parsing errors
-- MCP validation errors
+- JSON parsing and structured output handling
+- MCP validation and parameter alignment
 - Missing reports troubleshooting
-- Best practices and anti-patterns
-- Deployment checklists
+- Best practices and deployment checklists
 
 ### implementation_plan.md
 Development roadmap detailing:
-- Completed features
-- In-progress work
-- Planned enhancements
-- Technical debt tracking
+- Completed features across 8 architectural pillars
+- In-progress work and capability milestones
+- Planned enhancements and technical debt tracking
 
 ### CHANGELOG.md
 Version history including:
 - Release notes by version
-- Bug fixes and enhancements
-- Breaking changes
+- Bug fixes, enhancements, and breaking changes
 - Deployment revision tracking
+
+### dependency_graph.md
+Module dependency map covering:
+- Next.js frontend route structure and API proxy
+- LangGraph orchestration, agents, and state reducers
+- Embedded MCP servers and utility modules
+
+### FRAMEWORK.md
+Governance rules for maintaining the implementation plan across pillars and capability milestones.
+
+### roadmap_rethinking_attack_chain.md
+Roadmap and technical PRD proposing open agent context tagging and synthetic baseline scoring to replace static relationship strings.
 
 ---
 

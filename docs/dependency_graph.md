@@ -680,7 +680,7 @@ graph TD
 - `backend.utils.logger`
 
 **Top-level Functions:**
-- `validate_and_annotate(report_text, graph_cache, root_ioc)`: Validates that the synthesized Markdown report contains all required sections and annotates missing indicators.
+- `validate_and_annotate(report_md, cache, specialist_results, root_ioc, job_id=None)`: Verifies every IOC cited in the report against the NetworkX investigation graph and specialist tool outputs, annotating any unverified/hallucinated citations rather than stripping them. Never raises. Returns `(annotated_report, validation)`, where `validation` is the `{"unverified", "verified", "extracted"}` dict from `validate_report_iocs` (plus an `"error"` key if the validator itself failed) so callers can report the actual audit outcome.
 
 ## `backend/utils/signal_filter.py`
 **Imports:**

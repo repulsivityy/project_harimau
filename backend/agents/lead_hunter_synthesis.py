@@ -4,7 +4,9 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from backend.utils.logger import get_logger
 from backend.graph.state import AgentState
 from backend.utils.transparency import emit_reasoning
-from backend.utils.graph_cache import InvestigationCache, normalize_verdict
+from backend.utils.graph_cache import (
+    InvestigationCache, format_validated_graph_evidence, normalize_verdict,
+)
 from backend.utils.verdict_engine import build_escalation_context
 from backend.utils.signal_filter import build_promotion_context
 from backend.utils.dot_builder import (
@@ -229,13 +231,14 @@ def _build_triage_context(state: AgentState) -> str:
     return "\n".join(lines)
 
 
-def _build_specialist_context(state: AgentState) -> str:
+def _build_specialist_context(state: AgentState, cache: Optional[InvestigationCache] = None) -> str:
     """Build full specialist context for final synthesis — report + key structured fields."""
     specialist_data = state.get("specialist_results", {})
     if not specialist_data:
         return "No specialist findings available."
 
     sections = []
+    placeholder_seen = False
     for agent, res in specialist_data.items():
         sections.append(f"--- {agent.upper()} ---")
         sections.append(f"Verdict: {res.get('verdict', 'Unknown')}")
@@ -255,9 +258,20 @@ def _build_specialist_context(state: AgentState) -> str:
             sections.append("Full Report:")
             sections.append(markdown_report)
 
+        placeholder_seen = placeholder_seen or str(res.get("verdict") or "").lower() in {
+            "timeout", "system error"
+        }
+
         # Structured JSON dump removed — the markdown report already contains
         # the full analysis and duplicating it wastes tokens.
 
+    if placeholder_seen and cache is not None:
+        sections.append("--- VALIDATED GRAPH-BACKED SPECIALIST EVIDENCE ---")
+        sections.append(
+            "Use these retained, tool-backed target findings when a current specialist report is a timeout/error placeholder. "
+            "Do not treat them as evidence for targets whose latest graph outcome is failed."
+        )
+        sections.append(format_validated_graph_evidence(cache))
     return "\n".join(sections)
 
 
@@ -723,7 +737,7 @@ No actionable intelligence could be synthesized. The original indicator may be m
     scored_edges = _score_edges(cache, node_details, high_signal_node_ids, root_ioc)
 
     triage_context = _build_triage_context(state)
-    specialist_context = _build_specialist_context(state)
+    specialist_context = _build_specialist_context(state, cache)
     graph_summary = _build_graph_summary(
         state, cache,
         node_details=node_details,

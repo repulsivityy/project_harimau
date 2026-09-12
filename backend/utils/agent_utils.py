@@ -3,7 +3,7 @@ import functools
 import json
 import re
 from langchain_core.messages import BaseMessage
-from typing import List
+from typing import Any, Callable, Dict, List, Optional
 
 INDICATOR_PATTERN = re.compile(
     r"^(?P<type>IP(?:\s*Address)?|Domain|URL|File|Hash|SHA256|MD5)\s*:\s*(?P<value>.+)$",
@@ -66,7 +66,8 @@ FINAL_ITERATION_PROMPT = (
 DEFAULT_TOOL_TIMEOUT = 20.0
 
 
-def tool_timeout(seconds: float = DEFAULT_TOOL_TIMEOUT, logger=None):
+def tool_timeout(seconds: float = DEFAULT_TOOL_TIMEOUT, logger=None,
+                 on_error: Optional[Callable[[str, tuple, Dict[str, Any], str], None]] = None):
     """
     Bound an agent tool coroutine with a wall-clock timeout and a catch-all.
 
@@ -100,11 +101,17 @@ def tool_timeout(seconds: float = DEFAULT_TOOL_TIMEOUT, logger=None):
             except asyncio.TimeoutError:
                 if logger:
                     logger.error("tool_timeout", tool=func.__name__, timeout=seconds)
-                return json.dumps({"error": f"Tool {func.__name__} timed out after {seconds} seconds."})
+                result = json.dumps({"error": f"Tool {func.__name__} timed out after {seconds} seconds."})
+                if on_error:
+                    on_error(func.__name__, args, kwargs, result)
+                return result
             except Exception as e:
                 if logger:
                     logger.error("tool_error", tool=func.__name__, error=str(e))
-                return json.dumps({"error": f"Tool {func.__name__} failed - {str(e)}"})
+                result = json.dumps({"error": f"Tool {func.__name__} failed - {str(e)}"})
+                if on_error:
+                    on_error(func.__name__, args, kwargs, result)
+                return result
         return wrapper
     return decorator
 

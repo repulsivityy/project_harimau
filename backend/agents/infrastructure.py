@@ -266,6 +266,10 @@ async def infrastructure_node(state: AgentState):
     try:
         # Initialize cache from state
         cache = InvestigationCache(state.get("investigation_graph"))
+        specialist_attempt = {
+            "id": f"infrastructure:{state.get('iteration', 0)}:structured",
+            "iteration": state.get("iteration", 0),
+        }
         cache_stats_before = cache.get_stats()
         logger.info("infra_cache_loaded", stats=cache_stats_before)
         
@@ -287,6 +291,21 @@ async def infrastructure_node(state: AgentState):
         async with AsyncExitStack() as stack:
             session = await stack.enter_async_context(mcp_manager.get_session("gti"))
             shodan_session = await stack.enter_async_context(mcp_manager.get_session("shodan"))
+
+            tool_attempt_counter = 0
+            def retain_tool_output(tool_name: str, target_id: str, output: Any):
+                """Keep tool-backed evidence durable without adding it to prompts."""
+                nonlocal tool_attempt_counter
+                tool_attempt_counter += 1
+                cache.record_tool_evidence("infrastructure", tool_name, target_id, output, attempt={
+                    "id": f"infrastructure:{state.get('iteration', 0)}:{tool_name}:{tool_attempt_counter}",
+                    "iteration": state.get("iteration", 0),
+                })
+                return output
+
+            def record_decorator_failure(tool_name: str, args: tuple, kwargs: Dict[str, Any], output: str):
+                target_id = next(iter(kwargs.values()), args[0] if args else None)
+                retain_tool_output(tool_name, target_id, output)
             
             # Every tool below reports failure as json.dumps({"error": ...}) —
             # the same shape tool_timeout returns — so the model sees one
@@ -295,7 +314,7 @@ async def infrastructure_node(state: AgentState):
             # quote inside the message from producing invalid JSON.
             # Domain Tools
             @tool
-            @tool_timeout(logger=logger)
+            @tool_timeout(logger=logger, on_error=record_decorator_failure)
             async def get_domain_report(domain: str):
                 """Get threat report for a domain."""
                 job_id = state.get("job_id")
@@ -303,11 +322,11 @@ async def infrastructure_node(state: AgentState):
                     await emit_tool_call(job_id, "infrastructure", "get_domain_report", {"domain": domain})
                 try: 
                     res = await session.call_tool("get_domain_report", arguments={"domain": domain})
-                    return res.content[0].text if res.content else "{}"
-                except Exception as e: return json.dumps({"error": str(e)})
+                    return retain_tool_output("get_domain_report", domain, res.content[0].text if res.content else "{}")
+                except Exception as e: return retain_tool_output("get_domain_report", domain, json.dumps({"error": str(e)}))
 
             @tool
-            @tool_timeout(logger=logger)
+            @tool_timeout(logger=logger, on_error=record_decorator_failure)
             async def get_entities_related_to_a_domain(domain: str, relationship: str):
                 """Get entities related to a domain. Relationships: resolutions, subdomains, communicating_files."""
                 job_id = state.get("job_id")
@@ -328,9 +347,9 @@ async def infrastructure_node(state: AgentState):
                     # descriptor response does carry; recovering the rest would require an
                     # extra per-entity report fetch, a separate cost/architecture decision.
                     res = await session.call_tool("get_entities_related_to_a_domain", arguments={"domain": domain, "relationship_name": relationship, "descriptors_only": True})
-                    if not res.content: return "[]"
+                    if not res.content: return retain_tool_output("get_entities_related_to_a_domain", domain, "[]")
                     parsed = json.loads(res.content[0].text)
-                    if "error" in parsed: return res.content[0].text
+                    if "error" in parsed: return retain_tool_output("get_entities_related_to_a_domain", domain, res.content[0].text)
                     
                     found = []
                     for item in parsed.get("data", []):
@@ -343,14 +362,17 @@ async def infrastructure_node(state: AgentState):
                         attrs.update(extract_gti_summary(item))
                         
                         cache.add_entity(eid, h_type, attrs)
-                        cache.add_relationship(domain, eid, relationship, {"source": "infrastructure_analysis_tool"})
+                        cache.add_relationship(domain, eid, relationship, {
+                            "source": "infrastructure_analysis_tool",
+                            "provenance": [{"agent": "infrastructure", "tool": "get_entities_related_to_a_domain"}],
+                        })
                         found.append(eid)
-                    return json.dumps(found)
-                except Exception as e: return json.dumps({"error": str(e)})
+                    return retain_tool_output("get_entities_related_to_a_domain", domain, json.dumps(found))
+                except Exception as e: return retain_tool_output("get_entities_related_to_a_domain", domain, json.dumps({"error": str(e)}))
                 
             # IP Tools
             @tool
-            @tool_timeout(logger=logger)
+            @tool_timeout(logger=logger, on_error=record_decorator_failure)
             async def get_ip_address_report(ip_address: str):
                 """Get threat report for an IP address."""
                 job_id = state.get("job_id")
@@ -358,11 +380,11 @@ async def infrastructure_node(state: AgentState):
                     await emit_tool_call(job_id, "infrastructure", "get_ip_address_report", {"ip_address": ip_address})
                 try: 
                     res = await session.call_tool("get_ip_address_report", arguments={"ip_address": ip_address})
-                    return res.content[0].text if res.content else "{}"
-                except Exception as e: return json.dumps({"error": str(e)})
+                    return retain_tool_output("get_ip_address_report", ip_address, res.content[0].text if res.content else "{}")
+                except Exception as e: return retain_tool_output("get_ip_address_report", ip_address, json.dumps({"error": str(e)}))
 
             @tool
-            @tool_timeout(logger=logger)
+            @tool_timeout(logger=logger, on_error=record_decorator_failure)
             async def get_entities_related_to_an_ip_address(ip_address: str, relationship: str):
                 """Get entities related to an IP. Relationships: resolutions, communicating_files, referrer_files."""
                 job_id = state.get("job_id")
@@ -375,9 +397,9 @@ async def infrastructure_node(state: AgentState):
                     # collection targets, so pivot-discovered entities get thinner data
                     # than triage-discovered ones).
                     res = await session.call_tool("get_entities_related_to_an_ip_address", arguments={"ip_address": ip_address, "relationship_name": relationship, "descriptors_only": True})
-                    if not res.content: return "[]"
+                    if not res.content: return retain_tool_output("get_entities_related_to_an_ip_address", ip_address, "[]")
                     parsed = json.loads(res.content[0].text)
-                    if "error" in parsed: return res.content[0].text
+                    if "error" in parsed: return retain_tool_output("get_entities_related_to_an_ip_address", ip_address, res.content[0].text)
                     
                     found = []
                     for item in parsed.get("data", []):
@@ -390,14 +412,17 @@ async def infrastructure_node(state: AgentState):
                         attrs.update(extract_gti_summary(item))
                         
                         cache.add_entity(eid, h_type, attrs)
-                        cache.add_relationship(ip_address, eid, relationship, {"source": "infrastructure_analysis_tool"})
+                        cache.add_relationship(ip_address, eid, relationship, {
+                            "source": "infrastructure_analysis_tool",
+                            "provenance": [{"agent": "infrastructure", "tool": "get_entities_related_to_an_ip_address"}],
+                        })
                         found.append(eid)
-                    return json.dumps(found)
-                except Exception as e: return json.dumps({"error": str(e)})
+                    return retain_tool_output("get_entities_related_to_an_ip_address", ip_address, json.dumps(found))
+                except Exception as e: return retain_tool_output("get_entities_related_to_an_ip_address", ip_address, json.dumps({"error": str(e)}))
 
             # URL Tools
             @tool
-            @tool_timeout(logger=logger)
+            @tool_timeout(logger=logger, on_error=record_decorator_failure)
             async def get_url_report(url: str):
                 """Get threat report for a URL."""
                 job_id = state.get("job_id")
@@ -405,11 +430,11 @@ async def infrastructure_node(state: AgentState):
                     await emit_tool_call(job_id, "infrastructure", "get_url_report", {"url": url})
                 try: 
                     res = await session.call_tool("get_url_report", arguments={"url": url})
-                    return res.content[0].text if res.content else "{}"
-                except Exception as e: return json.dumps({"error": str(e)})
+                    return retain_tool_output("get_url_report", url, res.content[0].text if res.content else "{}")
+                except Exception as e: return retain_tool_output("get_url_report", url, json.dumps({"error": str(e)}))
 
             @tool
-            @tool_timeout(logger=logger)
+            @tool_timeout(logger=logger, on_error=record_decorator_failure)
             async def get_entities_related_to_an_url(url: str, relationship: str):
                 """Get entities related to a URL. Relationships: downloaded_files, network_location."""
                 job_id = state.get("job_id")
@@ -422,9 +447,9 @@ async def infrastructure_node(state: AgentState):
                     # collection targets, so pivot-discovered entities get thinner data
                     # than triage-discovered ones).
                     res = await session.call_tool("get_entities_related_to_an_url", arguments={"url": url, "relationship_name": relationship, "descriptors_only": True})
-                    if not res.content: return "[]"
+                    if not res.content: return retain_tool_output("get_entities_related_to_an_url", url, "[]")
                     parsed = json.loads(res.content[0].text)
-                    if "error" in parsed: return res.content[0].text
+                    if "error" in parsed: return retain_tool_output("get_entities_related_to_an_url", url, res.content[0].text)
                     
                     found = []
                     for item in parsed.get("data", []):
@@ -437,13 +462,16 @@ async def infrastructure_node(state: AgentState):
                         attrs.update(extract_gti_summary(item))
                         
                         cache.add_entity(eid, h_type, attrs)
-                        cache.add_relationship(url, eid, relationship, {"source": "infrastructure_analysis_tool"})
+                        cache.add_relationship(url, eid, relationship, {
+                            "source": "infrastructure_analysis_tool",
+                            "provenance": [{"agent": "infrastructure", "tool": "get_entities_related_to_an_url"}],
+                        })
                         found.append(eid)
-                    return json.dumps(found)
-                except Exception as e: return json.dumps({"error": str(e)})
+                    return retain_tool_output("get_entities_related_to_an_url", url, json.dumps(found))
+                except Exception as e: return retain_tool_output("get_entities_related_to_an_url", url, json.dumps({"error": str(e)}))
 
             @tool
-            @tool_timeout(logger=logger)
+            @tool_timeout(logger=logger, on_error=record_decorator_failure)
             async def get_webrisk_report(url: str):
                 """Check URL against Google Web Risk (Social Engineering/Malware)."""
                 job_id = state.get("job_id")
@@ -451,11 +479,11 @@ async def infrastructure_node(state: AgentState):
                     await emit_tool_call(job_id, "infrastructure", "get_webrisk_report", {"url": url})
                 try:
                     res = await webrisk.evaluate_uri(url)
-                    return json.dumps(res)
-                except Exception as e: return json.dumps({"error": str(e)})
+                    return retain_tool_output("get_webrisk_report", url, json.dumps(res))
+                except Exception as e: return retain_tool_output("get_webrisk_report", url, json.dumps({"error": str(e)}))
 
             @tool
-            @tool_timeout(logger=logger)
+            @tool_timeout(logger=logger, on_error=record_decorator_failure)
             async def shodan_ip_lookup(ip: str):
                 """Look up an IP in Shodan. Returns open ports, services, banners, known vulnerabilities, and geolocation."""
                 job_id = state.get("job_id")
@@ -463,11 +491,11 @@ async def infrastructure_node(state: AgentState):
                     await emit_tool_call(job_id, "infrastructure", "shodan_ip_lookup", {"ip": ip})
                 try:
                     res = await shodan_session.call_tool("ip_lookup", arguments={"ip": ip})
-                    return res.content[0].text if res.content else "{}"
-                except Exception as e: return json.dumps({"error": str(e)})
+                    return retain_tool_output("shodan_ip_lookup", ip, res.content[0].text if res.content else "{}")
+                except Exception as e: return retain_tool_output("shodan_ip_lookup", ip, json.dumps({"error": str(e)}))
 
             @tool
-            @tool_timeout(logger=logger)
+            @tool_timeout(logger=logger, on_error=record_decorator_failure)
             async def shodan_dns_lookup(hostnames: str):
                 """Resolve one or more hostnames to IPs via Shodan DNS. Accepts comma-separated hostnames."""
                 job_id = state.get("job_id")
@@ -475,11 +503,11 @@ async def infrastructure_node(state: AgentState):
                     await emit_tool_call(job_id, "infrastructure", "shodan_dns_lookup", {"hostnames": hostnames})
                 try:
                     res = await shodan_session.call_tool("dns_lookup", arguments={"hostnames": hostnames})
-                    return res.content[0].text if res.content else "{}"
-                except Exception as e: return json.dumps({"error": str(e)})
+                    return retain_tool_output("shodan_dns_lookup", hostnames, res.content[0].text if res.content else "{}")
+                except Exception as e: return retain_tool_output("shodan_dns_lookup", hostnames, json.dumps({"error": str(e)}))
 
             @tool
-            @tool_timeout(logger=logger)
+            @tool_timeout(logger=logger, on_error=record_decorator_failure)
             async def shodan_reverse_dns_lookup(ips: str):
                 """Resolve one or more IPs to hostnames via Shodan. Accepts comma-separated IPs."""
                 job_id = state.get("job_id")
@@ -487,8 +515,8 @@ async def infrastructure_node(state: AgentState):
                     await emit_tool_call(job_id, "infrastructure", "shodan_reverse_dns_lookup", {"ips": ips})
                 try:
                     res = await shodan_session.call_tool("reverse_dns_lookup", arguments={"ips": ips})
-                    return res.content[0].text if res.content else "{}"
-                except Exception as e: return json.dumps({"error": str(e)})
+                    return retain_tool_output("shodan_reverse_dns_lookup", ips, res.content[0].text if res.content else "{}")
+                except Exception as e: return retain_tool_output("shodan_reverse_dns_lookup", ips, json.dumps({"error": str(e)}))
 
             tools = [
                 get_domain_report, get_entities_related_to_a_domain,
@@ -888,7 +916,7 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                 state["target_outcomes"] = assess_target_outcomes(
                     timeout_targets, None, "infrastructure", failure_reason="timeout"
                 )
-                cache.record_target_outcomes(state["target_outcomes"])
+                cache.record_target_outcomes(state["target_outcomes"], specialist_attempt)
                 state["investigation_graph"] = cache.get_state()
                 return state
 
@@ -935,7 +963,8 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                 )
                 state["target_outcomes"] = outcomes
                 state["processed_entities"] = successful_target_ids(outcomes)
-                cache.record_target_outcomes(outcomes)
+                cache.record_target_outcomes(outcomes, specialist_attempt)
+                cache.record_specialist_result("infrastructure", current_attempt_result, outcomes, specialist_attempt)
                 for target_id in successful_target_ids(outcomes):
                     cache.mark_as_investigated(target_id, "infrastructure")
                     logger.info("infra_marked_investigated", entity=target_id)
@@ -958,7 +987,7 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                 )
                 state["target_outcomes"] = outcomes
                 cache = InvestigationCache(subgraph_output.get("investigation_graph") or state.get("investigation_graph"))
-                cache.record_target_outcomes(outcomes)
+                cache.record_target_outcomes(outcomes, specialist_attempt)
                 state["investigation_graph"] = cache.get_state()
 
     except Exception as e:
@@ -982,7 +1011,7 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
         state["target_outcomes"] = assess_target_outcomes(
             failed_targets, None, "infrastructure", failure_reason="system_error"
         )
-        failure_cache.record_target_outcomes(state["target_outcomes"])
+        failure_cache.record_target_outcomes(state["target_outcomes"], specialist_attempt)
         state["investigation_graph"] = failure_cache.get_state()
 
     return state

@@ -3,7 +3,7 @@ from typing import Optional, List
 from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage
 from backend.utils.logger import get_logger
-from backend.utils.graph_cache import InvestigationCache
+from backend.utils.graph_cache import InvestigationCache, format_specialist_evidence_summary
 from backend.graph.state import AgentState
 from backend.utils.target_outcomes import normalise_target_id
 
@@ -41,6 +41,9 @@ def _format_lead_for_prompt(node: dict) -> str:
         context_bits.append(f"malware_context={node['malware_context']}")
     if node.get("infra_context"):
         context_bits.append(f"infra_context={node['infra_context']}")
+    specialist_evidence = format_specialist_evidence_summary(node)
+    if specialist_evidence:
+        context_bits.append(f"specialist_evidence={specialist_evidence}")
 
     gti_assessment = node.get("gti_assessment") or {}
     verdict = gti_assessment.get("verdict") or {}

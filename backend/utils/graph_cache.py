@@ -22,6 +22,114 @@ def _normalise_id(entity_id: Optional[Any]) -> Optional[str]:
     norm = str(entity_id).strip().lower()
     return norm if norm else None
 
+
+def _json_value(value: Any) -> Any:
+    """Preserve JSON tool output as structured data when possible."""
+    if not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return value
+
+
+def _append_unique_record(records: List[Any], record: Dict[str, Any]) -> List[Any]:
+    """Append a JSON-compatible evidence record exactly once, in call order."""
+    key = json.dumps(record, sort_keys=True, default=str)
+    for existing in records:
+        if json.dumps(existing, sort_keys=True, default=str) == key:
+            return records
+    return [*records, record]
+
+
+def _contains_error(value: Any) -> bool:
+    if isinstance(value, dict):
+        return bool(value.get("error")) or any(_contains_error(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_error(item) for item in value)
+    if isinstance(value, str):
+        parsed = _json_value(value)
+        return parsed is not value and _contains_error(parsed)
+    return False
+
+
+def _tool_status(output: Any) -> str:
+    """Keep failed, explicit no-data, and useful tool results distinguishable."""
+    if _contains_error(output):
+        return "failed"
+    if output in (None, "", [], {}):
+        return "no_data"
+    if isinstance(output, dict) and output.get("data") == []:
+        return "no_data"
+    return "succeeded"
+
+
+def _attempt_sort_key(record: Dict[str, Any]) -> tuple:
+    attempt = record.get("attempt") or {}
+    return (int(attempt.get("iteration", -1)), str(attempt.get("id") or ""))
+
+
+def latest_specialist_outcomes(records: List[Any]) -> Dict[str, Dict[str, Any]]:
+    """Derive each agent's latest outcome from append-only attempt history."""
+    latest: Dict[str, Dict[str, Any]] = {}
+    for record in records or []:
+        if not isinstance(record, dict) or not record.get("agent"):
+            continue
+        agent = record["agent"]
+        if agent not in latest or _attempt_sort_key(record) >= _attempt_sort_key(latest[agent]):
+            latest[agent] = record
+    return latest
+
+
+def format_specialist_evidence_summary(node: Dict[str, Any]) -> str:
+    """Return a bounded planner-facing summary; never expose raw tool payloads."""
+    findings = node.get("specialist_findings") or []
+    if not isinstance(findings, list):
+        return ""
+    summaries = []
+    for finding in findings[-2:]:
+        if not isinstance(finding, dict):
+            continue
+        agent = finding.get("agent") or "specialist"
+        evidence = finding.get("evidence") or {}
+        verdict = evidence.get("verdict")
+        detail = evidence.get("behavior") or evidence.get("notes")
+        bits = [str(agent)]
+        if verdict:
+            bits.append(f"verdict={verdict}")
+        if detail:
+            bits.append(str(detail).replace("\n", " ")[:240])
+        summaries.append("; ".join(bits))
+    return " | ".join(summaries)
+
+
+def format_validated_graph_evidence(cache: "InvestigationCache", limit: int = 12) -> str:
+    """Bounded tool-backed target evidence for synthesis fallback reports."""
+    lines = []
+    for node_id, node in cache.graph.nodes(data=True):
+        outcomes = latest_specialist_outcomes(node.get("specialist_outcome_history") or [])
+        for finding in node.get("specialist_findings") or []:
+            if not isinstance(finding, dict):
+                continue
+            agent = finding.get("agent")
+            outcome = outcomes.get(agent) or {}
+            if outcome.get("status") != "succeeded" or finding.get("attempt") != outcome.get("attempt"):
+                continue
+            evidence = finding.get("evidence") or {}
+            detail = evidence.get("behavior") or evidence.get("notes") or "target-specific finding retained"
+            tools = [
+                item.get("tool") for item in node.get("specialist_tool_evidence") or []
+                if item.get("agent") == agent and item.get("status") == "succeeded"
+                and item.get("attempt", {}).get("iteration") == outcome.get("attempt", {}).get("iteration")
+            ]
+            lines.append(
+                f"- {node_id} | {agent} | verdict={evidence.get('verdict') or 'unknown'} "
+                f"| evidence={str(detail).replace(chr(10), ' ')[:240]} | tools={', '.join(dict.fromkeys(tools)) or 'recorded'}"
+            )
+            if len(lines) >= limit:
+                return "\n".join(lines)
+    return "\n".join(lines) or "No validated graph-backed specialist evidence retained."
+
 # Ordered (not a set) so the substring fallback below is deterministic.
 KNOWN_VERDICTS = ["malicious", "suspicious", "benign", "undetected", "unknown"]
 
@@ -349,8 +457,9 @@ class InvestigationCache:
         self.graph.nodes[entity_id]["analyzed_by"] = list(analyzed_by)
         logger.info("entity_marked_investigated", entity_id=entity_id, agent=agent)
 
-    def record_target_outcomes(self, outcomes: Dict[str, Dict[str, Any]]):
-        """Persist minimal specialist outcome/evidence metadata on cached nodes."""
+    def record_target_outcomes(self, outcomes: Dict[str, Dict[str, Any]],
+                               attempt: Optional[Dict[str, Any]] = None):
+        """Append attempt-aware outcome metadata without clobbering prior attempts."""
         for outcome in (outcomes or {}).values():
             target_id = _normalise_id(outcome.get("target_id"))
             agent = outcome.get("agent")
@@ -358,9 +467,90 @@ class InvestigationCache:
                 continue
             recorded = dict(outcome)
             recorded.pop("target_id", None)
-            node_outcomes = dict(self.graph.nodes[target_id].get("specialist_outcomes") or {})
-            node_outcomes[agent] = recorded
-            self.graph.nodes[target_id]["specialist_outcomes"] = node_outcomes
+            recorded["agent"] = agent
+            recorded["target_id"] = target_id
+            recorded["source"] = "specialist_target_outcome"
+            recorded["attempt"] = dict(attempt or {})
+            history = list(self.graph.nodes[target_id].get("specialist_outcome_history") or [])
+            self.graph.nodes[target_id]["specialist_outcome_history"] = _append_unique_record(history, recorded)
+            self.graph.nodes[target_id]["specialist_outcomes"] = latest_specialist_outcomes(
+                self.graph.nodes[target_id]["specialist_outcome_history"]
+            )
+
+    def record_tool_evidence(self, agent: str, tool: str, target_id: str,
+                             output: Any, *, source: Optional[str] = None,
+                             attempt: Optional[Dict[str, Any]] = None):
+        """Persist a specialist tool result on its requested target node.
+
+        ToolNode messages are transient and are not reliably available after a
+        parallel fan-in or checkpoint resume. Keeping the exact JSON-compatible
+        output here lets later planning and synthesis distinguish a grounded
+        finding from a narrative-only assertion. Raw payloads stay out of LLM
+        contexts; ``format_specialist_evidence_summary`` emits only bounded
+        structured-result details.
+        """
+        target_id = _normalise_id(target_id)
+        if not target_id:
+            return
+        # A tool call on an unadmitted/model-invented IOC must not create a
+        # graph node. Triage/pivot tools establish nodes before specialists
+        # enrich them; evidence is attached only to that grounded graph.
+        if target_id not in self.graph:
+            logger.warning("tool_evidence_target_not_in_graph", agent=agent, tool=tool, target_id=target_id)
+            return
+        evidence = {
+            "source": source or f"{agent}_analysis_tool",
+            "agent": agent,
+            "tool": tool,
+            "target_id": target_id,
+            "output": _json_value(output),
+            "attempt": dict(attempt or {}),
+        }
+        evidence["status"] = _tool_status(evidence["output"])
+        existing = list(self.graph.nodes[target_id].get("specialist_tool_evidence") or [])
+        self.graph.nodes[target_id]["specialist_tool_evidence"] = _append_unique_record(existing, evidence)
+
+    def record_specialist_result(self, agent: str, result: Dict[str, Any],
+                                 outcomes: Dict[str, Dict[str, Any]],
+                                 attempt: Dict[str, Any]):
+        """Attach only outcome-validated structured evidence to admitted nodes."""
+        if not isinstance(result, dict):
+            return
+        common = {
+            key: value for key, value in result.items()
+            if key not in {"analyzed_targets", "markdown_report", "summary"}
+        }
+        summary = str(result.get("summary") or "").replace("\n", " ")[:600]
+        targets = {
+            _normalise_id(target.get("indicator") or target.get("value")): target
+            for target in result.get("analyzed_targets") or []
+            if isinstance(target, dict) and _normalise_id(target.get("indicator") or target.get("value"))
+        }
+        for outcome in (outcomes or {}).values():
+            if outcome.get("agent") != agent or outcome.get("status") != "succeeded":
+                continue
+            target_id = _normalise_id(outcome.get("target_id"))
+            target = targets.get(target_id)
+            if not target_id or not target or target_id not in self.graph:
+                continue
+            record = {
+                "source": f"{agent}_specialist_structured_output",
+                "agent": agent,
+                "attempt": dict(attempt),
+                "outcome": {
+                    "status": outcome.get("status"),
+                    "reason": outcome.get("reason"),
+                    "evidence": outcome.get("evidence") or {},
+                },
+                "evidence": {
+                    key: value for key, value in target.items()
+                    if value not in (None, "", [], {})
+                },
+                "findings": common,
+                "summary": summary,
+            }
+            existing = list(self.graph.nodes[target_id].get("specialist_findings") or [])
+            self.graph.nodes[target_id]["specialist_findings"] = _append_unique_record(existing, record)
         
     def get_uninvestigated_nodes(self, agent_filter: Optional[str] = None) -> List[Dict[str, Any]]:
         """

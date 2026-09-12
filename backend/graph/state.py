@@ -1,6 +1,34 @@
 from typing import TypedDict, Annotated, List, Dict, Any, Optional
 from langchain_core.messages import BaseMessage
 import operator
+import json
+
+
+def _merge_graph_value(a: Any, b: Any) -> Any:
+    """Recursively preserve JSON-compatible graph attributes at branch fan-in."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    if isinstance(a, dict) and isinstance(b, dict):
+        merged = dict(a)
+        for key, value in b.items():
+            merged[key] = _merge_graph_value(merged.get(key), value) if key in merged else value
+        return merged
+    if isinstance(a, list) and isinstance(b, list):
+        merged = list(a)
+        def record_key(item: Any) -> str:
+            try:
+                return json.dumps(item, sort_keys=True, default=str)
+            except (TypeError, ValueError):
+                return repr(item)
+        seen = {record_key(item) for item in merged}
+        for item in b:
+            if record_key(item) not in seen:
+                merged.append(item)
+                seen.add(record_key(item))
+        return merged
+    return b
 
 def merge_dicts(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
     """Merges two dictionaries (shallow merge)."""
@@ -37,6 +65,7 @@ def merge_graphs(a: Optional[Any], b: Optional[Any]) -> Optional[Any]:
     
     # Import here to avoid circular deps
     import networkx as nx
+    from backend.utils.graph_cache import latest_specialist_outcomes
     
     # Deserialized graphs from dicts if necessary
     graph_a = nx.node_link_graph(a) if isinstance(a, dict) else a
@@ -52,24 +81,19 @@ def merge_graphs(a: Optional[Any], b: Optional[Any]) -> Optional[Any]:
             # Node exists - deep merge attributes
             existing = combined.nodes[actual_node]
             for key, val in data.items():
-                if key not in existing:
-                    existing[key] = val
-                elif isinstance(val, dict) and isinstance(existing[key], dict):
-                    existing[key].update(val)
-                elif isinstance(val, list) and isinstance(existing[key], list):
-                    res = list(existing[key])
-                    res_set = {str(i).strip().lower() for i in res if i is not None}
-                    for item in val:
-                        if item is not None and str(item).strip().lower() not in res_set:
-                            res.append(item)
-                            res_set.add(str(item).strip().lower())
-                    existing[key] = res
-                else:
-                    existing[key] = val
+                existing[key] = _merge_graph_value(existing.get(key), val) if key in existing else val
         else:
             # New node - add it
             combined.add_node(node, **data)
             existing_nodes_norm[norm_node] = node
+
+    # Branch snapshots can each carry an older ``specialist_outcomes`` map.
+    # Derive that compatibility view from append-only history after fan-in so
+    # a stale full graph copy cannot replace a later attempt outcome.
+    for _, data in combined.nodes(data=True):
+        history = data.get("specialist_outcome_history")
+        if isinstance(history, list):
+            data["specialist_outcomes"] = latest_specialist_outcomes(history)
     
     # Merge edges
     for u, v, data in graph_b.edges(data=True):
@@ -78,7 +102,8 @@ def merge_graphs(a: Optional[Any], b: Optional[Any]) -> Optional[Any]:
         if combined.has_edge(u, v):
             for edge_key, edge_data in combined[u][v].items():
                 if edge_data.get("relationship") == rel:
-                    edge_data.update(data)
+                    for key, value in data.items():
+                        edge_data[key] = _merge_graph_value(edge_data.get(key), value) if key in edge_data else value
                     edge_matched = True
                     break
         if not edge_matched:

@@ -53,6 +53,30 @@ def with_sse_events(node_name: str):
                     loop = asyncio.get_event_loop()
                     result = await loop.run_in_executor(None, func, state)
 
+                # A node can intentionally return a terminal failure contract
+                # instead of raising (so state/checkpoint persistence still
+                # captures the evidence). Emit that semantic failure as failed
+                # rather than falsely marking the node completed in the UI.
+                semantic_outcome = (
+                    result.get("investigation_outcome")
+                    or (result.get("metadata") or {}).get("investigation_outcome")
+                ) if isinstance(result, dict) else None
+                if semantic_outcome and semantic_outcome.get("status") == "failed":
+                    error = semantic_outcome.get("error") or "coverage could not be established"
+                    logger.error("node_semantic_failure", node=node_name, job_id=job_id, outcome=semantic_outcome)
+                    try:
+                        await sse_manager.emit_event(job_id, f"{node_name}_failed", {
+                            "agent": node_name,
+                            "iteration": iteration,
+                            "message": f"{node_name.replace('_', ' ').title()} failed: {error}",
+                            "error": error,
+                            "outcome": semantic_outcome,
+                            "progress": get_progress_estimate(node_name, "completed", iteration, max_iterations, subtask_count),
+                        })
+                    except Exception as emit_exc:
+                        logger.error("sse_emit_failed", node=node_name, job_id=job_id, phase="semantic_failed", error=str(emit_exc))
+                    return result
+
                 # Emit: Node completed
                 logger.info("node_completed", node=node_name, job_id=job_id, iteration=iteration)
                 try:

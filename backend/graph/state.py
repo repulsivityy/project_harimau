@@ -235,6 +235,12 @@ class AgentState(TypedDict):
     # Final Report: The generated markdown report
     # Reverting to last_value since Lead Hunter now assembles report manually
     final_report: Annotated[Optional[str], last_value]
+
+    # Explicit terminal outcome for stages where coverage cannot be known.
+    # ``None``/absence remains compatible with checkpoints created before the
+    # contract. A ``failed`` outcome is authoritative over a polished-looking
+    # fallback report when main.py persists the job and emits SSE terminal state.
+    investigation_outcome: Annotated[Optional[Dict[str, Any]], last_value]
     
     # Metadata: Timing, errors, etc.
     # CRITICAL: Uses merge_metadata (deep merge) instead of shallow merge_dicts,

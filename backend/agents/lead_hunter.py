@@ -9,7 +9,7 @@ from backend.utils.logger import get_logger
 from backend.utils.graph_cache import InvestigationCache
 
 from backend.agents.lead_hunter_planning import run_planning_phase
-from backend.agents.lead_hunter_synthesis import generate_final_report_llm
+from backend.agents.lead_hunter_synthesis import generate_final_report_outcome
 from backend.utils.verdict_engine import apply_composite_verdicts
 from backend.utils.report_validator import validate_and_annotate
 from backend.utils.signal_filter import promote_by_graph_context
@@ -84,6 +84,24 @@ async def lead_hunter_node(state: AgentState):
     current_iteration = state.get("iteration", 0)
     MAX_ITERATIONS = state.get("max_iterations", DEFAULT_HUNT_ITERATIONS)
 
+    # A prior stage may have produced a readable fallback report while failing
+    # to establish coverage (for example GTI enrichment). Do not turn that
+    # into a successful convergence or synthesize over it.
+    prior_outcome = state.get("investigation_outcome") or (state.get("metadata") or {}).get("investigation_outcome")
+    if prior_outcome and prior_outcome.get("status") == "failed":
+        logger.error("lead_hunter_prior_stage_failed", job_id=job_id, outcome=prior_outcome)
+        if job_id:
+            await emit_reasoning(
+                job_id,
+                "lead_hunter",
+                f"TERMINAL_FAILURE -> {prior_outcome.get('stage', 'unknown stage')} failed; investigation coverage is unknown.",
+            )
+        return {
+            "final_report": state.get("final_report") or "# Investigation Failed\n\nCoverage could not be established.",
+            "subtasks": [],
+            "investigation_outcome": prior_outcome,
+        }
+
     if current_iteration < MAX_ITERATIONS:
         # --- LAYER 1: Pre-check uninvestigated nodes (no LLM call needed) ---
         uninvestigated = cache.get_uninvestigated_nodes()
@@ -97,6 +115,21 @@ async def lead_hunter_node(state: AgentState):
             logger.info("lead_hunter_mode_planning", actionable_count=len(actionable))
 
             plan = await run_planning_phase(state, llm_flash, cache, actionable)
+            planning_outcome = plan.get("outcome") or {}
+            if planning_outcome.get("status") == "failed":
+                logger.error("lead_hunter_planning_terminal_failure", job_id=job_id, outcome=planning_outcome)
+                if job_id:
+                    await emit_reasoning(
+                        job_id,
+                        "lead_hunter_planning",
+                        "TERMINAL_FAILURE -> Planning failed; investigation coverage is unknown and synthesis was not attempted.",
+                    )
+                error = planning_outcome.get("error") or "Lead Hunter planning failed"
+                return {
+                    "final_report": f"# Investigation Failed\n\nPlanning could not determine next steps. Error: {error}",
+                    "subtasks": [],
+                    "investigation_outcome": planning_outcome,
+                }
             new_subtasks = plan.get("subtasks", [])
 
             # --- LAYER 2: LLM confidence signal ---
@@ -240,7 +273,22 @@ async def lead_hunter_node(state: AgentState):
     # confirmed C2 IP) instead of echoing raw GTI verdicts. See verdict_engine.py.
     apply_composite_verdicts(cache, job_id=state.get("job_id"))
 
-    final_report = await generate_final_report_llm(state, llm_pro, cache=cache)
+    synthesis_outcome = await generate_final_report_outcome(state, llm_pro, cache=cache)
+    final_report = synthesis_outcome["report"]
+    if synthesis_outcome.get("status") == "failed":
+        logger.error("lead_hunter_synthesis_terminal_failure", job_id=job_id, outcome=synthesis_outcome)
+        if job_id:
+            await emit_reasoning(
+                job_id,
+                "lead_hunter_synthesis",
+                "TERMINAL_FAILURE -> Final synthesis failed; investigation coverage is unknown.",
+            )
+        return {
+            "final_report": final_report,
+            "subtasks": [],
+            "investigation_graph": cache.get_state(),
+            "investigation_outcome": synthesis_outcome,
+        }
 
     # The iteration budget can force synthesis before a retry succeeds. Keep
     # those failures visible to the analyst instead of allowing a polished

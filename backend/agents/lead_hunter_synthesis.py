@@ -1,5 +1,5 @@
 import json
-from typing import Any, Optional
+from typing import Any, Optional, TypedDict
 from langchain_core.messages import SystemMessage, HumanMessage
 from backend.utils.logger import get_logger
 from backend.graph.state import AgentState
@@ -16,6 +16,18 @@ from backend.utils.dot_builder import (
 )
 
 logger = get_logger("agent_lead_hunter_synthesis")
+
+
+class SynthesisOutcome(TypedDict):
+    """Explicit terminal result for synthesis; never infer from markdown."""
+    status: str
+    report: str
+    stage: str
+    error: Optional[str]
+
+
+class SynthesisFailure(RuntimeError):
+    """Expected synthesis failure transported to the typed outcome adapter."""
 
 HIGH_SIGNAL_THREAT_SCORE = 60
 # Upper bound on how many edges feed the attack-flow diagram (and its prose
@@ -201,6 +213,18 @@ def _build_triage_context(state: AgentState) -> str:
 
     if threat_context:
         lines.append(f"Threat Context: {json.dumps(threat_context)}")
+
+    enrichment_outcomes = state.get("metadata", {}).get("enrichment_outcomes", {})
+    failed = []
+    root_outcome = enrichment_outcomes.get("root", {}) if isinstance(enrichment_outcomes, dict) else {}
+    if root_outcome.get("status") == "failed":
+        failed.append(f"root GTI enrichment: {root_outcome.get('error') or 'unknown error'}")
+    for relationship, outcome in (enrichment_outcomes.get("relationships", {}) or {}).items():
+        if isinstance(outcome, dict) and outcome.get("status") == "failed":
+            failed.append(f"relationship {relationship}: {outcome.get('error') or 'unknown error'}")
+    if failed:
+        lines.append("Failed Enrichments (coverage incomplete; not no data):")
+        lines.extend(f"- {failure}" for failure in failed[:20])
 
     return "\n".join(lines)
 
@@ -677,6 +701,7 @@ async def generate_final_report_llm(state: AgentState, llm, cache: Optional[Inve
     specialist_data = state.get("specialist_results", {})
     if specialist_data and all(res.get("verdict") == "System Error" for res in specialist_data.values()):
         logger.error("lead_hunter_synthesis_aborted_all_specialists_failed", job_id=job_id)
+        raise SynthesisFailure("all_specialists_failed")
         return """## ❌ Investigation Failed
 
 The investigation was aborted because all specialist agents encountered critical system errors. 
@@ -776,6 +801,8 @@ No actionable intelligence could be synthesized. The original indicator may be m
             raw_content = " ".join([b.get("text", "") if isinstance(b, dict) else str(b) for b in raw_content])
         elif not isinstance(raw_content, str):
             raw_content = str(raw_content)
+        if not raw_content.strip():
+            raise SynthesisFailure("synthesis returned a blank report")
 
         # Deterministic Graphviz fallback (S4-T3): validate whatever ```dot
         # block the LLM returned against the skeleton's own node/edge set.
@@ -823,6 +850,25 @@ No actionable intelligence could be synthesized. The original indicator may be m
             await emit_reasoning(job_id, "lead_hunter_synthesis", "SYNTHESIS_COMPLETE -> Final intelligence report synthesized. Executing automated graph-citation verification.")
 
         return raw_content
+    except SynthesisFailure:
+        raise
     except Exception as e:
         logger.error("lead_hunter_synthesis_error", job_id=job_id, error=str(e))
-        return f"# Analysis Error\n\nFailed to generate final report. Error: {str(e)}"
+        raise SynthesisFailure(str(e)) from e
+
+
+async def generate_final_report_outcome(
+    state: AgentState, llm, cache: Optional[InvestigationCache] = None
+) -> SynthesisOutcome:
+    """Typed synthesis contract used by workflow terminal-state handling."""
+    try:
+        report = await generate_final_report_llm(state, llm, cache=cache)
+        return {"status": "succeeded", "stage": "synthesis", "error": None, "report": report}
+    except SynthesisFailure as exc:
+        error = str(exc) or "final synthesis failed"
+        return {
+            "status": "failed",
+            "stage": "synthesis",
+            "error": error,
+            "report": f"# Investigation Failed\n\nFinal synthesis could not establish a usable report. Error: {error}",
+        }

@@ -207,6 +207,12 @@ async def save_job(job_id: str, data: dict):
                     "has_unresolved_specialist_gaps",
                     metadata.get("has_unresolved_specialist_gaps", False),
                 )
+                # Terminal workflow failures are distinct from retryable
+                # specialist gaps: they mean coverage itself is unknown.
+                metadata["investigation_outcome"] = data.get(
+                    "investigation_outcome",
+                    metadata.get("investigation_outcome"),
+                )
                 # Store request options in JSONB so recovery remains compatible
                 # when new options are added without a schema migration.
                 if data.get("hunt_config") is not None:
@@ -289,6 +295,7 @@ async def get_job(job_id: str):
                             "has_unresolved_specialist_gaps",
                             metadata.get("has_unresolved_specialist_gaps", False),
                         )
+                        job_data.setdefault("investigation_outcome", metadata.get("investigation_outcome"))
                         job_data.setdefault("hunt_config", metadata.get("hunt_config", {}))
                         # Legacy records used a top-level max_iterations lookup.
                         # Continue exposing it while new records keep the full config.
@@ -428,6 +435,7 @@ async def _run_investigation_background(
                 "scheduled_entities": [],
                 "processed_entities": [],
                 "target_outcomes": {},
+                "investigation_outcome": None,
                 "specialist_results": {},
                 "metadata": {},
                 "iteration": 0,
@@ -526,9 +534,13 @@ async def _run_investigation_background(
             for outcome in target_outcomes.values()
             if isinstance(outcome, dict)
         )
+        investigation_outcome = final_state.get("investigation_outcome") or (
+            final_state.get("metadata", {}) or {}
+        ).get("investigation_outcome")
+        terminal_status = "failed" if investigation_outcome and investigation_outcome.get("status") == "failed" else "completed"
         result = {
             "job_id": job_id,
-            "status": "completed",
+            "status": terminal_status,
             "ioc": final_state.get("ioc") or ioc, 
             "ioc_type": final_state.get("ioc_type"),
             "subtasks": initial_subtasks,  # Use preserved subtasks instead of cleared ones
@@ -542,6 +554,7 @@ async def _run_investigation_background(
             "processed_entities": final_state.get("processed_entities", []),
             "target_outcomes": target_outcomes,
             "has_unresolved_specialist_gaps": has_unresolved_specialist_gaps,
+            "investigation_outcome": investigation_outcome,
             "hunt_config": effective_hunt_config,
             "max_iterations": max_iterations,
             # nx.node_link_data() returns a plain dict — fully JSON/JSONB serializable.
@@ -549,18 +562,27 @@ async def _run_investigation_background(
             "transparency_log": transparency_log  # Agent transparency events
         }
         await save_job(job_id, result)
-        logger.info("investigation_complete", job_id=job_id, status="completed")
+        logger.info("investigation_terminal", job_id=job_id, status=terminal_status, outcome=investigation_outcome)
         
-        # Emit: Investigation completed
-        await sse_manager.emit_event(job_id, "investigation_completed", {
-            "job_id": job_id,
-            "status": "completed",
-            "message": "Investigation completed successfully",
-            "progress": 100,
-            "ioc_type": result.get("ioc_type"),
-            "risk_level": result.get("risk_level"),
-            "has_unresolved_specialist_gaps": has_unresolved_specialist_gaps,
-        })
+        if terminal_status == "completed":
+            await sse_manager.emit_event(job_id, "investigation_completed", {
+                "job_id": job_id,
+                "status": "completed",
+                "message": "Investigation completed successfully",
+                "progress": 100,
+                "ioc_type": result.get("ioc_type"),
+                "risk_level": result.get("risk_level"),
+                "has_unresolved_specialist_gaps": has_unresolved_specialist_gaps,
+            })
+        else:
+            error = investigation_outcome.get("error") or "Investigation coverage could not be established"
+            await sse_manager.emit_event(job_id, "investigation_failed", {
+                "job_id": job_id,
+                "status": "failed",
+                "error": error,
+                "message": f"Investigation failed: {error}",
+                "outcome": investigation_outcome,
+            })
         
     except Exception as e:
         logger.error("investigation_failed", job_id=job_id, error=str(e))

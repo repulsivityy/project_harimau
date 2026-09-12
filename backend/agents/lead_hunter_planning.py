@@ -122,6 +122,7 @@ async def run_planning_phase(state: AgentState, llm, cache: InvestigationCache, 
     logger.info("lead_hunter_planning_start", job_id=job_id, iteration=iteration, actionable_node_count=len(actionable_nodes))
 
     triage_data = state.get("metadata", {}).get("rich_intel", {})
+    enrichment_outcomes = state.get("metadata", {}).get("enrichment_outcomes", {})
     specialist_data = state.get("specialist_results", {})
     unresolved_outcomes = [
         outcome for outcome in (state.get("target_outcomes") or {}).values()
@@ -179,6 +180,17 @@ async def run_planning_phase(state: AgentState, llm, cache: InvestigationCache, 
                 f"{outcome.get('reason') or 'insufficient evidence'}\n"
             )
 
+    failed_enrichments = []
+    root_outcome = enrichment_outcomes.get("root", {}) if isinstance(enrichment_outcomes, dict) else {}
+    if root_outcome.get("status") == "failed":
+        failed_enrichments.append(f"root GTI enrichment: {root_outcome.get('error') or 'unknown error'}")
+    for relationship, outcome in (enrichment_outcomes.get("relationships", {}) or {}).items():
+        if isinstance(outcome, dict) and outcome.get("status") == "failed":
+            failed_enrichments.append(f"relationship {relationship}: {outcome.get('error') or 'unknown error'}")
+    if failed_enrichments:
+        context_str += "\n**Failed enrichments (coverage is incomplete; do not infer no data):**\n"
+        context_str += "\n".join(f"  - {failure}" for failure in failed_enrichments[:20]) + "\n"
+
     # 2. Format pre-filtered uninvestigated nodes (passed in from lead_hunter_node)
     try:
         root_ioc = state.get("ioc")
@@ -215,4 +227,15 @@ Please plan the next steps.
         return result
     except Exception as e:
         logger.error("lead_hunter_planning_error", job_id=job_id, iteration=iteration, error=str(e))
-        return {"subtasks": []}
+        # An empty plan means convergence only after the planner successfully
+        # evaluated available coverage. Preserve an exception explicitly so
+        # the caller cannot route it into successful synthesis.
+        return {
+            "subtasks": [],
+            "investigation_complete": False,
+            "outcome": {
+                "status": "failed",
+                "stage": "planning",
+                "error": str(e),
+            },
+        }

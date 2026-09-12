@@ -166,6 +166,26 @@ async def root():
 JOBS = {}  # In-memory fallback
 ACTIVE_TASKS = {}  # Track background asyncio Tasks for cancellation
 
+
+async def _has_resumable_checkpoint(job_id: str) -> bool:
+    """Return whether this worker can safely resume the outer hunt thread."""
+    if not checkpointer_instance or not app_graph:
+        logger.warning("checkpoint_recovery_unavailable", job_id=job_id)
+        return False
+
+    try:
+        snapshot = await app_graph.aget_state(
+            {"configurable": {"thread_id": job_id}}
+        )
+    except Exception as exc:
+        logger.warning("checkpoint_recovery_lookup_failed", job_id=job_id, error=str(exc))
+        return False
+
+    if not snapshot or not snapshot.next:
+        logger.warning("checkpoint_recovery_not_resumable", job_id=job_id)
+        return False
+    return True
+
 async def save_job(job_id: str, data: dict):
     if db_pool:
         try:
@@ -177,6 +197,12 @@ async def save_job(job_id: str, data: dict):
                 metadata["rich_intel"] = data.get("rich_intel", metadata.get("rich_intel", {}))
                 metadata["specialist_results"] = data.get("specialist_results", metadata.get("specialist_results", {}))
                 metadata["transparency_log"] = data.get("transparency_log", metadata.get("transparency_log", []))
+                # Store request options in JSONB so recovery remains compatible
+                # when new options are added without a schema migration.
+                if data.get("hunt_config") is not None:
+                    metadata["hunt_config"] = data["hunt_config"]
+                if data.get("max_iterations") is not None:
+                    metadata["max_iterations"] = data["max_iterations"]
 
                 # Serialise the investigation graph if present (nx.node_link_data() is a plain dict)
                 raw_graph = data.get("investigation_graph")
@@ -246,6 +272,18 @@ async def get_job(job_id: str):
                         job_data.setdefault("rich_intel", metadata.get("rich_intel", {}))
                         job_data.setdefault("specialist_results", metadata.get("specialist_results", {}))
                         job_data.setdefault("transparency_log", metadata.get("transparency_log", []))
+                        job_data.setdefault("hunt_config", metadata.get("hunt_config", {}))
+                        # Legacy records used a top-level max_iterations lookup.
+                        # Continue exposing it while new records keep the full config.
+                        if isinstance(job_data["hunt_config"], dict):
+                            job_data.setdefault(
+                                "max_iterations",
+                                job_data["hunt_config"].get(
+                                    "max_iterations", metadata.get("max_iterations")
+                                ),
+                            )
+                        else:
+                            job_data.setdefault("max_iterations", metadata.get("max_iterations"))
 
                     # Parse investigation_graph JSONB if returned as string
                     if isinstance(job_data.get("investigation_graph"), str):
@@ -293,16 +331,29 @@ async def run_investigation(request: InvestigationRequest, background_tasks: Bac
     job_id = str(uuid.uuid4())
     logger.info("investigation_request", job_id=job_id, ioc=normalized_ioc)
     
-    # Initialize Job Status
+    # Initialize Job Status. Keep the complete request configuration so an
+    # orphaned job can resume with the same controls after a worker restart.
+    hunt_config = {"max_iterations": request.max_iterations}
     await save_job(job_id, {
         "job_id": job_id,
         "status": "running",
         "ioc": normalized_ioc,
-        "created_at": datetime.now().isoformat()
+        "created_at": datetime.now().isoformat(),
+        "hunt_config": hunt_config,
+        # Retained for legacy callers that read this field directly.
+        "max_iterations": request.max_iterations,
     })
     
     # Run investigation in background safely, track for cancellation
-    task = asyncio.create_task(_run_investigation_background(job_id, normalized_ioc, request.max_iterations))
+    task = asyncio.create_task(
+        _run_investigation_background(
+            job_id,
+            normalized_ioc,
+            request.max_iterations,
+            resume=False,
+            hunt_config=hunt_config,
+        )
+    )
     ACTIVE_TASKS[job_id] = task
     
     # Return immediately
@@ -312,9 +363,20 @@ async def run_investigation(request: InvestigationRequest, background_tasks: Bac
         "message": "Investigation started. Poll /api/investigations/{job_id} for results."
     }
 
-async def _run_investigation_background(job_id: str, ioc: str, max_iterations: int = DEFAULT_HUNT_ITERATIONS):
-    """Background task that runs the actual investigation with SSE event streaming."""
+async def _run_investigation_background(
+    job_id: str,
+    ioc: str,
+    max_iterations: int = DEFAULT_HUNT_ITERATIONS,
+    *,
+    resume: bool = False,
+    hunt_config: dict | None = None,
+):
+    """Run a new hunt, or resume its saved LangGraph checkpoint when requested."""
     from backend.utils.sse_manager import sse_manager
+
+    effective_hunt_config = dict(hunt_config or {})
+    effective_hunt_config.setdefault("max_iterations", max_iterations)
+    max_iterations = effective_hunt_config["max_iterations"]
     
     try:
         # Create SSE queue for this investigation
@@ -324,21 +386,8 @@ async def _run_investigation_background(job_id: str, ioc: str, max_iterations: i
         await sse_manager.emit_event(job_id, "investigation_started", {
             "job_id": job_id,
             "ioc": ioc,
-            "message": "Investigation started"
+            "message": "Investigation resumed from saved checkpoint" if resume else "Investigation started"
         })
-        
-        initial_state = {
-            "job_id": job_id,
-            "ioc": ioc,
-            "messages": [],
-            "subtasks": [],
-            "tasked_entities": [],
-            "specialist_results": {},
-            "metadata": {},
-            "iteration": 0,
-            "investigation_graph": None,
-            "max_iterations": max_iterations
-        }
         
         # Emit: Workflow execution started
         await sse_manager.emit_event(job_id, "workflow_started", {
@@ -347,7 +396,25 @@ async def _run_investigation_background(job_id: str, ioc: str, max_iterations: i
         })
         
         config = {"configurable": {"thread_id": job_id}}
-        final_state = await app_graph.ainvoke(initial_state, config=config)
+        if resume:
+            # None is LangGraph's checkpoint-resume signal. A new state here
+            # would overwrite saved iteration/subtask control state in this thread.
+            logger.info("investigation_checkpoint_resume", job_id=job_id)
+            final_state = await app_graph.ainvoke(None, config=config)
+        else:
+            initial_state = {
+                "job_id": job_id,
+                "ioc": ioc,
+                "messages": [],
+                "subtasks": [],
+                "tasked_entities": [],
+                "specialist_results": {},
+                "metadata": {},
+                "iteration": 0,
+                "investigation_graph": None,
+                "max_iterations": max_iterations
+            }
+            final_state = await app_graph.ainvoke(initial_state, config=config)
         
         # Generate detailed timeline from SSE event history
         timeline_events = sse_manager.get_events(job_id)
@@ -445,6 +512,8 @@ async def _run_investigation_background(job_id: str, ioc: str, max_iterations: i
             "rich_intel": final_state.get("metadata", {}).get("rich_intel", {}),
             "specialist_results": specialist_results,
             "metadata": final_state.get("metadata", {}),
+            "hunt_config": effective_hunt_config,
+            "max_iterations": max_iterations,
             # nx.node_link_data() returns a plain dict — fully JSON/JSONB serializable.
             "investigation_graph": final_state.get("investigation_graph"),
             "transparency_log": transparency_log  # Agent transparency events
@@ -466,7 +535,14 @@ async def _run_investigation_background(job_id: str, ioc: str, max_iterations: i
         logger.error("investigation_failed", job_id=job_id, error=str(e))
         job = await get_job(job_id)
         if not job:
-            job = {"job_id": job_id, "status": "failed", "ioc": ioc, "metadata": {}}
+            job = {
+                "job_id": job_id,
+                "status": "failed",
+                "ioc": ioc,
+                "metadata": {},
+                "hunt_config": effective_hunt_config,
+                "max_iterations": max_iterations,
+            }
         job["status"] = "failed"
         if "metadata" not in job or not isinstance(job["metadata"], dict):
             job["metadata"] = {}
@@ -485,7 +561,14 @@ async def _run_investigation_background(job_id: str, ioc: str, max_iterations: i
         logger.info("investigation_cancelled", job_id=job_id)
         job = await get_job(job_id)
         if not job:
-            job = {"job_id": job_id, "status": "cancelled", "ioc": ioc, "metadata": {}}
+            job = {
+                "job_id": job_id,
+                "status": "cancelled",
+                "ioc": ioc,
+                "metadata": {},
+                "hunt_config": effective_hunt_config,
+                "max_iterations": max_iterations,
+            }
         job["status"] = "cancelled"
         if "metadata" not in job or not isinstance(job["metadata"], dict):
             job["metadata"] = {}
@@ -570,13 +653,31 @@ async def get_investigation(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Auto-resume orphaned running jobs if worker instance restarted
+    # Auto-resume only when this instance can read a pending outer checkpoint.
+    # A database connection without AsyncPostgresSaver must leave the job
+    # recoverable for a healthy instance; invoking None on an uncheckpointed
+    # graph would turn a transient platform failure into a permanent job failure.
     if job.get("status") == "running" and job_id not in ACTIVE_TASKS:
-        logger.info("resuming_orphaned_job", job_id=job_id)
-        ioc = job.get("ioc", "")
-        max_iters = job.get("max_iterations", DEFAULT_HUNT_ITERATIONS)
-        task = asyncio.create_task(_run_investigation_background(job_id, ioc, max_iters))
-        ACTIVE_TASKS[job_id] = task
+        if await _has_resumable_checkpoint(job_id):
+            logger.info("resuming_orphaned_job", job_id=job_id)
+            ioc = job.get("ioc", "")
+            hunt_config = job.get("hunt_config") or {}
+            if not isinstance(hunt_config, dict):
+                logger.warning("invalid_hunt_config", job_id=job_id)
+                hunt_config = {}
+            max_iters = hunt_config.get("max_iterations", job.get("max_iterations"))
+            if max_iters is None:
+                max_iters = DEFAULT_HUNT_ITERATIONS
+            task = asyncio.create_task(
+                _run_investigation_background(
+                    job_id,
+                    ioc,
+                    max_iters,
+                    resume=True,
+                    hunt_config=hunt_config,
+                )
+            )
+            ACTIVE_TASKS[job_id] = task
 
     return job
 

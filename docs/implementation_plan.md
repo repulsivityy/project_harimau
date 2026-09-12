@@ -117,6 +117,7 @@ This document tracks the iterative evolution of the Harimau platform, organized 
 ### Milestone 1: Cloud SQL & Checkpointing ✅
 *   [x] **Relational Persistence**: Replaced `JOBS` dict with Cloud SQL (Postgres).
 *   [x] **LangGraph Checkpointing**: Integrated `AsyncPostgresSaver` to persist graph snapshots.
+*   [x] **Checkpoint-Safe Orphan Recovery** (2026-09-12): An orphaned `running` job resumes the existing `thread_id` with `ainvoke(None, config=...)`, rather than receiving a new initial state that resets iteration/subtask control state. The complete request configuration is stored in job metadata at creation (currently `max_iterations`) and retained through completion for recovery. Recovery is deferred, without changing the job status, when this worker cannot read a pending checkpoint.
 *   [x] **Auth Proxy**: Configured unix socket injection for secure Cloud Run ↔ SQL connectivity.
 
 ### Milestone 2: Shodan Enrichment ✅

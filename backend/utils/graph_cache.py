@@ -255,7 +255,9 @@ def _migrate_graph_identities(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
         canonical = _canonical_url_node_id(node_id, data)
         if not canonical:
             continue
-        for alias in (node_id, data.get("gti_id"), data.get("gti_url_id"), data.get("url"), data.get("last_final_url")):
+        # last_final_url describes a redirect destination, not another spelling
+        # of this URL. Treating it as an alias collapses two distinct resources.
+        for alias in (node_id, data.get("gti_id"), data.get("gti_url_id"), data.get("url")):
             if alias is not None and str(alias).strip():
                 aliases[str(alias).strip()] = canonical
         generated_id = gti_url_id(canonical)

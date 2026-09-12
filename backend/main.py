@@ -286,7 +286,10 @@ async def _has_resumable_checkpoint(job_id: str) -> bool:
         logger.warning("checkpoint_recovery_lookup_failed", job_id=job_id, error=str(exc))
         return False
 
-    if not snapshot or not snapshot.next:
+    # An empty ``next`` means the graph reached END. It is still recoverable
+    # when the worker crashed before persisting its final state; invoking the
+    # saved thread lets the background path write that terminal result.
+    if not snapshot:
         logger.warning("checkpoint_recovery_not_resumable", job_id=job_id)
         return False
     return True
@@ -671,6 +674,13 @@ async def _run_investigation_background(
             "transparency_log": transparency_log  # Agent transparency events
         }
         await save_job(job_id, result)
+        # The conditional upsert preserves an already committed terminal
+        # transition (notably cancellation by another instance). Never emit a
+        # contradictory event based on this worker's requested status.
+        persisted_job = await get_job(job_id)
+        persisted_status = (persisted_job or {}).get("status")
+        if persisted_status in {"completed", "failed", "cancelled"}:
+            terminal_status = persisted_status
         logger.info("investigation_terminal", job_id=job_id, status=terminal_status, outcome=investigation_outcome)
         
         if terminal_status == "completed":
@@ -683,7 +693,7 @@ async def _run_investigation_background(
                 "risk_level": result.get("risk_level"),
                 "has_unresolved_specialist_gaps": has_unresolved_specialist_gaps,
             })
-        else:
+        elif terminal_status == "failed":
             error = investigation_outcome.get("error") or "Investigation coverage could not be established"
             await sse_manager.emit_event(job_id, "investigation_failed", {
                 "job_id": job_id,

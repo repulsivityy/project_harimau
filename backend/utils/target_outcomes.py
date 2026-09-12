@@ -102,6 +102,20 @@ def select_infrastructure_target_ids(ioc: Any, subtasks: Iterable[Dict[str, Any]
     ]
 
 
+def _contains_error(value: Any) -> bool:
+    """Match nested JSON error envelopes returned by aggregate MCP tools."""
+    if isinstance(value, str):
+        try:
+            return _contains_error(json.loads(value))
+        except (TypeError, json.JSONDecodeError):
+            return False
+    if isinstance(value, dict):
+        return bool(value.get("error")) or any(_contains_error(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_error(item) for item in value)
+    return False
+
+
 def _tool_error_seen(messages: Iterable[Any]) -> bool:
     """Detect the uniform ``{\"error\": ...}`` envelopes returned by tools."""
     for message in messages or []:
@@ -114,7 +128,7 @@ def _tool_error_seen(messages: Iterable[Any]) -> bool:
             parsed = json.loads(content)
         except (TypeError, json.JSONDecodeError):
             continue
-        if isinstance(parsed, dict) and parsed.get("error"):
+        if _contains_error(parsed):
             return True
     return False
 
@@ -135,7 +149,7 @@ def _successful_tool_targets(messages: Iterable[Any]) -> set[str]:
         if tool_call_id and tool_call_id in calls:
             content = getattr(message, "content", message.get("content") if isinstance(message, dict) else "")
             try:
-                failed = isinstance(json.loads(content), dict) and bool(json.loads(content).get("error"))
+                failed = _contains_error(json.loads(content))
             except (TypeError, json.JSONDecodeError):
                 failed = False
             if not failed:

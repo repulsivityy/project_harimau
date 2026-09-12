@@ -97,6 +97,8 @@ def normalise_entity_id(value: Any, entity_type: Optional[str] = None) -> Option
         return None
     is_url_type = str(entity_type or "").strip().lower() == URL_ENTITY_TYPE
     if is_url_type or is_http_url(raw):
+        if is_url_type and raw.startswith("gti-url:"):
+            return raw
         canonical = normalise_url(raw)
         if canonical:
             return canonical

@@ -399,13 +399,11 @@ export default function InvestigatePage() {
         // REST is also an authoritative terminal source (for example after
         // reconnecting to a different Cloud Run instance). Latch it before a
         // slower older response can restore the loading UI.
-        if (!terminalStatusRef.current && isTerminalInvestigationStatus(fetchedStatus)) {
-          applyTerminalUpdate(fetchedStatus, jobData, "investigation_snapshot");
-          return fetchedStatus;
-        }
+        const terminalFromRest = !terminalStatusRef.current && isTerminalInvestigationStatus(fetchedStatus);
         const effectiveStatus = terminalStatusRef.current ?? fetchedStatus;
         setJob(jobData);
         setJobStatus(effectiveStatus);
+        if (terminalFromRest) applyTerminalUpdate(fetchedStatus, jobData, "investigation_snapshot");
         if (terminalStatusRef.current && !isTerminalInvestigationStatus(fetchedStatus)) {
           // A stale REST response cannot erase a terminal snapshot's timeline.
           const snapshot = terminalSnapshotRef.current;

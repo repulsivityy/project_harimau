@@ -254,5 +254,20 @@ class AgentState(TypedDict):
     
     lead_hunter_report: Annotated[Optional[str], last_value]  # Full synthesis report
 
-    # Entities that have been assigned as subtasks across all iterations (for convergence detection)
+    # Legacy record of entities assigned as subtasks across all iterations.
+    #
+    # Kept for compatibility with existing checkpoints. New convergence logic
+    # must use ``processed_entities`` instead: assignment is not evidence that
+    # a capped specialist actually handled the target.
     tasked_entities: Annotated[List[str], union_lists]
+
+    # Every entity accepted for specialist dispatch. This is intentionally
+    # distinct from processed_entities: triage and the Lead Hunter can create
+    # more subtasks than a specialist's per-pass target cap permits.
+    scheduled_entities: Annotated[List[str], union_lists]
+
+    # Targets actually selected by a specialist and submitted to its analysis
+    # subgraph. This is an orchestration lifecycle marker, not a claim that
+    # every individual tool call succeeded. It is the sole history used for
+    # Lead Hunter convergence.
+    processed_entities: Annotated[List[str], union_lists]

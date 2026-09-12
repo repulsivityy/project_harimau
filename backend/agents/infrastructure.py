@@ -888,6 +888,14 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                 
                 # Mark targets as investigated
                 cache = InvestigationCache(state["investigation_graph"])
+                # Only the capped selection that entered this specialist
+                # subgraph is processed. Scheduled targets outside the cap are
+                # intentionally left for a later Lead Hunter planning round.
+                state["processed_entities"] = [
+                    str(target_info["value"]).strip().lower()
+                    for target_info in final_targets
+                    if target_info.get("value")
+                ]
                 for target_info in final_targets:
                     cache.mark_as_investigated(target_info["value"], "infrastructure")
                     logger.info("infra_marked_investigated", entity=target_info["value"])

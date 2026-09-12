@@ -482,7 +482,7 @@ Cancel running jobs or delete investigation records from Cloud SQL.
 
 #### State Machine Optimization
 - **Cleanup**: Pruned dead fields from `AgentState` to minimize persistence overhead.
-- **Convergence**: Switched to a `union_lists` reducer for `tasked_entities` to prevent exponential duplication during parallel specialist merges.
+- **Target lifecycle and convergence**: `union_lists` keeps case-insensitive scheduling and processing histories stable across parallel specialist merges. `scheduled_entities` records accepted dispatches while `processed_entities` records only targets admitted to capped specialist subgraphs; Lead Hunter convergence uses the latter. `tasked_entities` remains a legacy scheduling alias for existing checkpoints.
 
 #### Parallel Specialist Execution Fixes
 - **Graph Merge**: Added custom reducer to preserve data from parallel malware/infra agents

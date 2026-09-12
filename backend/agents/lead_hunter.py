@@ -29,7 +29,8 @@ async def lead_hunter_node(state: AgentState):
     Early exit conditions (in order):
       Layer 1 - No uninvestigated actionable nodes remain (zero-cost, no LLM call).
       Layer 2 - LLM signals investigation_complete in its planning response.
-      Layer 3 - New subtasks are a subset of previously tasked entities (convergence).
+      Layer 3 - New subtasks are a subset of actually processed entities
+                (convergence). Scheduled-but-capped targets remain eligible.
     """
     logger.info("lead_hunter_start", iteration=state.get("iteration"))
 
@@ -95,12 +96,45 @@ async def lead_hunter_node(state: AgentState):
 
             if new_subtasks:
                 # --- LAYER 3: Convergence detection ---
-                prev_tasked = {str(e).strip().lower() for e in state.get("tasked_entities", []) if e}
-                new_entity_ids = {str(t["entity_id"]).strip().lower() for t in new_subtasks if t.get("entity_id")}
+                # A target can be scheduled during triage or a prior planning
+                # round yet be deferred by a specialist cap (five malware
+                # targets / ten infrastructure targets). Treating scheduled
+                # entities as completed here drops those deferred leads. Older
+                # checkpoints simply lack processed_entities; an empty set is
+                # safe because the graph's investigated marker still removes
+                # completed nodes from the planner input.
+                previously_processed = {
+                    str(e).strip().lower()
+                    for e in (state.get("processed_entities") or [])
+                    if e
+                }
 
-                if new_entity_ids and new_entity_ids.issubset(prev_tasked):
-                    logger.info("lead_hunter_early_exit", reason="convergence", entities=list(new_entity_ids))
-                else:
+                # A planner can repeat previously processed targets alongside a
+                # deferred target. Passing that mixed batch through unchanged
+                # lets repeated targets consume a specialist's per-pass cap and
+                # starve the deferred lead. Keep only unresolved targets before
+                # dispatch, retaining the planner's order for deterministic caps.
+                dispatchable_subtasks = []
+                scheduled_ids = []
+                seen_scheduled_ids = set()
+                for task in new_subtasks:
+                    entity_id = task.get("entity_id")
+                    normalized_id = str(entity_id).strip().lower() if entity_id else None
+                    if normalized_id and normalized_id in previously_processed:
+                        continue
+                    dispatchable_subtasks.append(task)
+                    if normalized_id and normalized_id not in seen_scheduled_ids:
+                        scheduled_ids.append(normalized_id)
+                        seen_scheduled_ids.add(normalized_id)
+
+                if len(dispatchable_subtasks) != len(new_subtasks):
+                    logger.info(
+                        "lead_hunter_processed_tasks_removed",
+                        removed=len(new_subtasks) - len(dispatchable_subtasks),
+                    )
+                new_subtasks = dispatchable_subtasks
+
+                if new_subtasks:
                     logger.info("lead_hunter_new_tasks", count=len(new_subtasks))
                     # Emitted here, not in run_planning_phase: only at this point
                     # have Layers 2 and 3 confirmed the planner's subtasks will
@@ -116,8 +150,16 @@ async def lead_hunter_node(state: AgentState):
                     return {
                         "subtasks": new_subtasks,
                         "iteration": current_iteration + 1,
-                        "tasked_entities": list(new_entity_ids),
+                        "scheduled_entities": scheduled_ids,
+                        # Retain the legacy field for persisted state readers.
+                        "tasked_entities": scheduled_ids,
                     }
+
+                logger.info(
+                    "lead_hunter_early_exit",
+                    reason="convergence",
+                    entities=sorted(previously_processed),
+                )
 
             logger.info("lead_hunter_no_new_tasks", reason="empty_subtasks_or_converged")
             if job_id:

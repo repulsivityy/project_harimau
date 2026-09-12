@@ -408,6 +408,8 @@ async def _run_investigation_background(
                 "messages": [],
                 "subtasks": [],
                 "tasked_entities": [],
+                "scheduled_entities": [],
+                "processed_entities": [],
                 "specialist_results": {},
                 "metadata": {},
                 "iteration": 0,

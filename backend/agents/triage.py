@@ -1051,7 +1051,16 @@ async def triage_node(state: AgentState):
             relationships_data=relationships_data,
             priority_entities=analysis.get("priority_entities", []),
         )
-        state["tasked_entities"] = [str(t["entity_id"]).strip().lower() for t in state["subtasks"] if t.get("entity_id")]
+        initial_scheduled = [
+            str(t["entity_id"]).strip().lower()
+            for t in state["subtasks"]
+            if t.get("entity_id")
+        ]
+        # `tasked_entities` remains populated for checkpoints created before
+        # the explicit lifecycle fields existed. It records scheduling only;
+        # Lead Hunter convergence deliberately consults processed_entities.
+        state["tasked_entities"] = initial_scheduled
+        state["scheduled_entities"] = initial_scheduled
 
         # [EXPLAINABILITY — OPTION C] Emit deterministic routing explainability trace
         job_id = state.get("job_id")

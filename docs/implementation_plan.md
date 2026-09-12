@@ -98,6 +98,10 @@ This document tracks the iterative evolution of the Harimau platform, organized 
 *   [x] **Strict Structured Output**: (2026-06-04) Replace string parsing (`.replace("```json")`) with `with_structured_output()` to guarantee schema adherence and eliminate parsing fallbacks.
 *   [x] **Optimize NetworkX MultiDiGraph Merges**: (2026-05-30) Implemented deep node attribute merging (unioned lists like `analyzed_by`) and robust pre-insertion edge deduplication in `InvestigationCache.add_relationship` and `merge_graphs` to prevent data loss and exponential edge duplication during parallel state merges.
 *   [x] **Canonical Entity-ID Normalisation**: (2026-05-30) Implemented robust identifier normalisation (`_normalise_id`) across request intake (`main.py`), caching layers (`graph_cache.py`), Lead Hunter convergence detection, and UI root identification (`graph_formatter.py`) to prevent duplicate nodes and broken relationship links.
+*   [x] **Explicit Target Lifecycle for Specialist Caps**: (2026-09-12) `AgentState` now separates `scheduled_entities` from `processed_entities`. Triage and the Lead Hunter record every accepted dispatch as scheduled; specialists record only their capped selection after it completes. Lead Hunter convergence uses processed history, so a sixth malware target (cap: five) or eleventh infrastructure target (cap: ten) can be planned again instead of being discarded as already tasked. `tasked_entities` remains a legacy scheduled alias for persisted checkpoints.
+
+**Challenges & Learnings**
+*   **Scheduling Is Not Completion**: A specialist cap makes the accepted plan larger than a single specialist pass. Reusing scheduling history for convergence silently drops deferred leads even though the graph correctly leaves them uninvestigated; completion history must be recorded independently.
 
 ### Milestone 5: Intelligence Overhaul (May 2026) ✅
 *   [x] **Gemini 3 Migration**: Switched to official `ChatGoogleGenerativeAI` SDK using Gemini 3 Flash/Pro.

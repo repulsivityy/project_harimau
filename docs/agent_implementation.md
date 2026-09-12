@@ -271,6 +271,15 @@ TEMPERATURE = 0  # Deterministic analysis
 ERROR_CONTEXT_CHARS = 2000  # Show 2000 chars of raw output on failure
 ```
 
+### Target Lifecycle Contract
+
+`AgentState.scheduled_entities` contains every target accepted for specialist
+dispatch. `AgentState.processed_entities` contains only targets admitted to a
+specialist's capped subgraph after it returns a result. Lead Hunter convergence
+uses processed targets, so capped-off work remains eligible for a later plan.
+`tasked_entities` is retained only as a legacy scheduled alias for old
+checkpoints; new logic must not use it as completion evidence.
+
 ---
 
 ## Deployment Considerations

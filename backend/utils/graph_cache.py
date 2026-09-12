@@ -348,6 +348,19 @@ class InvestigationCache:
         # Update node attribute (convert back to list for JSON serialization)
         self.graph.nodes[entity_id]["analyzed_by"] = list(analyzed_by)
         logger.info("entity_marked_investigated", entity_id=entity_id, agent=agent)
+
+    def record_target_outcomes(self, outcomes: Dict[str, Dict[str, Any]]):
+        """Persist minimal specialist outcome/evidence metadata on cached nodes."""
+        for outcome in (outcomes or {}).values():
+            target_id = _normalise_id(outcome.get("target_id"))
+            agent = outcome.get("agent")
+            if not target_id or not agent or target_id not in self.graph:
+                continue
+            recorded = dict(outcome)
+            recorded.pop("target_id", None)
+            node_outcomes = dict(self.graph.nodes[target_id].get("specialist_outcomes") or {})
+            node_outcomes[agent] = recorded
+            self.graph.nodes[target_id]["specialist_outcomes"] = node_outcomes
         
     def get_uninvestigated_nodes(self, agent_filter: Optional[str] = None) -> List[Dict[str, Any]]:
         """

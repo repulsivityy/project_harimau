@@ -27,6 +27,10 @@ from backend.utils.agent_utils import (
     build_peer_context,
     parse_indicator_string,
 )
+from backend.utils.target_outcomes import (
+    assess_target_outcomes, successful_target_ids, normalise_target_id,
+    select_infrastructure_target_ids,
+)
 import backend.tools.webrisk as webrisk
 
 ## Global Variables
@@ -227,6 +231,7 @@ class InfraSubgraphState(TypedDict):
     loop_step: int
     max_iterations: int
     final_result: Optional[Dict[str, Any]]
+    current_attempt_analyzed_targets: List[Dict[str, Any]]
 
 # Routers (pure functions of sub_state — hoisted to module scope so they aren't
 # redefined as closures on every infrastructure_node invocation)
@@ -512,6 +517,16 @@ async def infrastructure_node(state: AgentState):
                     return {}
                 
                 # --- Identify Targets ---
+                # Compute canonical admission once; timeout/fatal paths reuse
+                # this pure selector so they report precisely this cap set.
+                investigated_ids = [
+                    node_id for node_id, data in cache.graph.nodes(data=True)
+                    if "infrastructure" in data.get("analyzed_by", [])
+                ]
+                selected_ids = select_infrastructure_target_ids(
+                    ioc, sub_state.get("subtasks", []), investigated_ids,
+                    triage_summary, key_findings,
+                )
                 targets = []
                 
                 # 1. Check Root
@@ -593,7 +608,10 @@ async def infrastructure_node(state: AgentState):
                         unique_targets.append(t)
                         seen.add(clean)
                         
-                unique_targets = unique_targets[:unique_targets_limit]
+                by_target = {normalise_target_id(t["value"]): t for t in unique_targets}
+                unique_targets = [
+                    by_target[target_id] for target_id in selected_ids if target_id in by_target
+                ]
                 logger.info("infra_targets_identified", count=len(unique_targets), targets=[t["value"] for t in unique_targets])
                 
                 if not unique_targets:
@@ -728,6 +746,10 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                         result = response_obj["parsed"].model_dump()
                 else:
                     result = response_obj.model_dump()
+
+                # Keep this attempt separate from the accumulated dossier.
+                # Lifecycle evidence must never be satisfied by an old report.
+                current_attempt_targets = list(result.get("analyzed_targets") or [])
                 
                 # --- Code-enforced accumulation ---
                 prev = sub_state["specialist_results"].get("infrastructure") or {}
@@ -767,7 +789,8 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                     await emit_reasoning(job_id, "infrastructure", final_text)
                     
                 return {
-                    "final_result": result
+                    "final_result": result,
+                    "current_attempt_analyzed_targets": current_attempt_targets,
                 }
 
             # Construct Sub-graph
@@ -855,10 +878,24 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                     "summary": f"Infrastructure Specialist timed out after {SPECIALIST_TIMEOUT} seconds during analysis.",
                     "markdown_report": f"## Analysis Timed Out\n\nThe Infrastructure Specialist timed out after {SPECIALIST_TIMEOUT} seconds while synthesizing or calling tools.\n",
                 }
+                timeout_targets = select_infrastructure_target_ids(
+                    ioc,
+                    state.get("subtasks", []),
+                    [node_id for node_id, data in cache.graph.nodes(data=True) if "infrastructure" in data.get("analyzed_by", [])],
+                    triage_summary,
+                    key_findings,
+                )
+                state["target_outcomes"] = assess_target_outcomes(
+                    timeout_targets, None, "infrastructure", failure_reason="timeout"
+                )
+                cache.record_target_outcomes(state["target_outcomes"])
+                state["investigation_graph"] = cache.get_state()
                 return state
 
             final_result = subgraph_output.get("final_result")
             if final_result:
+                current_attempt_result = dict(final_result)
+                current_attempt_result["analyzed_targets"] = subgraph_output.get("current_attempt_analyzed_targets") or []
                 if "specialist_results" not in state:
                     state["specialist_results"] = {}
                 state["specialist_results"]["infrastructure"] = final_result
@@ -886,19 +923,22 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                     except Exception as e:
                         logger.warning("infra_indicator_parse_failed", indicator=str(indicator)[:50], error=str(e))
                 
-                # Mark targets as investigated
+                # A cap admission is not completion. Record a target as
+                # processed/investigated only when the model explicitly
+                # addresses it with target-level evidence and no tool failed.
                 cache = InvestigationCache(state["investigation_graph"])
-                # Only the capped selection that entered this specialist
-                # subgraph is processed. Scheduled targets outside the cap are
-                # intentionally left for a later Lead Hunter planning round.
-                state["processed_entities"] = [
-                    str(target_info["value"]).strip().lower()
-                    for target_info in final_targets
-                    if target_info.get("value")
-                ]
-                for target_info in final_targets:
-                    cache.mark_as_investigated(target_info["value"], "infrastructure")
-                    logger.info("infra_marked_investigated", entity=target_info["value"])
+                outcomes = assess_target_outcomes(
+                    [target_info.get("value") for target_info in final_targets],
+                    current_attempt_result,
+                    "infrastructure",
+                    messages=subgraph_output.get("messages") or [],
+                )
+                state["target_outcomes"] = outcomes
+                state["processed_entities"] = successful_target_ids(outcomes)
+                cache.record_target_outcomes(outcomes)
+                for target_id in successful_target_ids(outcomes):
+                    cache.mark_as_investigated(target_id, "infrastructure")
+                    logger.info("infra_marked_investigated", entity=target_id)
                 
                 state["investigation_graph"] = cache.get_state()
                 cache_stats_after = cache.get_stats()
@@ -908,8 +948,18 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                 
                 logger.info("infra_agent_success", verdict=final_result.get("verdict"))
             else:
-                # Subgraph yielded no final result (no targets identified)
-                pass
+                # A completed subgraph without structured output is not a
+                # successful analysis. Keep every selected target retryable.
+                final_targets = subgraph_output.get("unique_targets") or []
+                outcomes = assess_target_outcomes(
+                    [target.get("value") for target in final_targets],
+                    None,
+                    "infrastructure",
+                )
+                state["target_outcomes"] = outcomes
+                cache = InvestigationCache(subgraph_output.get("investigation_graph") or state.get("investigation_graph"))
+                cache.record_target_outcomes(outcomes)
+                state["investigation_graph"] = cache.get_state()
 
     except Exception as e:
         logger.error("infra_node_fatal_error", error=str(e))
@@ -921,5 +971,18 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
             "summary": f"Fatal error in Infrastructure Specialist: {str(e)}",
             "markdown_report": f"## System Error\n\nThe Infrastructure Specialist encountered a fatal error.\n\n### Error Details\n```\n{str(e)}\n```\n\n### Traceback\n```\n{tb}\n```"
         }
+        failure_cache = InvestigationCache(state.get("investigation_graph"))
+        failed_targets = select_infrastructure_target_ids(
+            ioc,
+            state.get("subtasks", []),
+            [node_id for node_id, data in failure_cache.graph.nodes(data=True) if "infrastructure" in data.get("analyzed_by", [])],
+            triage_summary,
+            key_findings,
+        )
+        state["target_outcomes"] = assess_target_outcomes(
+            failed_targets, None, "infrastructure", failure_reason="system_error"
+        )
+        failure_cache.record_target_outcomes(state["target_outcomes"])
+        state["investigation_graph"] = failure_cache.get_state()
 
     return state

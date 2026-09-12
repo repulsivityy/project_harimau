@@ -14,10 +14,19 @@ from backend.utils.verdict_engine import apply_composite_verdicts
 from backend.utils.report_validator import validate_and_annotate
 from backend.utils.signal_filter import promote_by_graph_context
 from backend.utils.transparency import emit_reasoning
+from backend.utils.target_outcomes import canonical_agent, normalise_target_id
 
 logger = get_logger("agent_lead_hunter")
 
 ACTIONABLE_TYPES = {"file", "ip_address", "domain", "url"}
+
+
+def _unresolved_target_outcomes(state: AgentState):
+    """Return retryable target failures from the latest specialist attempts."""
+    return [
+        outcome for outcome in (state.get("target_outcomes") or {}).values()
+        if outcome.get("status") != "succeeded" and outcome.get("target_id") and outcome.get("agent")
+    ]
 
 
 async def lead_hunter_node(state: AgentState):
@@ -80,7 +89,8 @@ async def lead_hunter_node(state: AgentState):
         uninvestigated = cache.get_uninvestigated_nodes()
         actionable = [n for n in uninvestigated if n.get("entity_type") in ACTIONABLE_TYPES]
 
-        if not actionable:
+        unresolved_outcomes = _unresolved_target_outcomes(state)
+        if not actionable and not unresolved_outcomes:
             logger.info("lead_hunter_early_exit", reason="no_uninvestigated_nodes", iteration=current_iteration)
         else:
             # --- PLANNING MODE (uses Flash) ---
@@ -90,9 +100,42 @@ async def lead_hunter_node(state: AgentState):
             new_subtasks = plan.get("subtasks", [])
 
             # --- LAYER 2: LLM confidence signal ---
-            if plan.get("investigation_complete"):
+            if plan.get("investigation_complete") and not unresolved_outcomes:
                 logger.info("lead_hunter_early_exit", reason="llm_signals_complete", iteration=current_iteration)
                 new_subtasks = []
+            elif plan.get("investigation_complete"):
+                logger.info(
+                    "lead_hunter_completion_deferred_unresolved_targets",
+                    unresolved_count=len(unresolved_outcomes),
+                )
+
+            # A model may omit a failed lead or incorrectly report completion.
+            # Put retries first, and mark them for the specialist selectors, so
+            # a full planner batch cannot consume the specialist cap first.
+            retry_subtasks = []
+            retry_keys = set()
+            for outcome in unresolved_outcomes:
+                agent = canonical_agent(outcome.get("agent"))
+                target_id = normalise_target_id(outcome.get("target_id"))
+                if not agent or not target_id or (agent, target_id) in retry_keys:
+                    continue
+                retry_subtasks.append({
+                    "agent": f"{agent}_specialist",
+                    "entity_id": target_id,
+                    "task": "Retry target-specific specialist analysis",
+                    "context": f"Unresolved gap from prior attempt: {outcome.get('reason') or 'insufficient evidence'}.",
+                    "priority": "retry",
+                })
+                retry_keys.add((agent, target_id))
+
+            # A planner task for the same specialist/target is represented by
+            # the deterministic retry above. Canonical aliases prevent both
+            # spellings from using a slot.
+            planned_subtasks = [
+                task for task in new_subtasks
+                if (canonical_agent(task.get("agent")), normalise_target_id(task.get("entity_id"))) not in retry_keys
+            ]
+            new_subtasks = [*retry_subtasks, *planned_subtasks]
 
             if new_subtasks:
                 # --- LAYER 3: Convergence detection ---
@@ -198,6 +241,20 @@ async def lead_hunter_node(state: AgentState):
     apply_composite_verdicts(cache, job_id=state.get("job_id"))
 
     final_report = await generate_final_report_llm(state, llm_pro, cache=cache)
+
+    # The iteration budget can force synthesis before a retry succeeds. Keep
+    # those failures visible to the analyst instead of allowing a polished
+    # final report to imply complete coverage.
+    unresolved_outcomes = _unresolved_target_outcomes(state)
+    if unresolved_outcomes:
+        gap_lines = ["\n## Unresolved Specialist Gaps\n"]
+        gap_lines.append("The following targets were not marked investigated and require a retry:\n")
+        for outcome in unresolved_outcomes:
+            gap_lines.append(
+                f"- `{outcome['target_id']}` ({outcome['agent']}): "
+                f"{outcome.get('reason') or 'insufficient target-specific evidence'}\n"
+            )
+        final_report += "".join(gap_lines)
 
     # Annotate (never strip) any IOC cited in the report that isn't grounded in
     # the investigation graph or specialist findings. See report_validator.py.

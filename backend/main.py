@@ -197,6 +197,16 @@ async def save_job(job_id: str, data: dict):
                 metadata["rich_intel"] = data.get("rich_intel", metadata.get("rich_intel", {}))
                 metadata["specialist_results"] = data.get("specialist_results", metadata.get("specialist_results", {}))
                 metadata["transparency_log"] = data.get("transparency_log", metadata.get("transparency_log", []))
+                # Target lifecycle is required to distinguish a genuinely
+                # covered hunt from one that reached its iteration budget with
+                # retryable specialist gaps.
+                metadata["scheduled_entities"] = data.get("scheduled_entities", metadata.get("scheduled_entities", []))
+                metadata["processed_entities"] = data.get("processed_entities", metadata.get("processed_entities", []))
+                metadata["target_outcomes"] = data.get("target_outcomes", metadata.get("target_outcomes", {}))
+                metadata["has_unresolved_specialist_gaps"] = data.get(
+                    "has_unresolved_specialist_gaps",
+                    metadata.get("has_unresolved_specialist_gaps", False),
+                )
                 # Store request options in JSONB so recovery remains compatible
                 # when new options are added without a schema migration.
                 if data.get("hunt_config") is not None:
@@ -272,6 +282,13 @@ async def get_job(job_id: str):
                         job_data.setdefault("rich_intel", metadata.get("rich_intel", {}))
                         job_data.setdefault("specialist_results", metadata.get("specialist_results", {}))
                         job_data.setdefault("transparency_log", metadata.get("transparency_log", []))
+                        job_data.setdefault("scheduled_entities", metadata.get("scheduled_entities", []))
+                        job_data.setdefault("processed_entities", metadata.get("processed_entities", []))
+                        job_data.setdefault("target_outcomes", metadata.get("target_outcomes", {}))
+                        job_data.setdefault(
+                            "has_unresolved_specialist_gaps",
+                            metadata.get("has_unresolved_specialist_gaps", False),
+                        )
                         job_data.setdefault("hunt_config", metadata.get("hunt_config", {}))
                         # Legacy records used a top-level max_iterations lookup.
                         # Continue exposing it while new records keep the full config.
@@ -410,6 +427,7 @@ async def _run_investigation_background(
                 "tasked_entities": [],
                 "scheduled_entities": [],
                 "processed_entities": [],
+                "target_outcomes": {},
                 "specialist_results": {},
                 "metadata": {},
                 "iteration": 0,
@@ -502,6 +520,12 @@ async def _run_investigation_background(
                 })
         
         # Update Job with results
+        target_outcomes = final_state.get("target_outcomes") or {}
+        has_unresolved_specialist_gaps = any(
+            outcome.get("status") != "succeeded"
+            for outcome in target_outcomes.values()
+            if isinstance(outcome, dict)
+        )
         result = {
             "job_id": job_id,
             "status": "completed",
@@ -514,6 +538,10 @@ async def _run_investigation_background(
             "rich_intel": final_state.get("metadata", {}).get("rich_intel", {}),
             "specialist_results": specialist_results,
             "metadata": final_state.get("metadata", {}),
+            "scheduled_entities": final_state.get("scheduled_entities", []),
+            "processed_entities": final_state.get("processed_entities", []),
+            "target_outcomes": target_outcomes,
+            "has_unresolved_specialist_gaps": has_unresolved_specialist_gaps,
             "hunt_config": effective_hunt_config,
             "max_iterations": max_iterations,
             # nx.node_link_data() returns a plain dict — fully JSON/JSONB serializable.
@@ -530,7 +558,8 @@ async def _run_investigation_background(
             "message": "Investigation completed successfully",
             "progress": 100,
             "ioc_type": result.get("ioc_type"),
-            "risk_level": result.get("risk_level")
+            "risk_level": result.get("risk_level"),
+            "has_unresolved_specialist_gaps": has_unresolved_specialist_gaps,
         })
         
     except Exception as e:

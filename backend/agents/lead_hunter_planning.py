@@ -5,6 +5,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from backend.utils.logger import get_logger
 from backend.utils.graph_cache import InvestigationCache
 from backend.graph.state import AgentState
+from backend.utils.target_outcomes import normalise_target_id
 
 logger = get_logger("agent_lead_hunter_planning")
 
@@ -122,6 +123,10 @@ async def run_planning_phase(state: AgentState, llm, cache: InvestigationCache, 
 
     triage_data = state.get("metadata", {}).get("rich_intel", {})
     specialist_data = state.get("specialist_results", {})
+    unresolved_outcomes = [
+        outcome for outcome in (state.get("target_outcomes") or {}).values()
+        if outcome.get("status") != "succeeded" and outcome.get("target_id")
+    ]
 
     # 1. Gather Context
     context_str = f"**Triage Context:**\n{str(triage_data.get('triage_analysis', {}).get('executive_summary', 'N/A'))}\n\n"
@@ -151,8 +156,28 @@ async def run_planning_phase(state: AgentState, llm, cache: InvestigationCache, 
             ids = [str(t.get("indicator") or t.get("value") or t) if isinstance(t, dict) else str(t) for t in analyzed[:10]]
             all_analyzed_ids.update(i for i in ids if i)
             
+    # A prior report may mention evidence from an attempt that failed (for
+    # example, a later tool error). Do not tell the planner that those targets
+    # are complete; they must remain eligible for the deterministic retry.
+    unresolved_ids = {
+        normalise_target_id(outcome.get("target_id"))
+        for outcome in unresolved_outcomes
+        if normalise_target_id(outcome.get("target_id"))
+    }
+    all_analyzed_ids = {
+        indicator for indicator in all_analyzed_ids
+        if normalise_target_id(indicator) not in unresolved_ids
+    }
     if all_analyzed_ids:
         context_str += f"\n**Already analyzed (do NOT re-task):** {', '.join(list(all_analyzed_ids)[:20])}\n"
+
+    if unresolved_outcomes:
+        context_str += "\n**Unresolved specialist gaps (must remain eligible for retry):**\n"
+        for outcome in unresolved_outcomes[:20]:
+            context_str += (
+                f"  - {outcome.get('target_id')} ({outcome.get('agent')}): "
+                f"{outcome.get('reason') or 'insufficient evidence'}\n"
+            )
 
     # 2. Format pre-filtered uninvestigated nodes (passed in from lead_hunter_node)
     try:

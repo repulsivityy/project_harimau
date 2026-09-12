@@ -6,6 +6,10 @@ def merge_dicts(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
     """Merges two dictionaries (shallow merge)."""
     return {**a, **b}
 
+def merge_target_outcomes(a: Optional[Dict[str, Any]], b: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Merge latest per-agent/per-target outcomes from parallel specialists."""
+    return {**(a or {}), **(b or {})}
+
 def last_value(a: Any, b: Any) -> Any:
     """Reducer that returns the last value (for scalar fields in parallel execution)."""
     return b if b is not None else a
@@ -266,8 +270,11 @@ class AgentState(TypedDict):
     # more subtasks than a specialist's per-pass target cap permits.
     scheduled_entities: Annotated[List[str], union_lists]
 
-    # Targets actually selected by a specialist and submitted to its analysis
-    # subgraph. This is an orchestration lifecycle marker, not a claim that
-    # every individual tool call succeeded. It is the sole history used for
-    # Lead Hunter convergence.
+    # Targets proven to have received a successful, target-specific specialist
+    # analysis. This is the sole history used for Lead Hunter convergence.
     processed_entities: Annotated[List[str], union_lists]
+
+    # Latest target outcome per ``<agent>:<normalised target id>``. Failed
+    # outcomes deliberately do not enter processed_entities or analyzed_by,
+    # so the target remains eligible for a later retry.
+    target_outcomes: Annotated[Dict[str, Dict[str, Any]], merge_target_outcomes]

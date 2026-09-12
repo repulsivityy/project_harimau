@@ -324,6 +324,17 @@ data: {"job_id": "abc-123", "status": "completed"}
 **Get interactive knowledge graph data.**
 Constructed from the persisted NetworkX investigation graph via `format_graph_from_cache()`, with fallback to `rich_intel`. Uses real normalised entity IDs and rich typed metadata.
 
+### Entity identity contract
+
+File hashes, IP addresses, and domains use trimmed lowercase identities. URLs use
+their canonical raw URL as the graph, planner, specialist, lifecycle, and tool
+provenance key: only the scheme and host are lowercased; user-info, path, query,
+and fragment remain exact. GTI's opaque base64url URL object id is retained as
+`gti_id`/`gti_url_id` provenance and resolves to that raw URL node, never as a
+second graph node. This avoids a cache miss when GTI relationship descriptors
+use the hash while specialist tools receive the raw URL, and prevents a
+case-sensitive path or query from being redirected to another IOC.
+
 **Response** (200 OK):
 ```json
 {

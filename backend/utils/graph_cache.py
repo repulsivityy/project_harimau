@@ -12,15 +12,13 @@ import networkx as nx
 from typing import Dict, List, Any, Optional
 import json
 from backend.utils.logger import get_logger
+from backend.utils.entity_identity import gti_url_id, is_http_url, normalise_entity_id
 
 logger = get_logger("graph_cache")
 
-def _normalise_id(entity_id: Optional[Any]) -> Optional[str]:
-    """Normalise entity identifier by converting to string, stripping whitespace, and lowercasing."""
-    if entity_id is None:
-        return None
-    norm = str(entity_id).strip().lower()
-    return norm if norm else None
+def _normalise_id(entity_id: Optional[Any], entity_type: Optional[str] = None) -> Optional[str]:
+    """Compatibility wrapper for the typed investigation identity contract."""
+    return normalise_entity_id(entity_id, entity_type)
 
 
 def _json_value(value: Any) -> Any:
@@ -211,6 +209,100 @@ def extract_gti_summary(rel_item: dict) -> dict:
     return summary
 
 
+def _merge_graph_attributes(existing: Dict[str, Any], incoming: Dict[str, Any]) -> None:
+    """Merge migration collisions without discarding persisted evidence."""
+    for key, value in incoming.items():
+        if key not in existing:
+            existing[key] = value
+        elif isinstance(existing[key], dict) and isinstance(value, dict):
+            _merge_graph_attributes(existing[key], value)
+        elif isinstance(existing[key], list) and isinstance(value, list):
+            for item in value:
+                if item not in existing[key]:
+                    existing[key].append(item)
+
+
+def _canonical_url_node_id(node_id: Any, data: Dict[str, Any]) -> Optional[str]:
+    """Best-effort recovery of a URL node from old checkpoint representations."""
+    for value in (data.get("gti_id"), data.get("gti_url_id")):
+        decoded = normalise_entity_id(value, "url")
+        if decoded and not decoded.startswith("gti-url:"):
+            return decoded
+    # Older cache keys were lowercased URL strings. URL attributes are the
+    # only source that can recover their original path/query casing.
+    for value in (data.get("url"), data.get("last_final_url"), node_id):
+        canonical = normalise_entity_id(value, "url")
+        if canonical and not canonical.startswith("gti-url:"):
+            return canonical
+    return normalise_entity_id(node_id, "url")
+
+
+def _migrate_graph_identities(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
+    """Upgrade persisted graph keys and endpoints to the typed identity contract.
+
+    Checkpoints created before typed URL identities can contain a lowercased
+    raw URL node, a separate GTI base64-id node, and edges to either form.
+    Rebuild atomically so aliases collapse into one canonical node and no edge
+    retains a phantom endpoint.
+    """
+    if not isinstance(graph, nx.MultiDiGraph):
+        return graph
+
+    aliases: Dict[str, str] = {}
+    for node_id, data in graph.nodes(data=True):
+        if data.get("entity_type") != "url":
+            continue
+        canonical = _canonical_url_node_id(node_id, data)
+        if not canonical:
+            continue
+        for alias in (node_id, data.get("gti_id"), data.get("gti_url_id"), data.get("url"), data.get("last_final_url")):
+            if alias is not None and str(alias).strip():
+                aliases[str(alias).strip()] = canonical
+        generated_id = gti_url_id(canonical)
+        if generated_id:
+            aliases[generated_id] = canonical
+
+    node_map: Dict[Any, str] = {}
+    for node_id, data in graph.nodes(data=True):
+        raw = str(node_id).strip()
+        node_map[node_id] = aliases.get(raw) or (
+            _canonical_url_node_id(node_id, data)
+            if data.get("entity_type") == "url"
+            else _normalise_id(node_id, data.get("entity_type"))
+        ) or raw
+
+    migrated = nx.MultiDiGraph()
+    for node_id, data in graph.nodes(data=True):
+        canonical = node_map[node_id]
+        attributes = dict(data)
+        if attributes.get("entity_type") == "url":
+            attributes.setdefault("gti_url_id", gti_url_id(canonical))
+            raw = str(node_id).strip()
+            if raw != canonical and not is_http_url(raw):
+                attributes.setdefault("gti_id", raw)
+        if canonical in migrated:
+            _merge_graph_attributes(migrated.nodes[canonical], attributes)
+        else:
+            migrated.add_node(canonical, **attributes)
+
+    for source, target, data in graph.edges(data=True):
+        canonical_source = node_map.get(source, aliases.get(str(source).strip()) or _normalise_id(source))
+        canonical_target = node_map.get(target, aliases.get(str(target).strip()) or _normalise_id(target))
+        if not canonical_source or not canonical_target:
+            continue
+        relationship = data.get("relationship")
+        matched = False
+        if migrated.has_edge(canonical_source, canonical_target):
+            for _, existing in migrated[canonical_source][canonical_target].items():
+                if existing.get("relationship") == relationship:
+                    _merge_graph_attributes(existing, dict(data))
+                    matched = True
+                    break
+        if not matched:
+            migrated.add_edge(canonical_source, canonical_target, **data)
+    return migrated
+
+
 class InvestigationCache:
     """NetworkX-based cache for investigation entities with full attributes."""
     
@@ -227,10 +319,30 @@ class InvestigationCache:
             self.graph = graph
         else:
             self.graph = nx.MultiDiGraph()
+        self.graph = _migrate_graph_identities(self.graph)
 
     def get_state(self) -> Dict[str, Any]:
         """Get the graph as a dictionary for state persistence."""
         return nx.node_link_data(self.graph)
+
+    def _resolve_entity_id(self, entity_id: Any, entity_type: Optional[str] = None) -> Optional[str]:
+        """Resolve a graph key, including a GTI URL id already admitted to it."""
+        resolved = _normalise_id(entity_id, entity_type)
+        if resolved in self.graph:
+            return resolved
+        raw = str(entity_id).strip() if entity_id is not None else ""
+        if not raw:
+            return resolved
+        # Relationship descriptors frequently name URL objects by GTI's base64
+        # id while specialists use the raw URL.  Match only explicit URL
+        # aliases retained on a URL node; never fuzzy-match arbitrary IDs.
+        for node_id, data in self.graph.nodes(data=True):
+            if data.get("entity_type") != "url":
+                continue
+            aliases = {str(data.get("gti_id") or "").strip(), str(data.get("gti_url_id") or "").strip()}
+            if raw in aliases:
+                return node_id
+        return resolved
     
     def add_entity(self, entity_id: str, entity_type: str, attributes: Dict[str, Any]):
         """
@@ -242,9 +354,17 @@ class InvestigationCache:
             attributes: Complete attributes dictionary from GTI API
         """
         # Deduplication: Check if entity already exists
-        entity_id = _normalise_id(entity_id)
+        raw_id = str(entity_id).strip() if entity_id is not None else ""
+        entity_id = _normalise_id(entity_id, entity_type)
         if not entity_id:
             return
+        attributes = dict(attributes or {})
+        if entity_type == "url":
+            # Graph identity is the canonical raw URL. Keep GTI's opaque id as
+            # provenance/lookup metadata, never as a competing graph node.
+            attributes.setdefault("gti_url_id", gti_url_id(entity_id))
+            if raw_id and raw_id != entity_id:
+                attributes.setdefault("gti_id", raw_id)
         if entity_id in self.graph:
             # Entity exists - merge attributes instead of overwriting
             existing_data = self.graph.nodes[entity_id]
@@ -281,8 +401,8 @@ class InvestigationCache:
             rel_type: Relationship type (e.g., contacted_domains, dropped_files)
             metadata: Optional edge metadata
         """
-        source_id = _normalise_id(source_id)
-        target_id = _normalise_id(target_id)
+        source_id = self._resolve_entity_id(source_id)
+        target_id = self._resolve_entity_id(target_id)
         if not source_id or not target_id:
             return
         if self.graph.has_edge(source_id, target_id):
@@ -311,7 +431,7 @@ class InvestigationCache:
         Returns:
             Dictionary with only requested fields
         """
-        entity_id = _normalise_id(entity_id)
+        entity_id = self._resolve_entity_id(entity_id)
         if not entity_id or entity_id not in self.graph:
             return {}
         
@@ -328,7 +448,7 @@ class InvestigationCache:
         Returns:
             Dictionary with all stored attributes
         """
-        entity_id = _normalise_id(entity_id)
+        entity_id = self._resolve_entity_id(entity_id)
         if not entity_id or entity_id not in self.graph:
             return {}
         
@@ -345,7 +465,7 @@ class InvestigationCache:
         Returns:
             List of neighbor entity IDs
         """
-        entity_id = _normalise_id(entity_id)
+        entity_id = self._resolve_entity_id(entity_id)
         if not entity_id or entity_id not in self.graph:
             return []
         
@@ -409,7 +529,7 @@ class InvestigationCache:
     
     def has_entity(self, entity_id: str) -> bool:
         """Check if entity exists in cache."""
-        entity_id = _normalise_id(entity_id)
+        entity_id = self._resolve_entity_id(entity_id)
         if not entity_id:
             return False
         return entity_id in self.graph
@@ -445,7 +565,7 @@ class InvestigationCache:
             entity_id: The entity ID
             agent: The agent name (e.g., 'malware', 'infrastructure')
         """
-        entity_id = _normalise_id(entity_id)
+        entity_id = self._resolve_entity_id(entity_id)
         if not entity_id or entity_id not in self.graph:
             return
 
@@ -461,7 +581,7 @@ class InvestigationCache:
                                attempt: Optional[Dict[str, Any]] = None):
         """Append attempt-aware outcome metadata without clobbering prior attempts."""
         for outcome in (outcomes or {}).values():
-            target_id = _normalise_id(outcome.get("target_id"))
+            target_id = self._resolve_entity_id(outcome.get("target_id"))
             agent = outcome.get("agent")
             if not target_id or not agent or target_id not in self.graph:
                 continue
@@ -489,7 +609,7 @@ class InvestigationCache:
         contexts; ``format_specialist_evidence_summary`` emits only bounded
         structured-result details.
         """
-        target_id = _normalise_id(target_id)
+        target_id = self._resolve_entity_id(target_id)
         if not target_id:
             return
         # A tool call on an unadmitted/model-invented IOC must not create a
@@ -522,14 +642,14 @@ class InvestigationCache:
         }
         summary = str(result.get("summary") or "").replace("\n", " ")[:600]
         targets = {
-            _normalise_id(target.get("indicator") or target.get("value")): target
+            self._resolve_entity_id(target.get("indicator") or target.get("value")): target
             for target in result.get("analyzed_targets") or []
-            if isinstance(target, dict) and _normalise_id(target.get("indicator") or target.get("value"))
+            if isinstance(target, dict) and self._resolve_entity_id(target.get("indicator") or target.get("value"))
         }
         for outcome in (outcomes or {}).values():
             if outcome.get("agent") != agent or outcome.get("status") != "succeeded":
                 continue
-            target_id = _normalise_id(outcome.get("target_id"))
+            target_id = self._resolve_entity_id(outcome.get("target_id"))
             target = targets.get(target_id)
             if not target_id or not target or target_id not in self.graph:
                 continue

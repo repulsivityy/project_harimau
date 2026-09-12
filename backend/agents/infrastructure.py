@@ -39,6 +39,22 @@ unique_targets_limit = 10 # number of unique targets the infra agent investigate
 
 logger = get_logger("agent_infrastructure")
 
+
+def _dedupe_infrastructure_targets(targets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Deduplicate candidates by typed identity without altering the tool input.
+
+    In particular, an URL's path/query case and terminal punctuation remain
+    intact. The first presentation is retained for the specialist prompt.
+    """
+    unique_targets, seen = [], set()
+    for target in targets:
+        raw_value = target.get("value")
+        identity = normalise_target_id(raw_value)
+        if identity and identity not in seen:
+            unique_targets.append(target)
+            seen.add(identity)
+    return unique_targets
+
 class AnalyzedTargetInfra(BaseModel):
     indicator: Optional[str] = None
     type: Optional[str] = None
@@ -621,20 +637,9 @@ async def infrastructure_node(state: AgentState):
                             if not (e and "infrastructure" in e.get("analyzed_by", [])):
                                 targets.append({"type": "safety_net", "value": d, "context": "Found in Triage Summary"})
 
-                # Deduplicate
-                unique_targets = []
-                seen = set()
-                
-                def clean_val(v):
-                    return v.strip(".,;:").lower()
-
-                for t in targets:
-                    raw_val = t["value"]
-                    if not raw_val: continue
-                    clean = clean_val(raw_val)
-                    if clean not in seen:
-                        unique_targets.append(t)
-                        seen.add(clean)
+                # Deduplicate by the shared typed contract. Do not lowercase
+                # an entire URL or strip terminal path/query punctuation.
+                unique_targets = _dedupe_infrastructure_targets(targets)
                         
                 by_target = {normalise_target_id(t["value"]): t for t in unique_targets}
                 unique_targets = [

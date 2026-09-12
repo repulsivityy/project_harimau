@@ -15,6 +15,7 @@ from backend.utils.report_validator import validate_and_annotate
 from backend.utils.signal_filter import promote_by_graph_context
 from backend.utils.transparency import emit_reasoning
 from backend.utils.target_outcomes import canonical_agent, normalise_target_id
+from backend.utils.entity_identity import normalise_entity_id
 
 logger = get_logger("agent_lead_hunter")
 
@@ -180,7 +181,7 @@ async def lead_hunter_node(state: AgentState):
                 # safe because the graph's investigated marker still removes
                 # completed nodes from the planner input.
                 previously_processed = {
-                    str(e).strip().lower()
+                    normalise_entity_id(e)
                     for e in (state.get("processed_entities") or [])
                     if e
                 }
@@ -195,7 +196,7 @@ async def lead_hunter_node(state: AgentState):
                 seen_scheduled_ids = set()
                 for task in new_subtasks:
                     entity_id = task.get("entity_id")
-                    normalized_id = str(entity_id).strip().lower() if entity_id else None
+                    normalized_id = normalise_entity_id(entity_id) if entity_id else None
                     if normalized_id and normalized_id in previously_processed:
                         continue
                     dispatchable_subtasks.append(task)

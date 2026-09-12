@@ -11,6 +11,7 @@ import asyncpg
 from backend.graph.workflow import create_graph
 from backend.config import DEFAULT_HUNT_ITERATIONS
 from backend.utils import checkpointer_registry
+from backend.utils.entity_identity import normalise_entity_id
 
 # 1. Configure Logging
 configure_logger()
@@ -351,7 +352,9 @@ async def run_investigation(request: InvestigationRequest, background_tasks: Bac
     """
     import asyncio
     
-    normalized_ioc = request.ioc.strip().lower()
+    # File/IP/domain identities are case-insensitive; URL paths and query
+    # strings are not. Keep this identity unchanged through the workflow.
+    normalized_ioc = normalise_entity_id(request.ioc) or request.ioc.strip()
     job_id = str(uuid.uuid4())
     logger.info("investigation_request", job_id=job_id, ioc=normalized_ioc)
     

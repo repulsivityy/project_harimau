@@ -2,6 +2,7 @@ from typing import TypedDict, Annotated, List, Dict, Any, Optional
 from langchain_core.messages import BaseMessage
 import operator
 import json
+from backend.utils.entity_identity import normalise_entity_id
 
 
 def _merge_graph_value(a: Any, b: Any) -> Any:
@@ -43,12 +44,12 @@ def last_value(a: Any, b: Any) -> Any:
     return b if b is not None else a
 
 def union_lists(a: Optional[List[str]], b: Optional[List[str]]) -> List[str]:
-    """Union two lists with case-insensitive deduplication."""
+    """Union lifecycle identities without corrupting case-sensitive URL paths."""
     res = list(a or [])
-    res_norm = {str(item).strip().lower() for item in res if item is not None}
+    res_norm = {normalise_entity_id(item) for item in res if item is not None}
     for item in (b or []):
         if item is not None:
-            norm = str(item).strip().lower()
+            norm = normalise_entity_id(item)
             if norm not in res_norm:
                 res.append(item)
                 res_norm.add(norm)
@@ -60,22 +61,27 @@ def merge_graphs(a: Optional[Any], b: Optional[Any]) -> Optional[Any]:
     When specialists run in parallel, both expand the graph independently.
     This ensures both sets of updates are preserved.
     """
-    if a is None: return b
-    if b is None: return a
-    
     # Import here to avoid circular deps
     import networkx as nx
-    from backend.utils.graph_cache import latest_specialist_outcomes
+    from backend.utils.graph_cache import InvestigationCache, latest_specialist_outcomes
+
+    # Rehydrate through InvestigationCache even when only one branch supplied
+    # a graph. That migrates old URL aliases before the graph reaches another
+    # checkpoint or specialist.
+    if a is None:
+        return InvestigationCache(b).get_state() if b is not None else None
+    if b is None:
+        return InvestigationCache(a).get_state()
     
     # Deserialized graphs from dicts if necessary
-    graph_a = nx.node_link_graph(a) if isinstance(a, dict) else a
-    graph_b = nx.node_link_graph(b) if isinstance(b, dict) else b
+    graph_a = InvestigationCache(a).graph
+    graph_b = InvestigationCache(b).graph
     
     # Merge nodes
     combined = nx.MultiDiGraph(graph_a)
-    existing_nodes_norm = {str(n).strip().lower(): n for n in combined.nodes()}
+    existing_nodes_norm = {normalise_entity_id(n): n for n in combined.nodes()}
     for node, data in graph_b.nodes(data=True):
-        norm_node = str(node).strip().lower()
+        norm_node = normalise_entity_id(node, data.get("entity_type"))
         if norm_node in existing_nodes_norm:
             actual_node = existing_nodes_norm[norm_node]
             # Node exists - deep merge attributes
@@ -97,6 +103,13 @@ def merge_graphs(a: Optional[Any], b: Optional[Any]) -> Optional[Any]:
     
     # Merge edges
     for u, v, data in graph_b.edges(data=True):
+        # Endpoints may have been aliases in a branch snapshot. Resolve them
+        # against the merged canonical node map before adding an edge so a GTI
+        # URL id cannot silently create a phantom node during fan-in.
+        source_key = normalise_entity_id(u, graph_b.nodes[u].get("entity_type"))
+        target_key = normalise_entity_id(v, graph_b.nodes[v].get("entity_type"))
+        u = existing_nodes_norm.get(source_key, u)
+        v = existing_nodes_norm.get(target_key, v)
         rel = data.get("relationship")
         edge_matched = False
         if combined.has_edge(u, v):
@@ -135,8 +148,8 @@ def _merge_entity_lists(a: List[Dict[str, Any]], b: List[Dict[str, Any]]) -> Lis
     """
     def dedup_key(item: Dict[str, Any]):
         return (
-            str(item.get("id")).strip().lower(),
-            str(item.get("source_id")).strip().lower(),
+            normalise_entity_id(item.get("id"), item.get("type")),
+            normalise_entity_id(item.get("source_id")),
         )
 
     result: List[Dict[str, Any]] = []

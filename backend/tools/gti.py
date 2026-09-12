@@ -4,6 +4,7 @@ import os
 import certifi
 import ssl
 from backend.utils.logger import get_logger
+from backend.utils.entity_identity import gti_url_id
 
 logger = get_logger("tool_gti_direct")
 
@@ -193,10 +194,12 @@ async def get_file_report(file_hash: str, relationships: list[str] = None) -> di
     return await _make_request(f"files/{file_hash}", relationships)
 
 async def get_url_report(url: str, relationships: list[str] = None) -> dict:
-    import base64
-    # URL ID encoding: base64 without padding
+    # Derive GTI's object id from the same canonical raw URL used by the
+    # graph/lifecycle contract; path and query case are intentionally intact.
     try:
-        url_id = base64.urlsafe_b64encode(url.encode()).decode().strip("=")
+        url_id = gti_url_id(url)
+        if not url_id:
+            raise ValueError("URL must be a valid HTTP(S) URL")
         return await _make_request(f"urls/{url_id}", relationships)
     except Exception as e:
         logger.error("gti_url_encoding_failed", error=str(e))

@@ -9,14 +9,12 @@ that target and supplies at least one target-specific evidence field.
 import json
 import re
 from typing import Any, Dict, Iterable, List, Optional
+from backend.utils.entity_identity import normalise_target_id as _normalise_target_id
 
 
 def normalise_target_id(value: Any) -> Optional[str]:
-    """Return the canonical target id used by graph and lifecycle state."""
-    if value is None:
-        return None
-    normalised = str(value).strip().lower().strip(".,;:")
-    return normalised or None
+    """Return the typed canonical target id used by graph/lifecycle state."""
+    return _normalise_target_id(value)
 
 
 def canonical_agent(agent: Any) -> Optional[str]:

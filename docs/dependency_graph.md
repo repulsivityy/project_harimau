@@ -79,7 +79,8 @@ graph TD
 *   **`backend/agents/lead_hunter.py`**: Lead Hunter Orchestrator. Coordinates planning rounds (`run_planning_phase`) and final intelligence synthesis (`generate_final_report_llm`), enforcing early convergence exit rules.
 *   **`backend/agents/lead_hunter_synthesis.py`**: Synthesizes the final intelligence report, builds the grounded edge fact table, and coordinates attack-flow diagram annotation with `dot_builder.py`.
 *   **`backend/utils/dot_builder.py`**: Generates deterministic Graphviz DOT skeletons directly from NetworkX cache, parses returned DOT fences, and strictly validates node/edge consistency.
-*   **`backend/utils/graph_cache.py`**: Wraps NetworkX `MultiDiGraph` with canonical entity ID normalization (`_normalise_id`), deep node/edge attribute merging, and minimal field extraction.
+*   **`backend/utils/entity_identity.py`**: Defines typed canonical IOC identities. It lowercases file/IP/domain identities, but only the scheme and host of URLs; it also maps GTI base64url URL ids to their canonical raw URL.
+*   **`backend/utils/graph_cache.py`**: Wraps NetworkX `MultiDiGraph` with canonical entity identity resolution (`_normalise_id`), including GTI URL-id aliases, deep node/edge attribute merging, and minimal field extraction.
 *   **`backend/mcp/client.py`**: Manages stdio sessions for embedded GTI and Shodan FastMCP servers.
 
 ### Key Relationships (Edges)

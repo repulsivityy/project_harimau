@@ -14,6 +14,7 @@ from backend.utils.logger import get_logger
 import backend.tools.gti as gti
 import backend.tools.webrisk as webrisk
 from backend.utils.graph_cache import InvestigationCache, normalize_verdict
+from backend.utils.entity_identity import normalise_entity_id
 from backend.utils.signal_filter import get_signal_reason
 from backend.utils.transparency import emit_tool_call, emit_reasoning
 
@@ -312,7 +313,7 @@ def generate_initial_subtasks(
             eid = entity.get("id")
             sreason = entity.get("signal_reason")
             if eid and sreason:
-                reason_map[str(eid).strip().lower()] = str(sreason)
+                reason_map[normalise_entity_id(eid, entity.get("type"))] = str(sreason)
 
     def _agent_for_type(entity_type: str) -> str | None:
         t = entity_type.lower()
@@ -331,7 +332,7 @@ def generate_initial_subtasks(
         seen_entities.add(entity_id)
 
         # Explainability: attach deterministic qualification rule if known and not already present
-        norm_id = str(entity_id).strip().lower()
+        norm_id = normalise_entity_id(entity_id, entity_type)
         signal_reason = reason_map.get(norm_id)
         if signal_reason and "[Rule:" not in context:
             context = f"{context} [Rule: {signal_reason}]"
@@ -721,7 +722,8 @@ async def triage_node(state: AgentState):
     - Phase 2: Triage LLM does comprehensive first-level analysis (intelligent)
     - Result: Complete graph + actionable intelligence for specialists
     """
-    ioc = state["ioc"]
+    ioc = normalise_entity_id(state["ioc"]) or state["ioc"]
+    state["ioc"] = ioc
     logger.info("triage_start", ioc=ioc, mode="hybrid_comprehensive")
     
     try:
@@ -877,7 +879,7 @@ async def triage_node(state: AgentState):
                     # Now parse minimal + display fields for LLM and graph UI
                     attrs = full_attrs
                     
-                    norm_id = str(entity_id).strip().lower() if entity_id else None
+                    norm_id = normalise_entity_id(entity_id, entity_type) if entity_id else None
                     if not norm_id:
                         continue
                     
@@ -1119,7 +1121,7 @@ async def triage_node(state: AgentState):
             priority_entities=analysis.get("priority_entities", []),
         )
         initial_scheduled = [
-            str(t["entity_id"]).strip().lower()
+            normalise_entity_id(t["entity_id"])
             for t in state["subtasks"]
             if t.get("entity_id")
         ]

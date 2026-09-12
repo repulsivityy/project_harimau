@@ -4,6 +4,7 @@ import json
 import re
 from langchain_core.messages import BaseMessage
 from typing import Any, Callable, Dict, List, Optional
+from backend.utils.entity_identity import normalise_entity_id
 
 INDICATOR_PATTERN = re.compile(
     r"^(?P<type>IP(?:\s*Address)?|Domain|URL|File|Hash|SHA256|MD5)\s*:\s*(?P<value>.+)$",
@@ -144,11 +145,12 @@ def push_to_rich_intel(relationships_data: dict, rel_name: str, entity_type: str
     if rel_name not in relationships_data:
         relationships_data[rel_name] = []
         
-    norm_val = str(value).strip().lower() if value else ""
-    norm_src = str(source_id).strip().lower() if source_id else ""
+    norm_val = normalise_entity_id(value, entity_type) if value else ""
+    norm_src = normalise_entity_id(source_id) if source_id else ""
     
     exists = any(
-        str(e.get("id")).strip().lower() == norm_val and str(e.get("source_id")).strip().lower() == norm_src
+        normalise_entity_id(e.get("id"), e.get("type") or entity_type) == norm_val
+        and normalise_entity_id(e.get("source_id")) == norm_src
         for e in relationships_data[rel_name]
     )
     if not exists:

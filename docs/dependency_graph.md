@@ -72,20 +72,22 @@ graph TD
 *   **`src/app/api/[...path]/route.ts`**: App Router catch-all proxy route. Evaluates `BACKEND_URL` dynamically at request time (Cloud Run runtime env var), forwarding all `/api/*` traffic to the FastAPI backend.
 *   **`backend/main.py`**: FastAPI entry point. Handles HTTP requests, database lifecycle (Cloud SQL connection pool via `asyncpg`), checkpointer setup (`AsyncPostgresSaver`), background task dispatch (`_run_investigation_background`), and SSE streaming endpoints.
 *   **`backend/graph/workflow.py`**: Defines the LangGraph investigation workflow: `triage` -> `gate` -> `malware_specialist` & `infrastructure_specialist` (parallel fan-out) -> `lead_hunter` -> (loop or `END`).
-*   **`backend/graph/state.py`**: Defines `AgentState` with deep reducers: `merge_metadata` (recursive rich-intel merging), `merge_graphs` (NetworkX MultiDiGraph merging), `union_lists` (case-insensitive dedup), and `last_value`.
+*   **`backend/graph/state.py`**: Defines `AgentState` with deep reducers: `merge_metadata` (recursive rich-intel merging), `merge_graphs` (NetworkX MultiDiGraph merging), `union_lists` (case-insensitive dedup), and `last_value`. Its target lifecycle distinguishes `scheduled_entities` (accepted specialist dispatches), `target_outcomes` (latest per-target evidence/failure record), and `processed_entities` (only targets proven by specialist output); `tasked_entities` remains a legacy scheduling alias for persisted checkpoints.
 *   **`backend/agents/triage.py`**: Triage Agent. Performs initial breadth-first relationship queries via direct GTI API fast-path, evaluates risk levels, filters high-signal entities, and deterministically generates subtasks.
 *   **`backend/agents/malware.py`**: Malware Specialist Agent. Runs as a LangGraph `ToolNode` sub-graph with 5 specialist tools (`get_file_behavior`, `get_dropped_files`, `get_network_activity`, `get_attribution`, `get_file_report`), structured Pydantic output, and cumulative iteration memory.
 *   **`backend/agents/infrastructure.py`**: Infrastructure Specialist Agent. Runs as a LangGraph `ToolNode` sub-graph with 10 tools across GTI (domains, IPs, URLs), WebRisk, and Shodan (IP/DNS lookups), with structured output.
 *   **`backend/agents/lead_hunter.py`**: Lead Hunter Orchestrator. Coordinates planning rounds (`run_planning_phase`) and final intelligence synthesis (`generate_final_report_llm`), enforcing early convergence exit rules.
 *   **`backend/agents/lead_hunter_synthesis.py`**: Synthesizes the final intelligence report, builds the grounded edge fact table, and coordinates attack-flow diagram annotation with `dot_builder.py`.
 *   **`backend/utils/dot_builder.py`**: Generates deterministic Graphviz DOT skeletons directly from NetworkX cache, parses returned DOT fences, and strictly validates node/edge consistency.
-*   **`backend/utils/graph_cache.py`**: Wraps NetworkX `MultiDiGraph` with canonical entity ID normalization (`_normalise_id`), deep node/edge attribute merging, and minimal field extraction.
+*   **`backend/utils/entity_identity.py`**: Defines typed canonical IOC identities. It lowercases file/IP/domain identities, but only the scheme and host of URLs; it also maps GTI base64url URL ids to their canonical raw URL.
+*   **`app/src/lib/investigation-stream.ts`**: Applies persisted snapshots and terminal SSE events monotonically, preventing stale REST/live updates from resurrecting a terminal hunt.
+*   **`backend/utils/graph_cache.py`**: Wraps NetworkX `MultiDiGraph` with canonical entity identity resolution (`_normalise_id`), including GTI URL-id aliases, deep node/edge attribute merging, and minimal field extraction.
 *   **`backend/mcp/client.py`**: Manages stdio sessions for embedded GTI and Shodan FastMCP servers.
 
 ### Key Relationships (Edges)
 
 *   **Frontend -> Backend**: Next.js client fetches from `/api/*`, which `src/app/api/[...path]/route.ts` proxies at runtime to `backend/main.py`.
-*   **SSE Streaming**: `/api/investigations/{id}/stream` streams JSON events from `backend/utils/sse_manager.py` directly to the Next.js `EventSource` subscriber.
+*   **SSE Streaming**: `/api/investigations/{id}/stream` registers the subscriber before sending an authoritative persisted `investigation_snapshot`, then streams live events. It periodically reconciles durable job state for cross-instance terminal completion; completed, failed, and cancelled states are terminal.
 *   **Orchestration**: `workflow.py` orchestrates state transitions between `triage`, `gate`, specialists, and `lead_hunter`.
 *   **Data Sharing**: Specialists commit raw findings directly to `graph_cache.py` and `metadata["rich_intel"]`, preserving full data for downstream synthesis while passing compact summaries to LLMs.
 *   **Tool Execution**: Specialist agents invoke MCP tools bounded by `@tool_timeout(20.0)` in `backend/utils/agent_utils.py`.
@@ -703,6 +705,7 @@ graph TD
   - `__init__()`
   - `create_queue(job_id)`: Registers a subscriber queue.
   - `emit_event(job_id, event_type, data)`: Non-raising broadcast with subscriber snapshotting and monotone progress clamping (0–100%).
+  - `open_subscription(job_id)` / `close_subscription(job_id, queue)`: Register a client before snapshot generation and close it idempotently.
   - `get_events(job_id)`: Historical event retrieval.
   - `subscribe(job_id)`: Async generator yielding formatted SSE events.
   - `clear_history(job_id)`: Frees event queues and clears progress tracking state.

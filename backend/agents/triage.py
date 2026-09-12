@@ -14,6 +14,7 @@ from backend.utils.logger import get_logger
 import backend.tools.gti as gti
 import backend.tools.webrisk as webrisk
 from backend.utils.graph_cache import InvestigationCache, normalize_verdict
+from backend.utils.entity_identity import normalise_entity_id
 from backend.utils.signal_filter import get_signal_reason
 from backend.utils.transparency import emit_tool_call, emit_reasoning
 
@@ -151,7 +152,7 @@ which related entities are most important for deeper investigation.
 **Available Intelligence:**
 You have COMPLETE data from Google Threat Intelligence:
 - Base threat indicators (verdict, score, stats)
-- ALL priority relationships have been fetched and provided
+- Relationship coverage is explicitly labelled as enriched, validated no-data, or failed
 - Full context about associated threats, infrastructure, and campaigns
 - NOTE: Relationship entities have been pre-filtered to only include high-signal
   indicators — a malicious/suspicious verdict, significant vendor detections,
@@ -312,7 +313,7 @@ def generate_initial_subtasks(
             eid = entity.get("id")
             sreason = entity.get("signal_reason")
             if eid and sreason:
-                reason_map[str(eid).strip().lower()] = str(sreason)
+                reason_map[normalise_entity_id(eid, entity.get("type"))] = str(sreason)
 
     def _agent_for_type(entity_type: str) -> str | None:
         t = entity_type.lower()
@@ -331,7 +332,7 @@ def generate_initial_subtasks(
         seen_entities.add(entity_id)
 
         # Explainability: attach deterministic qualification rule if known and not already present
-        norm_id = str(entity_id).strip().lower()
+        norm_id = normalise_entity_id(entity_id, entity_type)
         signal_reason = reason_map.get(norm_id)
         if signal_reason and "[Rule:" not in context:
             context = f"{context} [Rule: {signal_reason}]"
@@ -513,6 +514,7 @@ async def comprehensive_triage_analysis(
     ioc_type: str,
     triage_data: dict,
     relationships_data: dict,
+    relationship_outcomes: dict | None = None,
     state: dict = None  # Added to access job_id
 ) -> dict:
     """
@@ -558,14 +560,16 @@ async def comprehensive_triage_analysis(
 **Base Threat Assessment:**
 {json.dumps(triage_data, indent=2)}
 
-**Complete Relationship Data:**
-ALL priority relationships have been fetched. Here is the complete intelligence:
+**Validated Relationship Data:**
+Only relationships with a successful enrichment and returned entities appear below.
+Empty relationships are explicitly validated no-data results; no failed relationship is presented as no data.
 
 {json.dumps(detailed_context, indent=2)}
 
 **Statistics:**
 - Total relationships checked: {len(PRIORITY_RELATIONSHIPS.get(ioc_type, []))}
-- Relationships with data: {len(relationships_data)}
+- Successfully enriched relationships with data: {len(relationships_data)}
+- Validated no-data relationships: {sum(1 for outcome in (relationship_outcomes or {}).values() if outcome.get('status') == 'no_data')}
 - Total entities found: {sum(len(entities) for entities in relationships_data.values())}
 
 Perform comprehensive first-level triage analysis now.
@@ -697,6 +701,20 @@ Perform comprehensive first-level triage analysis now.
         return analysis
 
 
+def _terminal_triage_failure(state: AgentState, *, stage: str, error: str, enrichment_outcomes: dict | None = None) -> AgentState:
+    """Record a coverage-unknown triage failure in the shared terminal contract."""
+    metadata = state.setdefault("metadata", {})
+    outcome = {"status": "failed", "stage": stage, "error": error, "source": "gti" if "enrichment" in stage else "triage"}
+    metadata["investigation_outcome"] = outcome
+    if enrichment_outcomes is not None:
+        metadata["enrichment_outcomes"] = enrichment_outcomes
+    metadata["risk_level"] = "Unknown"
+    state["final_report"] = f"# Investigation Failed\n\nThreat coverage could not be established. Error: {error}"
+    state["subtasks"] = []
+    state["investigation_outcome"] = outcome
+    return state
+
+
 async def triage_node(state: AgentState):
     """
     HYBRID APPROACH:
@@ -704,7 +722,8 @@ async def triage_node(state: AgentState):
     - Phase 2: Triage LLM does comprehensive first-level analysis (intelligent)
     - Result: Complete graph + actionable intelligence for specialists
     """
-    ioc = state["ioc"]
+    ioc = normalise_entity_id(state["ioc"]) or state["ioc"]
+    state["ioc"] = ioc
     logger.info("triage_start", ioc=ioc, mode="hybrid_comprehensive")
     
     try:
@@ -750,13 +769,28 @@ async def triage_node(state: AgentState):
             })
         
         # Pass priority_rels to the tool to trigger bundling
-        base_data = await config["direct_tool"](ioc, relationships=priority_rels)
-        
-        if not base_data or "data" not in base_data:
-             logger.warning("triage_direct_api_empty", ioc=ioc)
+        base_response = await config["direct_tool"](ioc, relationships=priority_rels)
+        base_outcome = (base_response or {}).get("_outcome", {})
+
+        # Direct GTI responses used to collapse missing credentials, API errors
+        # and a genuine 404 into ``{}``.  A failed enrichment makes coverage
+        # unknown, so it must terminate as failed rather than fabricate an
+        # empty root IOC and let the hunt converge successfully.
+        if base_outcome.get("status") == "failed":
+            error = base_outcome.get("error") or (base_response or {}).get("error") or "GTI enrichment failed"
+            logger.error("triage_direct_api_failed", ioc=ioc, error=error)
+            return _terminal_triage_failure(
+                state,
+                stage="triage_enrichment",
+                error=error,
+                enrichment_outcomes={"root": base_outcome},
+            )
+
+        if not base_response or "data" not in base_response or base_response.get("data") is None:
+             logger.info("triage_direct_api_no_data", ioc=ioc)
              base_data = {"id": ioc}
         else:
-             base_data = base_data["data"]
+             base_data = base_response["data"]
 
         triage_data = extract_triage_data(base_data, config["type"])
         
@@ -765,6 +799,37 @@ async def triage_node(state: AgentState):
         state["metadata"]["risk_level"] = "Assessing..." 
         state["metadata"]["gti_score"] = triage_data.get("threat_score")
         state["metadata"]["rich_intel"] = triage_data
+        state["metadata"]["enrichment_outcomes"] = {
+            "root": base_outcome or {"status": "succeeded", "source": "gti"},
+            "relationships": base_data.get("_relationship_outcomes", {}),
+        }
+        relationship_outcome_items = list((base_data.get("_relationship_outcomes", {}) or {}).items())
+        failed_relationships = [
+            f"{name}: {outcome.get('error') or 'GTI relationship enrichment failed'}"
+            for name, outcome in relationship_outcome_items
+            if isinstance(outcome, dict) and outcome.get("status") == "failed"
+        ]
+        # A single rate-limited or transient relationship failure must not sink
+        # the whole hunt: it is carried as a coverage gap in enrichment_outcomes
+        # (surfaced in triage/lead-hunter planning context and the final report)
+        # rather than a terminal failure. Only abort when every requested
+        # relationship failed, since that means root enrichment produced no
+        # usable graph at all.
+        if failed_relationships and len(failed_relationships) == len(relationship_outcome_items):
+            error = "; ".join(failed_relationships)
+            logger.error("triage_relationship_enrichment_failed", ioc=ioc, error=error)
+            return _terminal_triage_failure(
+                state,
+                stage="triage_relationship_enrichment",
+                error=error,
+                enrichment_outcomes=state["metadata"]["enrichment_outcomes"],
+            )
+        elif failed_relationships:
+            logger.warning(
+                "triage_relationship_enrichment_partial_failure",
+                ioc=ioc,
+                failed="; ".join(failed_relationships),
+            )
         
         # ========================================
         # PHASE 1: Super-Bundle Relationship Parsing
@@ -800,6 +865,7 @@ async def triage_node(state: AgentState):
         tool_call_trace = []
         
         raw_relationships = base_data.get("relationships", {})
+        relationship_outcomes = base_data.get("_relationship_outcomes", {})
         
         for rel_name, rel_content in raw_relationships.items():
             # Check if relationship has actual data (list of entities)
@@ -813,20 +879,41 @@ async def triage_node(state: AgentState):
                     entity_id = entity.get("id")
                     entity_type = entity.get("type")
                     full_attrs = entity.get("attributes", {})
-                    
+
+                    # GTI identifies url objects by an opaque id (its SHA256),
+                    # not the base64url-encoded canonical URL normalise_entity_id
+                    # expects. Falling back to the raw id produces an
+                    # unrecognisable `gti-url:<sha256>` identity that
+                    # _is_infrastructure_target rejects, silently dropping the
+                    # lead. Use the actual url attribute as the graph/lifecycle
+                    # identity instead.
+                    graph_entity_id = entity_id
+                    if entity_type == "url":
+                        url_attr_value = full_attrs.get("url") or full_attrs.get("last_final_url")
+                        if url_attr_value and entity_id:
+                            graph_entity_id = url_attr_value
+                            # add_entity's own gti_id bookkeeping only fires
+                            # when its raw/normalised ids differ, which no
+                            # longer happens once we substitute the URL as
+                            # entity_id here — preserve GTI's original opaque
+                            # id explicitly so later lookups by that id
+                            # (InvestigationCache._resolve_entity_id) still
+                            # resolve to this node.
+                            full_attrs = {**full_attrs, "gti_id": entity_id}
+
                     # STORE FULL ENTITY IN NETWORKX CACHE
                     cache.add_entity(
-                        entity_id=entity_id,
+                        entity_id=graph_entity_id,
                         entity_type=entity_type,
                         attributes=full_attrs
                     )
                     # Add relationship edge
-                    cache.add_relationship(ioc, entity_id, rel_name)
-                    
+                    cache.add_relationship(ioc, graph_entity_id, rel_name)
+
                     # Now parse minimal + display fields for LLM and graph UI
                     attrs = full_attrs
-                    
-                    norm_id = str(entity_id).strip().lower() if entity_id else None
+
+                    norm_id = normalise_entity_id(graph_entity_id, entity_type) if graph_entity_id else None
                     if not norm_id:
                         continue
                     
@@ -998,6 +1085,21 @@ async def triage_node(state: AgentState):
                     "sample_entity": {"id": parsed_entities[0]["id"], "type": parsed_entities[0]["type"]}
                 })
 
+        # Preserve explicit no-data and failed relationship outcomes even when
+        # there are no entities to add to the graph. This prevents an API
+        # outage from being narrated as "no related infrastructure found".
+        traced_relationships = {entry["relationship"] for entry in tool_call_trace}
+        for rel_name in priority_rels:
+            if rel_name in traced_relationships:
+                continue
+            outcome = relationship_outcomes.get(rel_name, {"status": "no_data", "source": "gti"})
+            tool_call_trace.append({
+                "relationship": rel_name,
+                "status": outcome.get("status", "no_data"),
+                "error": outcome.get("error"),
+                "entities_found": 0,
+            })
+
         # NOTE: graph-context promotion (promote_by_graph_context) deliberately
         # does NOT run here. See the accumulator comment above — at this point
         # in the pipeline the graph is a root->entity star, so nothing could
@@ -1033,6 +1135,7 @@ async def triage_node(state: AgentState):
             ioc_type=config["type"],
             triage_data=triage_data,
             relationships_data=relationships_data,
+            relationship_outcomes=relationship_outcomes,
             state=state  # Pass state for job_id access
         )
         
@@ -1051,7 +1154,16 @@ async def triage_node(state: AgentState):
             relationships_data=relationships_data,
             priority_entities=analysis.get("priority_entities", []),
         )
-        state["tasked_entities"] = [str(t["entity_id"]).strip().lower() for t in state["subtasks"] if t.get("entity_id")]
+        initial_scheduled = [
+            normalise_entity_id(t["entity_id"])
+            for t in state["subtasks"]
+            if t.get("entity_id")
+        ]
+        # `tasked_entities` remains populated for checkpoints created before
+        # the explicit lifecycle fields existed. It records scheduling only;
+        # Lead Hunter convergence deliberately consults processed_entities.
+        state["tasked_entities"] = initial_scheduled
+        state["scheduled_entities"] = initial_scheduled
 
         # [EXPLAINABILITY — OPTION C] Emit deterministic routing explainability trace
         job_id = state.get("job_id")
@@ -1099,16 +1211,6 @@ async def triage_node(state: AgentState):
                 
     except Exception as e:
         logger.error("triage_fatal_error", error=str(e))
-        if "metadata" not in state: state["metadata"] = {} # Ensuring metadata exists on error
-        state["metadata"]["risk_level"] = "Error"
-        if "rich_intel" not in state["metadata"]: state["metadata"]["rich_intel"] = {}
-        
-        # Fatal error visibility
-        import traceback
-        tb = traceback.format_exc()
-        state["metadata"]["rich_intel"]["triage_analysis"] = {
-            "executive_summary": f"Fatal System Error: {str(e)}",
-            "_llm_reasoning": f"## Fatal Error\n\nA critical system error occurred:\n\n```\n{str(e)}\n```\n\n### Traceback\n```\n{tb}\n```"
-        }
-        
+        return _terminal_triage_failure(state, stage="triage", error=str(e))
+
     return state

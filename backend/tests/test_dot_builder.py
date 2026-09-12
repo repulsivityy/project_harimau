@@ -34,7 +34,9 @@ from backend.agents.lead_hunter_synthesis import (
     _score_edges,
     _select_diagram_edges,
     generate_final_report_llm,
+    generate_final_report_outcome,
     DIAGRAM_EDGE_LIMIT,
+    SynthesisFailure,
 )
 
 
@@ -736,8 +738,9 @@ def test_synthesis_falls_back_when_llm_returns_an_empty_diagram():
 
 def test_synthesis_error_guard_short_circuits_before_building_a_skeleton():
     """
-    S1-T5's all-specialists-failed guard must still return its structured error
-    without touching the new skeleton/validation path.
+    S1-T5's all-specialists-failed guard must raise SynthesisFailure without
+    touching the new skeleton/validation path (and without calling the LLM);
+    generate_final_report_outcome turns that into the structured error report.
     """
     cache = _build_cache()
     state = dict(_synthesis_state())
@@ -750,9 +753,16 @@ def test_synthesis_error_guard_short_circuits_before_building_a_skeleton():
         async def ainvoke(self, messages):
             raise AssertionError("the LLM must not be called when all specialists failed")
 
-    report = asyncio.run(generate_final_report_llm(state, _ExplodingLLM(), cache=cache))
-    assert "Investigation Failed" in report
-    assert extract_dot_block(report) is None
+    try:
+        asyncio.run(generate_final_report_llm(state, _ExplodingLLM(), cache=cache))
+        assert False, "expected SynthesisFailure"
+    except SynthesisFailure as exc:
+        assert "all_specialists_failed" in str(exc)
+
+    outcome = asyncio.run(generate_final_report_outcome(state, _ExplodingLLM(), cache=cache))
+    assert outcome["status"] == "failed"
+    assert "Investigation Failed" in outcome["report"]
+    assert extract_dot_block(outcome["report"]) is None
 
 
 # ---------------------------------------------------------------------------

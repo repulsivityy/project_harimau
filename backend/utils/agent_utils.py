@@ -3,7 +3,8 @@ import functools
 import json
 import re
 from langchain_core.messages import BaseMessage
-from typing import List
+from typing import Any, Callable, Dict, List, Optional
+from backend.utils.entity_identity import normalise_entity_id
 
 INDICATOR_PATTERN = re.compile(
     r"^(?P<type>IP(?:\s*Address)?|Domain|URL|File|Hash|SHA256|MD5)\s*:\s*(?P<value>.+)$",
@@ -66,7 +67,8 @@ FINAL_ITERATION_PROMPT = (
 DEFAULT_TOOL_TIMEOUT = 20.0
 
 
-def tool_timeout(seconds: float = DEFAULT_TOOL_TIMEOUT, logger=None):
+def tool_timeout(seconds: float = DEFAULT_TOOL_TIMEOUT, logger=None,
+                 on_error: Optional[Callable[[str, tuple, Dict[str, Any], str], None]] = None):
     """
     Bound an agent tool coroutine with a wall-clock timeout and a catch-all.
 
@@ -100,11 +102,17 @@ def tool_timeout(seconds: float = DEFAULT_TOOL_TIMEOUT, logger=None):
             except asyncio.TimeoutError:
                 if logger:
                     logger.error("tool_timeout", tool=func.__name__, timeout=seconds)
-                return json.dumps({"error": f"Tool {func.__name__} timed out after {seconds} seconds."})
+                result = json.dumps({"error": f"Tool {func.__name__} timed out after {seconds} seconds."})
+                if on_error:
+                    on_error(func.__name__, args, kwargs, result)
+                return result
             except Exception as e:
                 if logger:
                     logger.error("tool_error", tool=func.__name__, error=str(e))
-                return json.dumps({"error": f"Tool {func.__name__} failed - {str(e)}"})
+                result = json.dumps({"error": f"Tool {func.__name__} failed - {str(e)}"})
+                if on_error:
+                    on_error(func.__name__, args, kwargs, result)
+                return result
         return wrapper
     return decorator
 
@@ -137,11 +145,12 @@ def push_to_rich_intel(relationships_data: dict, rel_name: str, entity_type: str
     if rel_name not in relationships_data:
         relationships_data[rel_name] = []
         
-    norm_val = str(value).strip().lower() if value else ""
-    norm_src = str(source_id).strip().lower() if source_id else ""
+    norm_val = normalise_entity_id(value, entity_type) if value else ""
+    norm_src = normalise_entity_id(source_id) if source_id else ""
     
     exists = any(
-        str(e.get("id")).strip().lower() == norm_val and str(e.get("source_id")).strip().lower() == norm_src
+        normalise_entity_id(e.get("id"), e.get("type") or entity_type) == norm_val
+        and normalise_entity_id(e.get("source_id")) == norm_src
         for e in relationships_data[rel_name]
     )
     if not exists:

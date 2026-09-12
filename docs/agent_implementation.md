@@ -271,6 +271,18 @@ TEMPERATURE = 0  # Deterministic analysis
 ERROR_CONTEXT_CHARS = 2000  # Show 2000 chars of raw output on failure
 ```
 
+### Target Lifecycle Contract
+
+`AgentState.scheduled_entities` contains every target accepted for specialist
+dispatch. `AgentState.processed_entities` contains only targets for which the
+current specialist attempt produced an explicit target match, substantive
+evidence, and a successful tool call for that target. `target_outcomes` retains
+the latest per-agent outcome; failures remain eligible for a prioritized retry
+and are surfaced in synthesis if the iteration limit is reached. Lead Hunter
+convergence uses processed targets, so capped-off or unsuccessfully analyzed
+work remains eligible for a later plan. `tasked_entities` is retained only as a
+legacy scheduled alias for old checkpoints.
+
 ---
 
 ## Deployment Considerations

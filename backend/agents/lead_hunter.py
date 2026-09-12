@@ -9,15 +9,25 @@ from backend.utils.logger import get_logger
 from backend.utils.graph_cache import InvestigationCache
 
 from backend.agents.lead_hunter_planning import run_planning_phase
-from backend.agents.lead_hunter_synthesis import generate_final_report_llm
+from backend.agents.lead_hunter_synthesis import generate_final_report_outcome
 from backend.utils.verdict_engine import apply_composite_verdicts
 from backend.utils.report_validator import validate_and_annotate
 from backend.utils.signal_filter import promote_by_graph_context
 from backend.utils.transparency import emit_reasoning
+from backend.utils.target_outcomes import canonical_agent, normalise_target_id
+from backend.utils.entity_identity import normalise_entity_id
 
 logger = get_logger("agent_lead_hunter")
 
 ACTIONABLE_TYPES = {"file", "ip_address", "domain", "url"}
+
+
+def _unresolved_target_outcomes(state: AgentState):
+    """Return retryable target failures from the latest specialist attempts."""
+    return [
+        outcome for outcome in (state.get("target_outcomes") or {}).values()
+        if outcome.get("status") != "succeeded" and outcome.get("target_id") and outcome.get("agent")
+    ]
 
 
 async def lead_hunter_node(state: AgentState):
@@ -29,7 +39,8 @@ async def lead_hunter_node(state: AgentState):
     Early exit conditions (in order):
       Layer 1 - No uninvestigated actionable nodes remain (zero-cost, no LLM call).
       Layer 2 - LLM signals investigation_complete in its planning response.
-      Layer 3 - New subtasks are a subset of previously tasked entities (convergence).
+      Layer 3 - New subtasks are a subset of actually processed entities
+                (convergence). Scheduled-but-capped targets remain eligible.
     """
     logger.info("lead_hunter_start", iteration=state.get("iteration"))
 
@@ -74,33 +85,133 @@ async def lead_hunter_node(state: AgentState):
     current_iteration = state.get("iteration", 0)
     MAX_ITERATIONS = state.get("max_iterations", DEFAULT_HUNT_ITERATIONS)
 
+    # A prior stage may have produced a readable fallback report while failing
+    # to establish coverage (for example GTI enrichment). Do not turn that
+    # into a successful convergence or synthesize over it.
+    prior_outcome = state.get("investigation_outcome") or (state.get("metadata") or {}).get("investigation_outcome")
+    if prior_outcome and prior_outcome.get("status") == "failed":
+        logger.error("lead_hunter_prior_stage_failed", job_id=job_id, outcome=prior_outcome)
+        if job_id:
+            await emit_reasoning(
+                job_id,
+                "lead_hunter",
+                f"TERMINAL_FAILURE -> {prior_outcome.get('stage', 'unknown stage')} failed; investigation coverage is unknown.",
+            )
+        return {
+            "final_report": state.get("final_report") or "# Investigation Failed\n\nCoverage could not be established.",
+            "subtasks": [],
+            "investigation_outcome": prior_outcome,
+        }
+
     if current_iteration < MAX_ITERATIONS:
         # --- LAYER 1: Pre-check uninvestigated nodes (no LLM call needed) ---
         uninvestigated = cache.get_uninvestigated_nodes()
         actionable = [n for n in uninvestigated if n.get("entity_type") in ACTIONABLE_TYPES]
 
-        if not actionable:
+        unresolved_outcomes = _unresolved_target_outcomes(state)
+        if not actionable and not unresolved_outcomes:
             logger.info("lead_hunter_early_exit", reason="no_uninvestigated_nodes", iteration=current_iteration)
         else:
             # --- PLANNING MODE (uses Flash) ---
             logger.info("lead_hunter_mode_planning", actionable_count=len(actionable))
 
             plan = await run_planning_phase(state, llm_flash, cache, actionable)
+            planning_outcome = plan.get("outcome") or {}
+            if planning_outcome.get("status") == "failed":
+                logger.error("lead_hunter_planning_terminal_failure", job_id=job_id, outcome=planning_outcome)
+                if job_id:
+                    await emit_reasoning(
+                        job_id,
+                        "lead_hunter_planning",
+                        "TERMINAL_FAILURE -> Planning failed; investigation coverage is unknown and synthesis was not attempted.",
+                    )
+                error = planning_outcome.get("error") or "Lead Hunter planning failed"
+                return {
+                    "final_report": f"# Investigation Failed\n\nPlanning could not determine next steps. Error: {error}",
+                    "subtasks": [],
+                    "investigation_outcome": planning_outcome,
+                }
             new_subtasks = plan.get("subtasks", [])
 
             # --- LAYER 2: LLM confidence signal ---
-            if plan.get("investigation_complete"):
+            if plan.get("investigation_complete") and not unresolved_outcomes:
                 logger.info("lead_hunter_early_exit", reason="llm_signals_complete", iteration=current_iteration)
                 new_subtasks = []
+            elif plan.get("investigation_complete"):
+                logger.info(
+                    "lead_hunter_completion_deferred_unresolved_targets",
+                    unresolved_count=len(unresolved_outcomes),
+                )
+
+            # A model may omit a failed lead or incorrectly report completion.
+            # Put retries first, and mark them for the specialist selectors, so
+            # a full planner batch cannot consume the specialist cap first.
+            retry_subtasks = []
+            retry_keys = set()
+            for outcome in unresolved_outcomes:
+                agent = canonical_agent(outcome.get("agent"))
+                target_id = normalise_target_id(outcome.get("target_id"))
+                if not agent or not target_id or (agent, target_id) in retry_keys:
+                    continue
+                retry_subtasks.append({
+                    "agent": f"{agent}_specialist",
+                    "entity_id": target_id,
+                    "task": "Retry target-specific specialist analysis",
+                    "context": f"Unresolved gap from prior attempt: {outcome.get('reason') or 'insufficient evidence'}.",
+                    "priority": "retry",
+                })
+                retry_keys.add((agent, target_id))
+
+            # A planner task for the same specialist/target is represented by
+            # the deterministic retry above. Canonical aliases prevent both
+            # spellings from using a slot.
+            planned_subtasks = [
+                task for task in new_subtasks
+                if (canonical_agent(task.get("agent")), normalise_target_id(task.get("entity_id"))) not in retry_keys
+            ]
+            new_subtasks = [*retry_subtasks, *planned_subtasks]
 
             if new_subtasks:
                 # --- LAYER 3: Convergence detection ---
-                prev_tasked = {str(e).strip().lower() for e in state.get("tasked_entities", []) if e}
-                new_entity_ids = {str(t["entity_id"]).strip().lower() for t in new_subtasks if t.get("entity_id")}
+                # A target can be scheduled during triage or a prior planning
+                # round yet be deferred by a specialist cap (five malware
+                # targets / ten infrastructure targets). Treating scheduled
+                # entities as completed here drops those deferred leads. Older
+                # checkpoints simply lack processed_entities; an empty set is
+                # safe because the graph's investigated marker still removes
+                # completed nodes from the planner input.
+                previously_processed = {
+                    normalise_entity_id(e)
+                    for e in (state.get("processed_entities") or [])
+                    if e
+                }
 
-                if new_entity_ids and new_entity_ids.issubset(prev_tasked):
-                    logger.info("lead_hunter_early_exit", reason="convergence", entities=list(new_entity_ids))
-                else:
+                # A planner can repeat previously processed targets alongside a
+                # deferred target. Passing that mixed batch through unchanged
+                # lets repeated targets consume a specialist's per-pass cap and
+                # starve the deferred lead. Keep only unresolved targets before
+                # dispatch, retaining the planner's order for deterministic caps.
+                dispatchable_subtasks = []
+                scheduled_ids = []
+                seen_scheduled_ids = set()
+                for task in new_subtasks:
+                    entity_id = task.get("entity_id")
+                    normalized_id = normalise_entity_id(entity_id) if entity_id else None
+                    if normalized_id and normalized_id in previously_processed:
+                        continue
+                    dispatchable_subtasks.append(task)
+                    if normalized_id and normalized_id not in seen_scheduled_ids:
+                        scheduled_ids.append(normalized_id)
+                        seen_scheduled_ids.add(normalized_id)
+
+                if len(dispatchable_subtasks) != len(new_subtasks):
+                    logger.info(
+                        "lead_hunter_processed_tasks_removed",
+                        removed=len(new_subtasks) - len(dispatchable_subtasks),
+                    )
+                new_subtasks = dispatchable_subtasks
+
+                if new_subtasks:
                     logger.info("lead_hunter_new_tasks", count=len(new_subtasks))
                     # Emitted here, not in run_planning_phase: only at this point
                     # have Layers 2 and 3 confirmed the planner's subtasks will
@@ -116,8 +227,16 @@ async def lead_hunter_node(state: AgentState):
                     return {
                         "subtasks": new_subtasks,
                         "iteration": current_iteration + 1,
-                        "tasked_entities": list(new_entity_ids),
+                        "scheduled_entities": scheduled_ids,
+                        # Retain the legacy field for persisted state readers.
+                        "tasked_entities": scheduled_ids,
                     }
+
+                logger.info(
+                    "lead_hunter_early_exit",
+                    reason="convergence",
+                    entities=sorted(previously_processed),
+                )
 
             logger.info("lead_hunter_no_new_tasks", reason="empty_subtasks_or_converged")
             if job_id:
@@ -155,7 +274,36 @@ async def lead_hunter_node(state: AgentState):
     # confirmed C2 IP) instead of echoing raw GTI verdicts. See verdict_engine.py.
     apply_composite_verdicts(cache, job_id=state.get("job_id"))
 
-    final_report = await generate_final_report_llm(state, llm_pro, cache=cache)
+    synthesis_outcome = await generate_final_report_outcome(state, llm_pro, cache=cache)
+    final_report = synthesis_outcome["report"]
+    if synthesis_outcome.get("status") == "failed":
+        logger.error("lead_hunter_synthesis_terminal_failure", job_id=job_id, outcome=synthesis_outcome)
+        if job_id:
+            await emit_reasoning(
+                job_id,
+                "lead_hunter_synthesis",
+                "TERMINAL_FAILURE -> Final synthesis failed; investigation coverage is unknown.",
+            )
+        return {
+            "final_report": final_report,
+            "subtasks": [],
+            "investigation_graph": cache.get_state(),
+            "investigation_outcome": synthesis_outcome,
+        }
+
+    # The iteration budget can force synthesis before a retry succeeds. Keep
+    # those failures visible to the analyst instead of allowing a polished
+    # final report to imply complete coverage.
+    unresolved_outcomes = _unresolved_target_outcomes(state)
+    if unresolved_outcomes:
+        gap_lines = ["\n## Unresolved Specialist Gaps\n"]
+        gap_lines.append("The following targets were not marked investigated and require a retry:\n")
+        for outcome in unresolved_outcomes:
+            gap_lines.append(
+                f"- `{outcome['target_id']}` ({outcome['agent']}): "
+                f"{outcome.get('reason') or 'insufficient target-specific evidence'}\n"
+            )
+        final_report += "".join(gap_lines)
 
     # Annotate (never strip) any IOC cited in the report that isn't grounded in
     # the investigation graph or specialist findings. See report_validator.py.

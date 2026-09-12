@@ -308,6 +308,14 @@ Retrieves a paginated list of recent investigations from Cloud SQL, ordered by c
 **Real-time Server-Sent Events (SSE) stream.**
 Provides sub-second updates of agent tasks, progress percentage (0–100% monotonically bounded), tool calls, reasoning thoughts, and status transitions. Consumed by the Next.js Tactical Dashboard.
 
+The first message is always an authoritative `investigation_snapshot` read from
+the persisted job record. It contains current status, report metadata, recent
+timeline/transparency data, and a `terminal` flag. Terminal snapshots and the
+`investigation_completed`, `investigation_failed`, and
+`investigation_cancelled` events close the stream. While non-terminal, the
+endpoint periodically reconciles durable job state so a stream served by a
+different Cloud Run instance cannot remain alive on keepalives forever.
+
 **Event Format**:
 ```
 event: progress
@@ -323,6 +331,17 @@ data: {"job_id": "abc-123", "status": "completed"}
 #### GET /api/investigations/{job_id}/graph
 **Get interactive knowledge graph data.**
 Constructed from the persisted NetworkX investigation graph via `format_graph_from_cache()`, with fallback to `rich_intel`. Uses real normalised entity IDs and rich typed metadata.
+
+### Entity identity contract
+
+File hashes, IP addresses, and domains use trimmed lowercase identities. URLs use
+their canonical raw URL as the graph, planner, specialist, lifecycle, and tool
+provenance key: only the scheme and host are lowercased; user-info, path, query,
+and fragment remain exact. GTI's opaque base64url URL object id is retained as
+`gti_id`/`gti_url_id` provenance and resolves to that raw URL node, never as a
+second graph node. This avoids a cache miss when GTI relationship descriptors
+use the hash while specialist tools receive the raw URL, and prevents a
+case-sensitive path or query from being redirected to another IOC.
 
 **Response** (200 OK):
 ```json
@@ -355,7 +374,10 @@ Extracts iterative reports for each completed loop from the PostgreSQL checkpoin
 
 #### POST /api/investigations/{job_id}/cancel
 **Cancel an active investigation.**
-Terminates the running LangGraph background task and transitions status to `cancelled`.
+Conditionally transitions an active job to terminal `cancelled`, persists the
+cancellation before cancelling the local task, and emits
+`investigation_cancelled` only for the winning transition. A cancellation from
+another instance may supersede a worker's attempted completion.
 
 #### POST /api/admin/bulk-cancel & DELETE /api/admin/jobs
 **Administrative maintenance endpoints.**
@@ -482,7 +504,7 @@ Cancel running jobs or delete investigation records from Cloud SQL.
 
 #### State Machine Optimization
 - **Cleanup**: Pruned dead fields from `AgentState` to minimize persistence overhead.
-- **Convergence**: Switched to a `union_lists` reducer for `tasked_entities` to prevent exponential duplication during parallel specialist merges.
+- **Target lifecycle and convergence**: `union_lists` keeps case-insensitive scheduling and processing histories stable across parallel specialist merges. `scheduled_entities` records accepted dispatches, while `processed_entities` advances only after a target-specific, tool-backed specialist result. `target_outcomes` retains the latest per-agent success/failure evidence so timeouts, tool errors, and omitted targets are retried or explicitly reported as unresolved gaps. `tasked_entities` remains a legacy scheduling alias for existing checkpoints.
 
 #### Parallel Specialist Execution Fixes
 - **Graph Merge**: Added custom reducer to preserve data from parallel malware/infra agents

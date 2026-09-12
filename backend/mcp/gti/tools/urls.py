@@ -11,8 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import base64
 import typing
+from backend.utils.entity_identity import gti_url_id
 
 from mcp.server.fastmcp import Context
 
@@ -61,12 +61,14 @@ URL_KEY_RELATIONSHIPS = [
 
 
 def url_to_base64(url: str) -> str:
-  """Converts the URL into base64.
+  """Converts the canonical raw URL into GTI's base64url object id.
 
   Without padding, as required by the Google Threat Intelligence API.
   """
-  b = base64.b64encode(url.encode('utf-8'))
-  return b.decode('utf-8').rstrip("=")
+  url_id = gti_url_id(url)
+  if not url_id:
+    raise ValueError("URL must be a valid HTTP(S) URL")
+  return url_id
 
 
 @server.tool()

@@ -1,6 +1,7 @@
 import json
 import os
 from backend.utils.logger import get_logger
+from backend.utils.entity_identity import normalise_entity_id
 
 logger = get_logger("graph-formatter")
 
@@ -22,7 +23,7 @@ def format_graph_from_cache(job_id: str, job: dict) -> dict:
 
     ioc = job.get("ioc", "Unknown")
     ioc_type = job.get("ioc_type", "Unknown")
-    norm_ioc = str(ioc).strip().lower()
+    norm_ioc = normalise_entity_id(ioc)
 
     cache = InvestigationCache(graph_data)
     stats = cache.get_stats()
@@ -44,7 +45,7 @@ def format_graph_from_cache(job_id: str, job: dict) -> dict:
 
     for node_id, data in cache.graph.nodes(data=True):
         etype = data.get("entity_type", "unknown")
-        is_root = (str(node_id).strip().lower() == norm_ioc)
+        is_root = (normalise_entity_id(node_id, data.get("entity_type")) == norm_ioc)
 
         # ── Label ──────────────────────────────────────────────────────────
         if is_root:

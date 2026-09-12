@@ -1,22 +1,55 @@
 from typing import TypedDict, Annotated, List, Dict, Any, Optional
 from langchain_core.messages import BaseMessage
 import operator
+import json
+from backend.utils.entity_identity import normalise_entity_id
+
+
+def _merge_graph_value(a: Any, b: Any) -> Any:
+    """Recursively preserve JSON-compatible graph attributes at branch fan-in."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    if isinstance(a, dict) and isinstance(b, dict):
+        merged = dict(a)
+        for key, value in b.items():
+            merged[key] = _merge_graph_value(merged.get(key), value) if key in merged else value
+        return merged
+    if isinstance(a, list) and isinstance(b, list):
+        merged = list(a)
+        def record_key(item: Any) -> str:
+            try:
+                return json.dumps(item, sort_keys=True, default=str)
+            except (TypeError, ValueError):
+                return repr(item)
+        seen = {record_key(item) for item in merged}
+        for item in b:
+            if record_key(item) not in seen:
+                merged.append(item)
+                seen.add(record_key(item))
+        return merged
+    return b
 
 def merge_dicts(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
     """Merges two dictionaries (shallow merge)."""
     return {**a, **b}
+
+def merge_target_outcomes(a: Optional[Dict[str, Any]], b: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Merge latest per-agent/per-target outcomes from parallel specialists."""
+    return {**(a or {}), **(b or {})}
 
 def last_value(a: Any, b: Any) -> Any:
     """Reducer that returns the last value (for scalar fields in parallel execution)."""
     return b if b is not None else a
 
 def union_lists(a: Optional[List[str]], b: Optional[List[str]]) -> List[str]:
-    """Union two lists with case-insensitive deduplication."""
+    """Union lifecycle identities without corrupting case-sensitive URL paths."""
     res = list(a or [])
-    res_norm = {str(item).strip().lower() for item in res if item is not None}
+    res_norm = {normalise_entity_id(item) for item in res if item is not None}
     for item in (b or []):
         if item is not None:
-            norm = str(item).strip().lower()
+            norm = normalise_entity_id(item)
             if norm not in res_norm:
                 res.append(item)
                 res_norm.add(norm)
@@ -28,53 +61,62 @@ def merge_graphs(a: Optional[Any], b: Optional[Any]) -> Optional[Any]:
     When specialists run in parallel, both expand the graph independently.
     This ensures both sets of updates are preserved.
     """
-    if a is None: return b
-    if b is None: return a
-    
     # Import here to avoid circular deps
     import networkx as nx
+    from backend.utils.graph_cache import InvestigationCache, latest_specialist_outcomes
+
+    # Rehydrate through InvestigationCache even when only one branch supplied
+    # a graph. That migrates old URL aliases before the graph reaches another
+    # checkpoint or specialist.
+    if a is None:
+        return InvestigationCache(b).get_state() if b is not None else None
+    if b is None:
+        return InvestigationCache(a).get_state()
     
     # Deserialized graphs from dicts if necessary
-    graph_a = nx.node_link_graph(a) if isinstance(a, dict) else a
-    graph_b = nx.node_link_graph(b) if isinstance(b, dict) else b
+    graph_a = InvestigationCache(a).graph
+    graph_b = InvestigationCache(b).graph
     
     # Merge nodes
     combined = nx.MultiDiGraph(graph_a)
-    existing_nodes_norm = {str(n).strip().lower(): n for n in combined.nodes()}
+    existing_nodes_norm = {normalise_entity_id(n): n for n in combined.nodes()}
     for node, data in graph_b.nodes(data=True):
-        norm_node = str(node).strip().lower()
+        norm_node = normalise_entity_id(node, data.get("entity_type"))
         if norm_node in existing_nodes_norm:
             actual_node = existing_nodes_norm[norm_node]
             # Node exists - deep merge attributes
             existing = combined.nodes[actual_node]
             for key, val in data.items():
-                if key not in existing:
-                    existing[key] = val
-                elif isinstance(val, dict) and isinstance(existing[key], dict):
-                    existing[key].update(val)
-                elif isinstance(val, list) and isinstance(existing[key], list):
-                    res = list(existing[key])
-                    res_set = {str(i).strip().lower() for i in res if i is not None}
-                    for item in val:
-                        if item is not None and str(item).strip().lower() not in res_set:
-                            res.append(item)
-                            res_set.add(str(item).strip().lower())
-                    existing[key] = res
-                else:
-                    existing[key] = val
+                existing[key] = _merge_graph_value(existing.get(key), val) if key in existing else val
         else:
             # New node - add it
             combined.add_node(node, **data)
             existing_nodes_norm[norm_node] = node
+
+    # Branch snapshots can each carry an older ``specialist_outcomes`` map.
+    # Derive that compatibility view from append-only history after fan-in so
+    # a stale full graph copy cannot replace a later attempt outcome.
+    for _, data in combined.nodes(data=True):
+        history = data.get("specialist_outcome_history")
+        if isinstance(history, list):
+            data["specialist_outcomes"] = latest_specialist_outcomes(history)
     
     # Merge edges
     for u, v, data in graph_b.edges(data=True):
+        # Endpoints may have been aliases in a branch snapshot. Resolve them
+        # against the merged canonical node map before adding an edge so a GTI
+        # URL id cannot silently create a phantom node during fan-in.
+        source_key = normalise_entity_id(u, graph_b.nodes[u].get("entity_type"))
+        target_key = normalise_entity_id(v, graph_b.nodes[v].get("entity_type"))
+        u = existing_nodes_norm.get(source_key, u)
+        v = existing_nodes_norm.get(target_key, v)
         rel = data.get("relationship")
         edge_matched = False
         if combined.has_edge(u, v):
             for edge_key, edge_data in combined[u][v].items():
                 if edge_data.get("relationship") == rel:
-                    edge_data.update(data)
+                    for key, value in data.items():
+                        edge_data[key] = _merge_graph_value(edge_data.get(key), value) if key in edge_data else value
                     edge_matched = True
                     break
         if not edge_matched:
@@ -106,8 +148,8 @@ def _merge_entity_lists(a: List[Dict[str, Any]], b: List[Dict[str, Any]]) -> Lis
     """
     def dedup_key(item: Dict[str, Any]):
         return (
-            str(item.get("id")).strip().lower(),
-            str(item.get("source_id")).strip().lower(),
+            normalise_entity_id(item.get("id"), item.get("type")),
+            normalise_entity_id(item.get("source_id")),
         )
 
     result: List[Dict[str, Any]] = []
@@ -231,6 +273,12 @@ class AgentState(TypedDict):
     # Final Report: The generated markdown report
     # Reverting to last_value since Lead Hunter now assembles report manually
     final_report: Annotated[Optional[str], last_value]
+
+    # Explicit terminal outcome for stages where coverage cannot be known.
+    # ``None``/absence remains compatible with checkpoints created before the
+    # contract. A ``failed`` outcome is authoritative over a polished-looking
+    # fallback report when main.py persists the job and emits SSE terminal state.
+    investigation_outcome: Annotated[Optional[Dict[str, Any]], last_value]
     
     # Metadata: Timing, errors, etc.
     # CRITICAL: Uses merge_metadata (deep merge) instead of shallow merge_dicts,
@@ -254,5 +302,23 @@ class AgentState(TypedDict):
     
     lead_hunter_report: Annotated[Optional[str], last_value]  # Full synthesis report
 
-    # Entities that have been assigned as subtasks across all iterations (for convergence detection)
+    # Legacy record of entities assigned as subtasks across all iterations.
+    #
+    # Kept for compatibility with existing checkpoints. New convergence logic
+    # must use ``processed_entities`` instead: assignment is not evidence that
+    # a capped specialist actually handled the target.
     tasked_entities: Annotated[List[str], union_lists]
+
+    # Every entity accepted for specialist dispatch. This is intentionally
+    # distinct from processed_entities: triage and the Lead Hunter can create
+    # more subtasks than a specialist's per-pass target cap permits.
+    scheduled_entities: Annotated[List[str], union_lists]
+
+    # Targets proven to have received a successful, target-specific specialist
+    # analysis. This is the sole history used for Lead Hunter convergence.
+    processed_entities: Annotated[List[str], union_lists]
+
+    # Latest target outcome per ``<agent>:<normalised target id>``. Failed
+    # outcomes deliberately do not enter processed_entities or analyzed_by,
+    # so the target remains eligible for a later retry.
+    target_outcomes: Annotated[Dict[str, Dict[str, Any]], merge_target_outcomes]

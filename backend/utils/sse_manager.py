@@ -105,22 +105,56 @@ class SSEEventManager:
     def get_events(self, job_id: str) -> list:
         """Retrieve the full event history for a job."""
         return self._event_history.get(job_id, [])
+
+    def open_subscription(self, job_id: str) -> asyncio.Queue:
+        """Register and return one subscriber queue immediately.
+
+        The API opens this queue before returning ``StreamingResponse``.  That
+        closes the otherwise unavoidable gap between accepting an SSE request
+        and first advancing the async generator, during which an in-process
+        event could be lost.
+        """
+        if job_id not in self._subscribers:
+            self.create_queue(job_id)
+
+        local_queue = asyncio.Queue()
+        self._subscribers[job_id].append(local_queue)
+        logger.info("sse_client_connected", job_id=job_id,
+                    subscribers=len(self._subscribers[job_id]))
+        return local_queue
+
+    def close_subscription(self, job_id: str, local_queue: asyncio.Queue):
+        """Remove one subscriber queue. Safe to call more than once."""
+        queues = self._subscribers.get(job_id)
+        if not queues:
+            return
+
+        try:
+            queues.remove(local_queue)
+            logger.info("sse_client_disconnected", job_id=job_id,
+                        remaining_subscribers=len(queues))
+        except ValueError:
+            return
+
+        if not queues:
+            del self._subscribers[job_id]
+            logger.info("sse_subscriber_list_cleaned", job_id=job_id)
     
-    async def subscribe(self, job_id: str) -> AsyncGenerator[str, None]:
+    async def subscribe(
+        self, job_id: str, local_queue: asyncio.Queue | None = None
+    ) -> AsyncGenerator[str, None]:
         """
         Subscribe to SSE event stream for a job.
         
         Yields SSE-formatted event strings.
         """
-        if job_id not in self._subscribers:
-            self.create_queue(job_id)
-        
-        # Create a local queue for THIS subscriber
-        local_queue = asyncio.Queue()
-        self._subscribers[job_id].append(local_queue)
-        
-        logger.info("sse_client_connected", job_id=job_id, 
-                   subscribers=len(self._subscribers[job_id]))
+        # ``stream_investigation`` may register the queue before it returns
+        # StreamingResponse, then send a durable initial snapshot.  Reusing
+        # that queue means live events emitted during response setup remain in
+        # order behind the snapshot rather than falling into a registration
+        # race.
+        if local_queue is None:
+            local_queue = self.open_subscription(job_id)
         
         try:
             # Keepalive tracker
@@ -138,7 +172,11 @@ class SSEEventManager:
                     last_event_time = asyncio.get_event_loop().time()
                     
                     # If completion event, exit
-                    if event.get("event_type") in ["investigation_completed", "investigation_failed"]:
+                    if event.get("event_type") in [
+                        "investigation_completed",
+                        "investigation_failed",
+                        "investigation_cancelled",
+                    ]:
                         logger.info("sse_stream_completed", job_id=job_id)
                         break
                 
@@ -154,19 +192,7 @@ class SSEEventManager:
             raise
         
         finally:
-            # Cleanup: remove this subscriber from the list
-            if job_id in self._subscribers:
-                try:
-                    self._subscribers[job_id].remove(local_queue)
-                    logger.info("sse_client_disconnected", job_id=job_id,
-                              remaining_subscribers=len(self._subscribers[job_id]))
-                except ValueError:
-                    pass  # Already removed
-                
-                # Remove subscriber list if empty
-                if not self._subscribers[job_id]:
-                    del self._subscribers[job_id]
-                    logger.info("sse_subscriber_list_cleaned", job_id=job_id)
+            self.close_subscription(job_id, local_queue)
 
 
     def clear_history(self, job_id: str):

@@ -11,6 +11,9 @@ downloads/
 eggs/
 .eggs/
 lib/
+!app/src/lib/
+!app/src/lib/investigation-stream.ts
+!app/src/lib/investigation-stream.test.ts
 lib64/
 parts/
 sdist/

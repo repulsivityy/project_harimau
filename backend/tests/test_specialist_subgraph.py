@@ -18,6 +18,7 @@ asyncio.run(...) inside ordinary sync test functions.
 import asyncio
 import inspect
 import json
+import re
 
 import backend.utils.agent_utils as agent_utils
 from backend.utils.agent_utils import tool_timeout
@@ -342,16 +343,31 @@ def test_infra_route_after_agent_routes_to_tools():
 # payload the model could not parse; infrastructure.py returned a bare str(e)
 # with no envelope at all, which reads as tool *output* rather than a failure.
 #
+# Every error branch now routes the envelope through retain_tool_output(),
+# which caches it as durable evidence and returns it unchanged — so the
+# envelope itself is still `json.dumps({"error": str(e)})`, just passed as an
+# argument instead of returned bare.
+#
 # Asserted over the module source because the tool bodies are defined inside
 # the node function, closed over a live MCP session — there is no handle to the
 # error branch without standing up a session.
 # ---------------------------------------------------------------------------
 
 def test_specialist_tool_error_paths_use_one_json_envelope():
+    # Every @tool-decorated function's error branch must return the envelope
+    # through retain_tool_output — a module-wide substring check would pass
+    # even if some branch returned the envelope bare, or some other branch
+    # returned something else entirely. `except Exception as e:` also covers
+    # unrelated handlers (e.g. the outer node's fatal-error fallback), so
+    # anchor the expected count on the number of @tool functions instead.
+    envelope_pattern = re.compile(r'return retain_tool_output\([^\n]*json\.dumps\(\{"error": str\(e\)\}\)')
     for module in (malware, infrastructure):
         source = inspect.getsource(module)
         name = module.__name__
-        assert 'return json.dumps({"error": str(e)})' in source, name
+        tool_count = source.count("@tool\n")
+        envelope_returns = len(envelope_pattern.findall(source))
+        assert tool_count > 0, name
+        assert envelope_returns == tool_count, (name, tool_count, envelope_returns)
         assert "return str(e)" not in source, name
         # The old hand-built f-string envelope: unescaped interpolation.
         assert '{{"error": "{str(e)}"}}' not in source, name

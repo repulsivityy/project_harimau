@@ -224,3 +224,41 @@ def test_orphaned_job_stays_running_when_checkpoint_recovery_is_unavailable(monk
     assert job["status"] == "running"
     assert scheduled == []
     assert "unavailable-orphan" not in main.ACTIVE_TASKS
+
+
+def test_cancellation_is_a_single_conditional_terminal_transition(monkeypatch):
+    """Only the caller that changes an active DB row may publish cancellation."""
+    executed = []
+    events = []
+
+    class Connection:
+        async def execute(self, query, *args):
+            executed.append((query, args))
+            return "UPDATE 1" if len(executed) == 1 else "UPDATE 0"
+
+    class Acquire:
+        async def __aenter__(self):
+            return Connection()
+
+        async def __aexit__(self, *_args):
+            return False
+
+    class Pool:
+        def acquire(self, **_kwargs):
+            return Acquire()
+
+    class SSE:
+        async def emit_event(self, _job_id, event_type, data):
+            events.append((event_type, data))
+
+    monkeypatch.setattr(main, "db_pool", Pool())
+    monkeypatch.setattr(sse_module, "sse_manager", SSE())
+
+    async def exercise():
+        first = await main._mark_investigation_cancelled("job-1")
+        second = await main._mark_investigation_cancelled("job-1")
+        return first, second
+
+    assert asyncio.run(exercise()) == (True, False)
+    assert "status IN ('running', 'pending')" in executed[0][0]
+    assert [event_type for event_type, _data in events] == ["investigation_cancelled"]

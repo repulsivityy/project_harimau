@@ -166,6 +166,110 @@ async def root():
 # Persistence Helpers
 JOBS = {}  # In-memory fallback
 ACTIVE_TASKS = {}  # Track background asyncio Tasks for cancellation
+TERMINAL_JOB_STATUSES = frozenset({"completed", "failed", "cancelled"})
+
+
+def _investigation_snapshot(job: dict) -> dict:
+    """Return the durable state a newly connected SSE client must reconcile.
+
+    Live event history is intentionally process-local and is released once a
+    hunt terminates.  The job record is therefore the only source that is
+    valid for a reconnect after a worker restart or after that cleanup.
+    """
+    status = str(job.get("status") or "running").lower()
+    metadata = job.get("metadata") if isinstance(job.get("metadata"), dict) else {}
+    terminal = status in TERMINAL_JOB_STATUSES
+    error = metadata.get("error")
+    if status == "cancelled":
+        message = "Investigation cancelled"
+    elif status == "completed":
+        message = "Investigation completed successfully"
+    elif status == "failed":
+        message = f"Investigation failed: {error or 'Unknown error'}"
+    else:
+        message = "Investigation is running"
+
+    return {
+        "job_id": job.get("job_id"),
+        "status": status,
+        "terminal": terminal,
+        "progress": 100 if terminal else 0,
+        "message": message,
+        "error": error,
+        # These are already persisted in JSONB by save_job().  Supplying them
+        # in the snapshot lets a reconnect render its terminal timeline before
+        # its follow-up REST reconciliation completes.
+        "subtasks": job.get("subtasks", []),
+        "transparency_log": job.get("transparency_log", [])[-20:],
+        "completed_at": job.get("completed_at"),
+    }
+
+
+async def _mark_investigation_cancelled(
+    job_id: str,
+    *,
+    ioc: str = "",
+    hunt_config: dict | None = None,
+    max_iterations: int | None = None,
+) -> bool:
+    """Atomically transition a running job to cancelled, then publish once.
+
+    A prior read followed by ``save_job`` could overwrite a concurrently
+    completed/failed job from another Cloud Run instance.  The database update
+    therefore owns the terminal transition and only succeeds for active jobs.
+    ``True`` means this invocation performed that transition and may emit SSE.
+    """
+    error = "Investigation was cancelled by user."
+    if db_pool:
+        try:
+            async with db_pool.acquire(timeout=5.0) as conn:
+                result = await conn.execute(
+                    """
+                    UPDATE investigations
+                    SET status = 'cancelled',
+                        metadata = jsonb_set(
+                            COALESCE(metadata, '{}'::jsonb),
+                            '{error}',
+                            to_jsonb($2::text),
+                            true
+                        ),
+                        completed_at = NOW()
+                    WHERE job_id = $1
+                      AND status IN ('running', 'pending')
+                    """,
+                    job_id,
+                    error,
+                )
+        except Exception as exc:
+            logger.error("investigation_cancel_persist_failed", job_id=job_id, error=str(exc))
+            return False
+
+        if result != "UPDATE 1":
+            return False
+    else:
+        job = JOBS.get(job_id)
+        if not job or str(job.get("status") or "").lower() not in {"running", "pending"}:
+            return False
+        job["status"] = "cancelled"
+        if not isinstance(job.get("metadata"), dict):
+            job["metadata"] = {}
+        job["metadata"]["error"] = error
+        if hunt_config is not None:
+            job["hunt_config"] = hunt_config
+        if max_iterations is not None:
+            job["max_iterations"] = max_iterations
+        JOBS[job_id] = job
+
+    from backend.utils.sse_manager import sse_manager
+
+    await sse_manager.emit_event(job_id, "investigation_cancelled", {
+        "job_id": job_id,
+        "status": "cancelled",
+        "progress": 100,
+        "error": error,
+        "message": "Investigation cancelled",
+    })
+    return True
 
 
 async def _has_resumable_checkpoint(job_id: str) -> bool:
@@ -244,7 +348,9 @@ async def save_job(job_id: str, data: dict):
                         final_report = EXCLUDED.final_report,
                         metadata = EXCLUDED.metadata,
                         investigation_graph = COALESCE(EXCLUDED.investigation_graph, investigations.investigation_graph),
-                        completed_at = CASE WHEN EXCLUDED.status IN ('completed', 'failed') THEN NOW() ELSE investigations.completed_at END
+                        completed_at = CASE WHEN EXCLUDED.status IN ('completed', 'failed', 'cancelled') THEN NOW() ELSE investigations.completed_at END
+                    WHERE investigations.status NOT IN ('completed', 'failed', 'cancelled')
+                       OR investigations.status = EXCLUDED.status
                 """,
                 job_id,
                 data.get("status"),
@@ -587,6 +693,15 @@ async def _run_investigation_background(
                 "outcome": investigation_outcome,
             })
         
+    except asyncio.CancelledError:
+        logger.info("investigation_cancelled", job_id=job_id)
+        await _mark_investigation_cancelled(
+            job_id,
+            ioc=ioc,
+            hunt_config=effective_hunt_config,
+            max_iterations=max_iterations,
+        )
+        raise
     except Exception as e:
         logger.error("investigation_failed", job_id=job_id, error=str(e))
         job = await get_job(job_id)
@@ -612,33 +727,6 @@ async def _run_investigation_background(
             "error": str(e),
             "message": f"Investigation failed: {str(e)}"
         })
-        
-    except asyncio.CancelledError:
-        logger.info("investigation_cancelled", job_id=job_id)
-        job = await get_job(job_id)
-        if not job:
-            job = {
-                "job_id": job_id,
-                "status": "cancelled",
-                "ioc": ioc,
-                "metadata": {},
-                "hunt_config": effective_hunt_config,
-                "max_iterations": max_iterations,
-            }
-        job["status"] = "cancelled"
-        if "metadata" not in job or not isinstance(job["metadata"], dict):
-            job["metadata"] = {}
-        job["metadata"]["error"] = "Investigation was cancelled by user."
-        await save_job(job_id, job)
-        
-        # Emit: Investigation cancelled
-        await sse_manager.emit_event(job_id, "investigation_failed", {
-            "job_id": job_id,
-            "status": "cancelled",
-            "error": "Investigation was cancelled by user.",
-            "message": "Investigation cancelled"
-        })
-        raise
     finally:
         ACTIVE_TASKS.pop(job_id, None)
         sse_manager.clear_history(job_id)
@@ -647,25 +735,32 @@ async def _run_investigation_background(
 async def cancel_investigation(job_id: str):
     """Cancels a running investigation."""
     task = ACTIVE_TASKS.get(job_id)
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if str(job.get("status") or "").lower() in TERMINAL_JOB_STATUSES:
+        return {"message": f"Job is already {job.get('status')}"}
+
+    # Make cancellation durable before signalling the task.  In particular,
+    # this covers a just-created task which has not begun executing its
+    # coroutine yet, and an orphan owned by another worker.
+    transitioned = await _mark_investigation_cancelled(
+        job_id,
+        ioc=job.get("ioc", ""),
+        hunt_config=job.get("hunt_config") if isinstance(job.get("hunt_config"), dict) else {},
+        max_iterations=job.get("max_iterations"),
+    )
+    if not transitioned:
+        current_job = await get_job(job_id)
+        current_status = current_job.get("status") if current_job else "terminal"
+        return {"message": f"Job is already {current_status}"}
     if not task:
-        # Check DB to update status if it's a zombie process from another worker
-        job = await get_job(job_id)
-        if not job:
-            raise HTTPException(status_code=404, detail="Job not found")
-        if job.get("status") not in ["running", "pending"]:
-            return {"message": f"Job is already {job.get('status')}"}
-        
-        job["status"] = "cancelled"
-        if "metadata" not in job or not isinstance(job["metadata"], dict):
-            job["metadata"] = {}
-        job["metadata"]["error"] = "Investigation was cancelled by user."
-        await save_job(job_id, job)
-        return {"message": "Job marked as cancelled in database."}
+        return {"message": "Job cancellation recorded."}
     
     # Send cancel signal to the active task (this will trigger CancelledError inside _run_investigation_background
     # and safely close any active asyncpg queries)
     task.cancel()
-    return {"message": "Cancel signal sent to the active investigation logic."}
+    return {"message": "Cancellation recorded and signal sent to active investigation logic."}
 
 @app.post("/api/admin/bulk-cancel")
 async def bulk_cancel_jobs():
@@ -748,7 +843,7 @@ async def stream_investigation(job_id: str):
     - triage_started / triage_completed
     - specialist_started / specialist_completed
     - lead_hunter_started / lead_hunter_completed
-    - investigation_completed / investigation_failed
+    - investigation_completed / investigation_failed / investigation_cancelled
     
     Usage:
         EventSource: new EventSource('/api/investigations/{job_id}/stream')
@@ -757,15 +852,65 @@ async def stream_investigation(job_id: str):
     from fastapi.responses import StreamingResponse
     from backend.utils.sse_manager import sse_manager
     
-    # Check if job exists
+    # Check that the job exists before allocating an in-memory subscriber.
     job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    
+
     logger.info("sse_stream_requested", job_id=job_id)
+
+    # Register before reading the durable snapshot.  If a terminal event is
+    # emitted during that read it is queued behind the snapshot, rather than
+    # being lost in response setup.  A second DB read makes a reconnect after
+    # process-local history cleanup immediately terminal-aware.
+    local_queue = sse_manager.open_subscription(job_id)
+    current_job = await get_job(job_id) or job
+    snapshot_data = _investigation_snapshot(current_job)
+
+    async def stream_with_snapshot():
+        snapshot = {
+            "event_type": "investigation_snapshot",
+            "timestamp": datetime.now().isoformat(),
+            "data": snapshot_data,
+        }
+        try:
+            yield f"data: {json.dumps(snapshot)}\n\n"
+            if snapshot_data["terminal"]:
+                return
+            # Local queues cannot observe an event emitted by another Cloud
+            # Run instance. Reconcile the durable job record on each quiet
+            # interval so a healthy-but-wrong-instance stream still reaches a
+            # terminal state instead of sending keepalives forever.
+            while True:
+                try:
+                    event = await asyncio.wait_for(local_queue.get(), timeout=15.0)
+                    yield f"data: {json.dumps(event)}\n\n"
+                    if event.get("event_type") in {
+                        "investigation_completed",
+                        "investigation_failed",
+                        "investigation_cancelled",
+                    }:
+                        return
+                except asyncio.TimeoutError:
+                    latest_job = await get_job(job_id)
+                    latest_snapshot = _investigation_snapshot(latest_job or current_job)
+                    if latest_snapshot["terminal"]:
+                        event_type = f"investigation_{latest_snapshot['status']}"
+                        terminal_event = {
+                            "event_type": event_type,
+                            "timestamp": datetime.now().isoformat(),
+                            "data": latest_snapshot,
+                        }
+                        yield f"data: {json.dumps(terminal_event)}\n\n"
+                        return
+                    yield ": keepalive\n\n"
+        finally:
+            # subscribe() owns this when reached; close_subscription is
+            # intentionally idempotent for the terminal-snapshot fast path.
+            sse_manager.close_subscription(job_id, local_queue)
     
     return StreamingResponse(
-        sse_manager.subscribe(job_id),
+        stream_with_snapshot(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

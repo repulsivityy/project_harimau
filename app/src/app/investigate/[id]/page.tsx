@@ -11,6 +11,12 @@ import dagre from "dagre";
 
 import * as d3 from "d3";
 import { graphviz } from "d3-graphviz";
+import {
+  isTerminalInvestigationStatus,
+  reconcileTerminalInvestigationEvent,
+  type InvestigationStreamData,
+  type TerminalInvestigationStatus,
+} from "@/lib/investigation-stream";
 import "@xyflow/react/dist/style.css";
 
 
@@ -312,6 +318,10 @@ export default function InvestigatePage() {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [modalContent, setModalContent] = useState<{ title: string; content: string } | null>(null);
   const simulationRef = useRef<any>(null);
+  // A durable terminal snapshot/event must not be overwritten by stale live
+  // events or a REST response that raced with persistence.
+  const terminalStatusRef = useRef<TerminalInvestigationStatus | null>(null);
+  const terminalSnapshotRef = useRef<{ subtasks?: unknown[]; transparencyLog?: unknown[] } | null>(null);
 
   // Graph filtering
   const [graphFilters, setGraphFilters] = useState({
@@ -333,7 +343,47 @@ export default function InvestigatePage() {
       .catch(() => setRecentJobs([]));
 
     let pollInterval: ReturnType<typeof setInterval> | null = null;
+    let reconciliationInterval: ReturnType<typeof setInterval> | null = null;
     let eventSource: EventSource | null = null;
+    terminalStatusRef.current = null;
+    terminalSnapshotRef.current = null;
+
+    const formatTransparencyLog = (entries: unknown[]) => entries
+      .slice(-20)
+      .reverse()
+      .map((entry: any) => {
+        const time = entry?.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+        const icon = entry?.tool ? "tool" : "reasoning";
+        return `[${time}] ${icon} ${entry?.agent || "system"}: ${entry?.tool ? `EXECUTING_${entry.tool}` : "ANALYZING_DATA"}`;
+      });
+
+    const applyTerminalUpdate = (
+      status: TerminalInvestigationStatus,
+      data: InvestigationStreamData,
+      eventType: string,
+    ) => {
+      const update = reconcileTerminalInvestigationEvent(eventType, data);
+      if (!update) return;
+
+      terminalStatusRef.current = status;
+      terminalSnapshotRef.current = {
+        subtasks: update.subtasks,
+        transparencyLog: update.transparencyLog,
+      };
+      setJobStatus(status);
+      setProgress(update.progress);
+      setStatusMessage(update.message);
+      setJob((previous: any) => ({
+        ...(previous ?? {}),
+        status,
+        ...(update.subtasks ? { subtasks: update.subtasks } : {}),
+        ...(update.transparencyLog ? { transparency_log: update.transparencyLog } : {}),
+      }));
+      if (update.transparencyLog) setActivityLog(formatTransparencyLog(update.transparencyLog));
+      if (pollInterval) clearInterval(pollInterval);
+      if (reconciliationInterval) clearInterval(reconciliationInterval);
+      eventSource?.close();
+    };
 
     const refetch = async (): Promise<string> => {
       try {
@@ -345,9 +395,32 @@ export default function InvestigatePage() {
         if (!jobRes.ok) throw new Error("Failed to fetch job details");
 
         const jobData = await jobRes.json();
+        const fetchedStatus = jobData.status ?? "running";
+        // REST is also an authoritative terminal source (for example after
+        // reconnecting to a different Cloud Run instance). Latch it before a
+        // slower older response can restore the loading UI.
+        if (!terminalStatusRef.current && isTerminalInvestigationStatus(fetchedStatus)) {
+          applyTerminalUpdate(fetchedStatus, jobData, "investigation_snapshot");
+          return fetchedStatus;
+        }
+        const effectiveStatus = terminalStatusRef.current ?? fetchedStatus;
         setJob(jobData);
-        setJobStatus(jobData.status ?? "running");
-        if (Array.isArray(jobData?.metadata?.transparency_log) && jobData.metadata.transparency_log.length > 0) {
+        setJobStatus(effectiveStatus);
+        if (terminalStatusRef.current && !isTerminalInvestigationStatus(fetchedStatus)) {
+          // A stale REST response cannot erase a terminal snapshot's timeline.
+          const snapshot = terminalSnapshotRef.current;
+          setJob({
+            ...jobData,
+            status: terminalStatusRef.current,
+            ...(snapshot?.subtasks ? { subtasks: snapshot.subtasks } : {}),
+            ...(snapshot?.transparencyLog ? { transparency_log: snapshot.transparencyLog } : {}),
+          });
+        }
+        const durableTransparencyLog = jobData?.transparency_log ?? jobData?.metadata?.transparency_log;
+        if (Array.isArray(durableTransparencyLog) && durableTransparencyLog.length > 0) {
+          setActivityLog(formatTransparencyLog(durableTransparencyLog));
+        }
+        if (!Array.isArray(durableTransparencyLog) && Array.isArray(jobData?.metadata?.transparency_log) && jobData.metadata.transparency_log.length > 0) {
           const loadedLogs = jobData.metadata.transparency_log
             .slice(-20)
             .reverse()
@@ -458,23 +531,48 @@ export default function InvestigatePage() {
             setEdges(calculatedEdges);
           }
         }
-        return jobData.status ?? "running";
+        return effectiveStatus;
       } catch (err) {
         console.error("refetch error:", err);
-        return "running";
+        // An in-flight request may fail after the SSE path has already
+        // latched a terminal status. Never let that resurrect the loading UI.
+        return terminalStatusRef.current ?? "running";
       } finally {
         setLoading(false);
       }
     };
 
+    const reconcileDurableStatus = async () => {
+      if (terminalStatusRef.current) return;
+
+      try {
+        const response = await fetch(`/api/investigations/${id}`);
+        if (!response.ok) return;
+
+        const jobData = await response.json();
+        if (!isTerminalInvestigationStatus(jobData.status)) return;
+
+        // This request is the cross-instance backstop: SSE subscribers are
+        // process-local, while the persisted job record is shared by Cloud Run
+        // instances. Treat the REST response as a terminal snapshot.
+        setJob(jobData);
+        applyTerminalUpdate(jobData.status, jobData, "investigation_snapshot");
+      } catch (error) {
+        console.warn("durable investigation reconciliation failed:", error);
+      }
+    };
+
     const startPolling = () => {
+      if (terminalStatusRef.current || pollInterval) return;
+      if (reconciliationInterval) clearInterval(reconciliationInterval);
       setStatusMessage("Live stream disconnected. Polling backend for updates...");
       pollInterval = setInterval(async () => {
         const status = await refetch();
-        if (status === "completed" || status === "failed") {
+        if (terminalStatusRef.current) return;
+        if (isTerminalInvestigationStatus(status)) {
           if (pollInterval) clearInterval(pollInterval);
           setProgress(100);
-          setStatusMessage(status === "completed" ? "Investigation finalized." : "System error occurred.");
+          setStatusMessage(status === "completed" ? "Investigation finalized." : status === "cancelled" ? "Investigation cancelled." : "System error occurred.");
         } else {
           setStatusMessage("🤖 Investigating network & threat graph...");
         }
@@ -482,36 +580,39 @@ export default function InvestigatePage() {
     };
 
     refetch().then((status) => {
-      if (status === "completed" || status === "failed") {
+      if (isTerminalInvestigationStatus(status)) {
         setProgress(100);
-        setStatusMessage(status === "completed" ? "Investigation finalized." : "System error occurred.");
+        setStatusMessage(status === "completed" ? "Investigation finalized." : status === "cancelled" ? "Investigation cancelled." : "System error occurred.");
         return;
       }
 
       eventSource = new EventSource(`/api/investigations/${id}/stream`);
+      reconciliationInterval = setInterval(() => {
+        void reconcileDurableStatus();
+      }, 5_000);
 
       eventSource.onmessage = async (e: MessageEvent) => {
         try {
           const event = JSON.parse(e.data);
           const eventType: string = event.event_type ?? "";
-          const data = event.data ?? {};
-          const msg: string = data.message ?? "";
-          const agent: string = data.agent ?? "";
-          const pct: number = data.progress ?? 0;
+          const data: InvestigationStreamData = event.data ?? {};
+          const msg = typeof data.message === "string" ? data.message : "";
+          const agent = typeof data.agent === "string" ? data.agent : "";
+          const pct = typeof data.progress === "number" ? data.progress : 0;
+
+          const terminalUpdate = reconcileTerminalInvestigationEvent(eventType, data);
+          if (terminalUpdate) {
+            applyTerminalUpdate(terminalUpdate.status, data, eventType);
+            // REST supplies full report/graph detail after the snapshot. It
+            // cannot supersede the terminal status captured above.
+            void refetch();
+            return;
+          }
+          if (terminalStatusRef.current) return;
 
           if (pct > 0) setProgress(Math.min(pct, 100));
 
-          if (eventType === "investigation_completed") {
-            setProgress(100);
-            setStatusMessage("Mission complete.");
-            await refetch();
-            eventSource?.close();
-          } else if (eventType === "investigation_failed") {
-            setProgress(100);
-            setStatusMessage(`Mission failure: ${data.error ?? "ERR_UNKNOWN"}`);
-            await refetch();
-            eventSource?.close();
-          } else if (eventType === "tool_invocation") {
+          if (eventType === "tool_invocation") {
             setActivityLog((prev) => [`[${new Date().toLocaleTimeString()}] 🔧 ${agent}: EXECUTING_${data.tool}`, ...prev].slice(0, 20));
           } else if (eventType === "agent_reasoning") {
             setActivityLog((prev) => [`[${new Date().toLocaleTimeString()}] 💭 ${agent}: ANALYZING_DATA`, ...prev].slice(0, 20));
@@ -530,13 +631,14 @@ export default function InvestigatePage() {
 
       eventSource.onerror = () => {
         eventSource?.close();
-        startPolling();
+        if (!terminalStatusRef.current) startPolling();
       };
     });
 
     return () => {
       eventSource?.close();
       if (pollInterval) clearInterval(pollInterval);
+      if (reconciliationInterval) clearInterval(reconciliationInterval);
       simulationRef.current?.stop();
     };
   }, [id]);
@@ -805,6 +907,43 @@ export default function InvestigatePage() {
                 </div>
               </div>
             </div>
+          ) : jobStatus === "failed" || jobStatus === "cancelled" ? (
+            <section className="col-span-12 flex min-h-[70vh] items-center justify-center">
+              <div className="w-full max-w-3xl border border-primary/40 bg-surface-container-low p-8 shadow-[0_0_48px_rgba(255,75,75,0.08)]">
+                <div className="mb-6 flex items-start gap-4">
+                  <span className="material-symbols-outlined text-4xl text-primary">
+                    {jobStatus === "cancelled" ? "cancel" : "error"}
+                  </span>
+                  <div>
+                    <p className="font-label text-xs uppercase tracking-[0.3em] text-primary">Terminal Investigation State</p>
+                    <h2 className="mt-2 font-headline text-3xl font-black uppercase tracking-tight text-foreground">
+                      {jobStatus === "cancelled" ? "Investigation Cancelled" : "Investigation Failed"}
+                    </h2>
+                  </div>
+                </div>
+                <p className="border-l-2 border-primary bg-primary/5 px-4 py-3 font-mono text-sm text-outline">
+                  {job?.metadata?.error || statusMessage}
+                </p>
+                <div className="mt-8 border-t border-slate-800 pt-5">
+                  <h3 className="font-label text-xs uppercase tracking-widest text-outline-variant">Recorded Timeline</h3>
+                  <div className="mt-4 space-y-3">
+                    {job?.subtasks?.map((task: any, index: number) => (
+                      <div key={`${task.agent || "task"}-${index}`} className="border-l border-slate-700 pl-4">
+                        <p className="font-mono text-[10px] text-secondary">{task.timestamp || "Recorded"}</p>
+                        <p className="font-headline text-sm uppercase text-foreground">{task.agent || "System"}</p>
+                        <p className="text-xs text-slate-500">{task.task || task.status || "No detail recorded."}</p>
+                      </div>
+                    ))}
+                    {(!job?.subtasks || job.subtasks.length === 0) && (
+                      <p className="text-xs italic text-outline/50">No agent tasks completed before this terminal state.</p>
+                    )}
+                  </div>
+                </div>
+                <Link href="/" className="mt-8 inline-flex border border-secondary px-4 py-2 font-label text-xs uppercase tracking-widest text-secondary transition-colors hover:bg-secondary/10">
+                  Start New Investigation
+                </Link>
+              </div>
+            </section>
           ) : (
             <>
               {/* Triage Assessment Panel */}

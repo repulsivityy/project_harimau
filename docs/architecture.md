@@ -308,6 +308,14 @@ Retrieves a paginated list of recent investigations from Cloud SQL, ordered by c
 **Real-time Server-Sent Events (SSE) stream.**
 Provides sub-second updates of agent tasks, progress percentage (0–100% monotonically bounded), tool calls, reasoning thoughts, and status transitions. Consumed by the Next.js Tactical Dashboard.
 
+The first message is always an authoritative `investigation_snapshot` read from
+the persisted job record. It contains current status, report metadata, recent
+timeline/transparency data, and a `terminal` flag. Terminal snapshots and the
+`investigation_completed`, `investigation_failed`, and
+`investigation_cancelled` events close the stream. While non-terminal, the
+endpoint periodically reconciles durable job state so a stream served by a
+different Cloud Run instance cannot remain alive on keepalives forever.
+
 **Event Format**:
 ```
 event: progress
@@ -366,7 +374,10 @@ Extracts iterative reports for each completed loop from the PostgreSQL checkpoin
 
 #### POST /api/investigations/{job_id}/cancel
 **Cancel an active investigation.**
-Terminates the running LangGraph background task and transitions status to `cancelled`.
+Conditionally transitions an active job to terminal `cancelled`, persists the
+cancellation before cancelling the local task, and emits
+`investigation_cancelled` only for the winning transition. A cancellation from
+another instance may supersede a worker's attempted completion.
 
 #### POST /api/admin/bulk-cancel & DELETE /api/admin/jobs
 **Administrative maintenance endpoints.**

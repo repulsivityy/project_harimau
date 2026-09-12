@@ -80,13 +80,14 @@ graph TD
 *   **`backend/agents/lead_hunter_synthesis.py`**: Synthesizes the final intelligence report, builds the grounded edge fact table, and coordinates attack-flow diagram annotation with `dot_builder.py`.
 *   **`backend/utils/dot_builder.py`**: Generates deterministic Graphviz DOT skeletons directly from NetworkX cache, parses returned DOT fences, and strictly validates node/edge consistency.
 *   **`backend/utils/entity_identity.py`**: Defines typed canonical IOC identities. It lowercases file/IP/domain identities, but only the scheme and host of URLs; it also maps GTI base64url URL ids to their canonical raw URL.
+*   **`app/src/lib/investigation-stream.ts`**: Applies persisted snapshots and terminal SSE events monotonically, preventing stale REST/live updates from resurrecting a terminal hunt.
 *   **`backend/utils/graph_cache.py`**: Wraps NetworkX `MultiDiGraph` with canonical entity identity resolution (`_normalise_id`), including GTI URL-id aliases, deep node/edge attribute merging, and minimal field extraction.
 *   **`backend/mcp/client.py`**: Manages stdio sessions for embedded GTI and Shodan FastMCP servers.
 
 ### Key Relationships (Edges)
 
 *   **Frontend -> Backend**: Next.js client fetches from `/api/*`, which `src/app/api/[...path]/route.ts` proxies at runtime to `backend/main.py`.
-*   **SSE Streaming**: `/api/investigations/{id}/stream` streams JSON events from `backend/utils/sse_manager.py` directly to the Next.js `EventSource` subscriber.
+*   **SSE Streaming**: `/api/investigations/{id}/stream` registers the subscriber before sending an authoritative persisted `investigation_snapshot`, then streams live events. It periodically reconciles durable job state for cross-instance terminal completion; completed, failed, and cancelled states are terminal.
 *   **Orchestration**: `workflow.py` orchestrates state transitions between `triage`, `gate`, specialists, and `lead_hunter`.
 *   **Data Sharing**: Specialists commit raw findings directly to `graph_cache.py` and `metadata["rich_intel"]`, preserving full data for downstream synthesis while passing compact summaries to LLMs.
 *   **Tool Execution**: Specialist agents invoke MCP tools bounded by `@tool_timeout(20.0)` in `backend/utils/agent_utils.py`.
@@ -704,6 +705,7 @@ graph TD
   - `__init__()`
   - `create_queue(job_id)`: Registers a subscriber queue.
   - `emit_event(job_id, event_type, data)`: Non-raising broadcast with subscriber snapshotting and monotone progress clamping (0–100%).
+  - `open_subscription(job_id)` / `close_subscription(job_id, queue)`: Register a client before snapshot generation and close it idempotently.
   - `get_events(job_id)`: Historical event retrieval.
   - `subscribe(job_id)`: Async generator yielding formatted SSE events.
   - `clear_history(job_id)`: Frees event queues and clears progress tracking state.

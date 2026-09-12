@@ -116,23 +116,6 @@ def _contains_error(value: Any) -> bool:
     return False
 
 
-def _tool_error_seen(messages: Iterable[Any]) -> bool:
-    """Detect the uniform ``{\"error\": ...}`` envelopes returned by tools."""
-    for message in messages or []:
-        content = getattr(message, "content", message)
-        if isinstance(content, list):
-            content = " ".join(str(part) for part in content)
-        if not isinstance(content, str):
-            continue
-        try:
-            parsed = json.loads(content)
-        except (TypeError, json.JSONDecodeError):
-            continue
-        if _contains_error(parsed):
-            return True
-    return False
-
-
 def _successful_tool_targets(messages: Iterable[Any]) -> set[str]:
     """Return targets with a matched successful ToolNode result in this attempt."""
     calls: Dict[str, set[str]] = {}
@@ -174,9 +157,10 @@ def assess_target_outcomes(
 ) -> Dict[str, Dict[str, Any]]:
     """Build the latest, minimal per-target result records for one specialist.
 
-    A tool error conservatively fails the whole selected batch. The current
-    ToolNode does not retain a reliable target-to-tool-call mapping, and it is
-    safer to retry a target than to certify it from a partial tool run.
+    A tool error for one target must not fail targets whose own tool calls
+    succeeded: ``_successful_tool_targets`` already maps each target to its
+    own ``tool_call_id`` provenance below, so a batch-wide veto here would
+    only re-fail evidence-backed targets and starve retries of budget.
     """
     selected = []
     for target_id in target_ids or []:
@@ -188,8 +172,6 @@ def assess_target_outcomes(
         batch_reason = failure_reason
     elif not isinstance(final_result, dict) or not final_result:
         batch_reason = "no_final_output"
-    elif _tool_error_seen(messages or []):
-        batch_reason = "tool_error"
     else:
         batch_reason = None
 

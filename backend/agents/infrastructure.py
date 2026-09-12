@@ -278,14 +278,17 @@ async def infrastructure_node(state: AgentState):
     """
     ioc = state["ioc"]
     logger.info("infra_agent_start", ioc=ioc)
-    
+    # Defined before the try block so the except handler's failure-path
+    # recording can always reference it, even if InvestigationCache() itself
+    # raises.
+    specialist_attempt = {
+        "id": f"infrastructure:{state.get('iteration', 0)}:structured",
+        "iteration": state.get("iteration", 0),
+    }
+
     try:
         # Initialize cache from state
         cache = InvestigationCache(state.get("investigation_graph"))
-        specialist_attempt = {
-            "id": f"infrastructure:{state.get('iteration', 0)}:structured",
-            "iteration": state.get("iteration", 0),
-        }
         cache_stats_before = cache.get_stats()
         logger.info("infra_cache_loaded", stats=cache_stats_before)
         

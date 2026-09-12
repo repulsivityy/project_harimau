@@ -803,12 +803,19 @@ async def triage_node(state: AgentState):
             "root": base_outcome or {"status": "succeeded", "source": "gti"},
             "relationships": base_data.get("_relationship_outcomes", {}),
         }
+        relationship_outcome_items = list((base_data.get("_relationship_outcomes", {}) or {}).items())
         failed_relationships = [
             f"{name}: {outcome.get('error') or 'GTI relationship enrichment failed'}"
-            for name, outcome in (base_data.get("_relationship_outcomes", {}) or {}).items()
+            for name, outcome in relationship_outcome_items
             if isinstance(outcome, dict) and outcome.get("status") == "failed"
         ]
-        if failed_relationships:
+        # A single rate-limited or transient relationship failure must not sink
+        # the whole hunt: it is carried as a coverage gap in enrichment_outcomes
+        # (surfaced in triage/lead-hunter planning context and the final report)
+        # rather than a terminal failure. Only abort when every requested
+        # relationship failed, since that means root enrichment produced no
+        # usable graph at all.
+        if failed_relationships and len(failed_relationships) == len(relationship_outcome_items):
             error = "; ".join(failed_relationships)
             logger.error("triage_relationship_enrichment_failed", ioc=ioc, error=error)
             return _terminal_triage_failure(
@@ -816,6 +823,12 @@ async def triage_node(state: AgentState):
                 stage="triage_relationship_enrichment",
                 error=error,
                 enrichment_outcomes=state["metadata"]["enrichment_outcomes"],
+            )
+        elif failed_relationships:
+            logger.warning(
+                "triage_relationship_enrichment_partial_failure",
+                ioc=ioc,
+                failed="; ".join(failed_relationships),
             )
         
         # ========================================
@@ -866,20 +879,41 @@ async def triage_node(state: AgentState):
                     entity_id = entity.get("id")
                     entity_type = entity.get("type")
                     full_attrs = entity.get("attributes", {})
-                    
+
+                    # GTI identifies url objects by an opaque id (its SHA256),
+                    # not the base64url-encoded canonical URL normalise_entity_id
+                    # expects. Falling back to the raw id produces an
+                    # unrecognisable `gti-url:<sha256>` identity that
+                    # _is_infrastructure_target rejects, silently dropping the
+                    # lead. Use the actual url attribute as the graph/lifecycle
+                    # identity instead.
+                    graph_entity_id = entity_id
+                    if entity_type == "url":
+                        url_attr_value = full_attrs.get("url") or full_attrs.get("last_final_url")
+                        if url_attr_value and entity_id:
+                            graph_entity_id = url_attr_value
+                            # add_entity's own gti_id bookkeeping only fires
+                            # when its raw/normalised ids differ, which no
+                            # longer happens once we substitute the URL as
+                            # entity_id here — preserve GTI's original opaque
+                            # id explicitly so later lookups by that id
+                            # (InvestigationCache._resolve_entity_id) still
+                            # resolve to this node.
+                            full_attrs = {**full_attrs, "gti_id": entity_id}
+
                     # STORE FULL ENTITY IN NETWORKX CACHE
                     cache.add_entity(
-                        entity_id=entity_id,
+                        entity_id=graph_entity_id,
                         entity_type=entity_type,
                         attributes=full_attrs
                     )
                     # Add relationship edge
-                    cache.add_relationship(ioc, entity_id, rel_name)
-                    
+                    cache.add_relationship(ioc, graph_entity_id, rel_name)
+
                     # Now parse minimal + display fields for LLM and graph UI
                     attrs = full_attrs
-                    
-                    norm_id = normalise_entity_id(entity_id, entity_type) if entity_id else None
+
+                    norm_id = normalise_entity_id(graph_entity_id, entity_type) if graph_entity_id else None
                     if not norm_id:
                         continue
                     
@@ -1178,3 +1212,5 @@ async def triage_node(state: AgentState):
     except Exception as e:
         logger.error("triage_fatal_error", error=str(e))
         return _terminal_triage_failure(state, stage="triage", error=str(e))
+
+    return state

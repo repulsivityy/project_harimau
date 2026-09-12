@@ -76,6 +76,90 @@ def test_triage_rejects_failed_required_relationship_enrichment(monkeypatch):
     assert "contacted_ips" in result["investigation_outcome"]["error"]
 
 
+def test_triage_carries_partial_relationship_failure_as_coverage_gap(monkeypatch):
+    """One failed relationship out of several must not sink the whole hunt.
+
+    Only a total loss (every requested relationship failed) means root
+    enrichment produced no usable graph at all; a partial failure is carried
+    as a coverage gap in enrichment_outcomes instead of a terminal failure.
+    """
+    async def partial_report(*_args, **_kwargs):
+        return {
+            "data": {
+                "id": "a" * 64,
+                "attributes": {},
+                "relationships": {},
+                "_relationship_outcomes": {
+                    "contacted_ips": {
+                        "status": "failed",
+                        "source": "gti",
+                        "error": "rate limited",
+                    },
+                    "contacted_domains": {"status": "no_data", "source": "gti"},
+                },
+            },
+            "_outcome": {"status": "succeeded", "source": "gti"},
+        }
+
+    async def stub_analysis(*_args, **_kwargs):
+        return {"ioc_type": "File", "priority_entities": []}
+
+    monkeypatch.setattr(triage.gti, "get_file_report", partial_report)
+    monkeypatch.setattr(triage, "comprehensive_triage_analysis", stub_analysis)
+    result = asyncio.run(triage.triage_node({"ioc": "a" * 64, "metadata": {}, "subtasks": []}))
+
+    assert result.get("investigation_outcome") is None
+    assert result["metadata"]["enrichment_outcomes"]["relationships"]["contacted_ips"]["status"] == "failed"
+
+
+def test_triage_url_relationship_entities_use_canonical_url_identity(monkeypatch):
+    """A url-type relationship entity must not be graphed/tasked under GTI's
+    opaque object id (its SHA256).  ``normalise_entity_id`` can only decode
+    that id back to a URL when it is GTI's base64url URL id; for the SHA256
+    id GTI actually uses for url objects, decoding fails and previously fell
+    back to an unrecognised ``gti-url:<sha256>`` identity that infra-target
+    matching rejects, silently dropping the lead.
+    """
+    opaque_gti_id = "b" * 64
+    canonical_url = "https://malicious.example.test/payload"
+
+    async def report_with_url_relationship(*_args, **_kwargs):
+        return {
+            "data": {
+                "id": "a" * 64,
+                "attributes": {},
+                "relationships": {
+                    "contacted_urls": {
+                        "data": [
+                            {
+                                "id": opaque_gti_id,
+                                "type": "url",
+                                "attributes": {
+                                    "url": canonical_url,
+                                    "last_analysis_stats": {"malicious": 5},
+                                },
+                            }
+                        ]
+                    }
+                },
+                "_relationship_outcomes": {"contacted_urls": {"status": "succeeded", "source": "gti"}},
+            },
+            "_outcome": {"status": "succeeded", "source": "gti"},
+        }
+
+    async def stub_analysis(*_args, **_kwargs):
+        return {"ioc_type": "File", "priority_entities": []}
+
+    monkeypatch.setattr(triage.gti, "get_file_report", report_with_url_relationship)
+    monkeypatch.setattr(triage, "comprehensive_triage_analysis", stub_analysis)
+
+    result = asyncio.run(triage.triage_node({"ioc": "a" * 64, "metadata": {}, "subtasks": []}))
+
+    node_ids = {node["id"] for node in result["investigation_graph"]["nodes"]}
+    assert canonical_url in node_ids
+    assert f"gti-url:{opaque_gti_id}" not in node_ids
+
+
 def test_planning_exception_cannot_converge_into_synthesis(monkeypatch):
     """A planner exception returns a failed terminal outcome, not an empty plan."""
     class TargetCache:

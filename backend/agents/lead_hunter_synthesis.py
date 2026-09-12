@@ -716,14 +716,6 @@ async def generate_final_report_llm(state: AgentState, llm, cache: Optional[Inve
     if specialist_data and all(res.get("verdict") == "System Error" for res in specialist_data.values()):
         logger.error("lead_hunter_synthesis_aborted_all_specialists_failed", job_id=job_id)
         raise SynthesisFailure("all_specialists_failed")
-        return """## ❌ Investigation Failed
-
-The investigation was aborted because all specialist agents encountered critical system errors. 
-Please review the system logs for stack traces.
-
-### Error Details
-No actionable intelligence could be synthesized. The original indicator may be malformed or external systems may be unreachable.
-"""
 
     # Compute the _compute_node_details -> _compute_high_signal -> _score_edges
     # chain exactly once here, and share the results with _build_graph_summary,

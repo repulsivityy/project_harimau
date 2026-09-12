@@ -286,10 +286,14 @@ async def _has_resumable_checkpoint(job_id: str) -> bool:
         logger.warning("checkpoint_recovery_lookup_failed", job_id=job_id, error=str(exc))
         return False
 
-    # An empty ``next`` means the graph reached END. It is still recoverable
-    # when the worker crashed before persisting its final state; invoking the
-    # saved thread lets the background path write that terminal result.
-    if not snapshot:
+    # aget_state() always returns a StateSnapshot, even for a thread_id with
+    # no persisted checkpoint (empty values, empty next) — so `not snapshot`
+    # never fires. An empty ``next`` with populated ``values`` means the graph
+    # reached END; it is still recoverable when the worker crashed before
+    # persisting its final state, since invoking the saved thread lets the
+    # background path write that terminal result. Only a snapshot with no
+    # values at all means there is nothing to resume.
+    if not snapshot or (not snapshot.values and not snapshot.next):
         logger.warning("checkpoint_recovery_not_resumable", job_id=job_id)
         return False
     return True

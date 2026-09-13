@@ -262,3 +262,42 @@ def test_cancellation_is_a_single_conditional_terminal_transition(monkeypatch):
     assert asyncio.run(exercise()) == (True, False)
     assert "status IN ('running', 'pending')" in executed[0][0]
     assert [event_type for event_type, _data in events] == ["investigation_cancelled"]
+
+
+def test_stream_investigation_closes_subscription_if_snapshot_setup_fails(monkeypatch):
+    """open_subscription() runs before StreamingResponse starts consuming the
+    generator whose `finally` normally closes it. If building the initial
+    snapshot raises in that gap, the generator body never runs at all — the
+    queue must still be closed here, or every such failure leaks one forever.
+    """
+    class RecordingSSE:
+        def __init__(self):
+            self.opened = []
+            self.closed = []
+
+        def open_subscription(self, job_id):
+            queue = asyncio.Queue()
+            self.opened.append((job_id, queue))
+            return queue
+
+        def close_subscription(self, job_id, queue):
+            self.closed.append((job_id, queue))
+
+    recording_sse = RecordingSSE()
+    monkeypatch.setattr(sse_module, "sse_manager", recording_sse)
+
+    calls = {"n": 0}
+
+    async def flaky_get_job(job_id):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"job_id": job_id, "status": "running"}
+        raise RuntimeError("db unavailable")
+
+    monkeypatch.setattr(main, "get_job", flaky_get_job)
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(main.stream_investigation("job-1"))
+
+    assert len(recording_sse.opened) == 1
+    assert recording_sse.closed == [recording_sse.opened[0]]

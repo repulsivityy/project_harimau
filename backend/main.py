@@ -878,8 +878,15 @@ async def stream_investigation(job_id: str):
     # being lost in response setup.  A second DB read makes a reconnect after
     # process-local history cleanup immediately terminal-aware.
     local_queue = sse_manager.open_subscription(job_id)
-    current_job = await get_job(job_id) or job
-    snapshot_data = _investigation_snapshot(current_job)
+    try:
+        current_job = await get_job(job_id) or job
+        snapshot_data = _investigation_snapshot(current_job)
+    except Exception:
+        # The generator below (whose `finally` normally owns this) never
+        # starts running if setup fails before StreamingResponse is
+        # constructed, which would otherwise leak this subscriber queue.
+        sse_manager.close_subscription(job_id, local_queue)
+        raise
 
     async def stream_with_snapshot():
         snapshot = {

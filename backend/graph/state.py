@@ -79,7 +79,13 @@ def merge_graphs(a: Optional[Any], b: Optional[Any]) -> Optional[Any]:
     
     # Merge nodes
     combined = nx.MultiDiGraph(graph_a)
-    existing_nodes_norm = {normalise_entity_id(n): n for n in combined.nodes()}
+    # Must pass entity_type here too: a node's canonical form can depend on
+    # it (e.g. a url node), so omitting it here while graph_b's nodes below
+    # are normalised with entity_type could split one entity into two nodes.
+    existing_nodes_norm = {
+        normalise_entity_id(n, data.get("entity_type")): n
+        for n, data in combined.nodes(data=True)
+    }
     for node, data in graph_b.nodes(data=True):
         norm_node = normalise_entity_id(node, data.get("entity_type"))
         if norm_node in existing_nodes_norm:

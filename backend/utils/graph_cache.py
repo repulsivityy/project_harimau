@@ -198,6 +198,10 @@ def extract_gti_summary(rel_item: dict) -> dict:
         "sandbox_verdicts", "behaviour_summary", "crowdsourced_ids_results",
         "last_analysis_date", "creation_date", "tld", "first_seen_itw_date",
         "first_submission_date", "times_submitted", "last_https_certificate",
+        # "url"/"last_final_url": when present, let a url-type descriptor's
+        # own canonical-identity fallback (_resolve_live_url_entity_id) work
+        # for pivot-discovered entities, not just triage's Super-Bundle fetch.
+        "url", "last_final_url",
     ]:
         if key in attrs:
             summary[key] = attrs[key]
@@ -220,6 +224,34 @@ def _merge_graph_attributes(existing: Dict[str, Any], incoming: Dict[str, Any]) 
             for item in value:
                 if item not in existing[key]:
                     existing[key].append(item)
+
+
+def _resolve_live_url_entity_id(entity_id: Any, attributes: Dict[str, Any]) -> Optional[str]:
+    """Canonical URL identity for a live (non-migration) add_entity call.
+
+    The caller's own entity_id is authoritative whenever it already decodes
+    to a URL (a raw URL, or GTI's base64url object id) — unlike
+    _canonical_url_node_id's checkpoint-migration use below, attributes never
+    override an already-decodable id here. That matters because a GTI
+    `attributes.url` can legitimately differ in spelling from the caller's id
+    (e.g. VT appending a trailing slash to a bare-host URL); overriding on
+    that basis would silently re-key an already-correct node — notably the
+    root entity of a URL-rooted investigation, whose id must stay in sync
+    with `state["ioc"]`.
+
+    Only GTI's opaque, non-base64 relationship-descriptor id — which fails to
+    decode at all — falls back to the entity's own `url` attribute.
+    `last_final_url` describes a redirect destination, not another spelling
+    of this URL (see _canonical_url_node_id's own note below), so it is
+    deliberately not consulted on this live path.
+    """
+    normalised = normalise_entity_id(entity_id, "url")
+    if normalised and not normalised.startswith("gti-url:"):
+        return normalised
+    recovered = normalise_entity_id(attributes.get("url"), "url")
+    if recovered and not recovered.startswith("gti-url:"):
+        return recovered
+    return normalised
 
 
 def _canonical_url_node_id(node_id: Any, data: Dict[str, Any]) -> Optional[str]:
@@ -357,10 +389,13 @@ class InvestigationCache:
         """
         # Deduplication: Check if entity already exists
         raw_id = str(entity_id).strip() if entity_id is not None else ""
-        entity_id = _normalise_id(entity_id, entity_type)
+        attributes = dict(attributes or {})
+        if entity_type == "url":
+            entity_id = _resolve_live_url_entity_id(entity_id, attributes)
+        else:
+            entity_id = _normalise_id(entity_id, entity_type)
         if not entity_id:
             return
-        attributes = dict(attributes or {})
         if entity_type == "url":
             # Graph identity is the canonical raw URL. Keep GTI's opaque id as
             # provenance/lookup metadata, never as a competing graph node.

@@ -341,7 +341,22 @@ and fragment remain exact. GTI's opaque base64url URL object id is retained as
 `gti_id`/`gti_url_id` provenance and resolves to that raw URL node, never as a
 second graph node. This avoids a cache miss when GTI relationship descriptors
 use the hash while specialist tools receive the raw URL, and prevents a
-case-sensitive path or query from being redirected to another IOC.
+case-sensitive path or query from being redirected to another IOC. Some GTI
+relationship payloads identify `url` objects by a different opaque id — a raw
+SHA256 hash, which does not decode to a URL at all — rather than the
+base64url id above. `InvestigationCache.add_entity` only falls back to the
+entity's own `url` attribute when the caller's id fails to decode as a URL at
+all; an already-decodable id (a raw URL, or the base64url id) is never
+overridden by attributes, since GTI's `url` field can legitimately differ in
+spelling from the caller's id (e.g. a trailing slash) without being a
+different resource — this matters most for the root entity of a URL-rooted
+investigation, whose id must stay in sync with the submitted IOC.
+`last_final_url` describes a redirect destination, not another spelling of
+the same URL, so it is never consulted for identity on this path (only by
+checkpoint migration's separate, more permissive recovery). `extract_gti_summary`
+(`backend/utils/graph_cache.py`) carries `url`/`last_final_url` through from a
+GTI relationship-descriptor payload so pivot-discovered entities — not just
+triage's initial Super-Bundle fetch — have the attribute to recover from.
 
 **Response** (200 OK):
 ```json
@@ -549,6 +564,22 @@ Cancel running jobs or delete investigation records from Cloud SQL.
   - **Fix**: `emit_event` never raises; the subscriber list is snapshotted before broadcast; progress is clamped monotone and ≤100% centrally, per job, in `sse_manager`. See §2.7.
 - **Also**: consolidated the two overlapping, drifting edge-context blocks the synthesis LLM used to see into a single id-keyed edge fact table (`_build_edge_tuples`); pinned `backend/requirements.txt` (previously fully unpinned) after `mcp`'s latest release removed the `mcp.server.fastmcp` module both embedded MCP servers import.
 - **Impact**: Full backend suite (115 tests, including four new suites for this work — `test_dot_builder.py`, `test_synthesis_edges.py`, `test_sse_robustness.py`, `test_specialist_subgraph.py`) passing.
+
+### Hunt Reliability Fixes (Sep 2026)
+- **Problem 1 — A single failed relationship enrichment aborted the whole investigation**: `triage_node` treated any failed GTI relationship fetch (e.g. one rate-limited call among 11) as a terminal failure, even when the rest of root enrichment succeeded.
+  - **Fix**: Abort only when *every* requested relationship fails; a partial failure is logged and carried forward as a coverage gap in `enrichment_outcomes` instead.
+- **Problem 2 — Some URL relationship entities were silently dropped**: GTI identifies some `url`-type relationship objects by a raw SHA256 hash rather than the base64url id the entity identity contract (§ above) already handles, so `normalise_entity_id` couldn't decode it — producing an unrecognised `gti-url:<sha256>` identity that infrastructure-target matching rejected outright. Confirmed live against production: a real domain's `urls` relationship left 6 nodes stuck as `gti-url:<sha256>` in a persisted investigation graph.
+  - **First attempt (incomplete)**: triage's relationship-parsing loop was patched to substitute the entity's own `url`/`last_final_url` attribute as its graph identity before calling `add_entity` — but this was a call-site special case, and `infrastructure.py`'s/`malware.py`'s pivot-discovery tools hit the identical bug through `add_entity` directly.
+  - **Fix**: two changes were needed together, not one. (1) `InvestigationCache.add_entity`'s `url` branch now calls a dedicated `_resolve_live_url_entity_id` helper: the caller's id is tried first and never overridden once it decodes; only an undecodable opaque id falls back to the entity's own `url` attribute (never `last_final_url` — a redirect target, not another spelling of the same resource). (2) `extract_gti_summary` — the function that actually builds the attributes dict at every specialist pivot call site — did not carry `url`/`last_final_url` through from a relationship descriptor at all, so the first version of this fix had nothing to recover from at exactly the call sites it targeted; both fields were added to its captured-key list. An earlier draft of the `add_entity` change let attributes override an already-decodable id unconditionally, which silently re-keyed the root node of a URL-rooted investigation whenever GTI's `url` attribute differed in spelling (e.g. a trailing slash) from the submitted IOC — caught before landing by an independent review and fixed by making the attribute recovery a strict fallback.
+- **Problem 3 — `merge_graphs` could split one entity into two nodes**: the receiving graph's existing node ids were normalised without their `entity_type` while the incoming graph's were normalised with it; since an id's canonical form can depend on `entity_type`, the two sides could disagree for the same entity.
+  - **Fix**: both sides of the merge now normalise consistently.
+- **Problem 4 — Checkpoint recovery never actually detected an unresumable job**: `_has_resumable_checkpoint` checked `if not snapshot`, but `aget_state()` always returns a `StateSnapshot` object, even for a thread with no persisted checkpoint at all — so the check never fired and every job was reported resumable.
+  - **Fix**: also treat a snapshot with empty `values` and empty `next` as unresumable.
+- **Problem 5 — SSE subscription leak on stream setup failure**: `GET /api/investigations/{job_id}/stream` opened its subscriber queue before building the initial snapshot; a failure there skipped the streaming generator whose `finally` normally closes it.
+  - **Fix**: setup is wrapped to close the queue explicitly before re-raising.
+- **Problem 6 — A tool error on one target failed its whole batch**: `assess_target_outcomes` failed every selected target in a batch if any tool-error envelope appeared anywhere in the specialist's messages, even for targets with their own successful, evidence-backed tool call.
+  - **Fix**: removed the batch-wide veto; per-target success is already tracked via tool-call-id provenance.
+- **Impact**: Full backend suite passing, including new coverage in `test_investigation_outcomes.py` (partial-enrichment-failure and URL-identity cases) and `test_investigation_recovery.py` (subscription-leak case).
 
 ---
 

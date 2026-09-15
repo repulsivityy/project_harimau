@@ -47,21 +47,9 @@ async def lead_hunter_node(state: AgentState):
     project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
     location = os.getenv("GOOGLE_CLOUD_REGION", "asia-southeast1")
 
-    # Flash for planning (fast, cost-efficient), Pro only for final synthesis
-    # llm_flash = ChatVertexAI(
-    #     model="gemini-2.5-flash",
-    #     temperature=0.1,
-    #     project=project_id,
-    #     location=location,
-    # )
-    # llm_pro = ChatVertexAI(
-    #     model="gemini-2.5-pro",
-    #     temperature=0.1,
-    #     project=project_id,
-    #     location="global",
-    # )
+
     llm_flash = ChatGoogleGenerativeAI(
-        model="gemini-3.5-flash",
+        model="gemini-3.8-flash",
         temperature=0.1,
         #max_tokens=1024,
         project=project_id,

@@ -548,11 +548,12 @@ async def infrastructure_node(state: AgentState):
             global _infra_base_llm
             if _infra_base_llm is None:
                 _infra_base_llm = ChatGoogleGenerativeAI(
-                    model="gemini-3.1-pro-preview",
+                    model="gemini-3.8-flash",
+                    #model="gemini-3.1-pro-preview",
                     temperature=0.0,
                     project=project_id,
                     location="global",
-                    thinking_level="medium",
+                    thinking_level="high",
                     include_thoughts=True
                 )
             base_llm = _infra_base_llm

@@ -540,7 +540,7 @@ async def comprehensive_triage_analysis(
 #    )
     
     llm = ChatGoogleGenerativeAI(
-        model="gemini-3.5-flash",
+        model="gemini-3.5-flash-lite",
         temperature=0,
         #max_tokens=1024,
         project=project_id,

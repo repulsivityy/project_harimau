@@ -782,7 +782,7 @@
             if (Array.isArray(recentJobs) && recentJobs.length > 0) {
               liveOptions = `<optgroup label="Live Backend Hunts">` + recentJobs.map(j => {
                 const shortIoc = j.ioc?.length > 28 ? j.ioc.slice(0, 24) + '...' : j.ioc;
-                return `<option value="${j.job_id}">[${(j.ioc_type || 'IOC').toUpperCase()}] ${shortIoc} // ${j.status}</option>`;
+                return `<option value="${escapeHtml(j.job_id)}">[${escapeHtml((j.ioc_type || 'IOC').toUpperCase())}] ${escapeHtml(shortIoc)} // ${escapeHtml(j.status)}</option>`;
               }).join('') + `</optgroup>`;
             }
           }
@@ -1533,8 +1533,13 @@
     // Attack Flow Card Template Generator (Report-Derived & Decoy Aware)
     // =========================================================================
     function escapeHtml(str) {
-      if (!str) return '';
-      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
     }
 
     function getAttackFlowCardHtml(job, rawDotCode, parsedDotGraph) {
@@ -1569,10 +1574,10 @@
                 ${escapeHtml(item.entityType || 'entity')}
               </span>
               <div class="flex items-center gap-1.5 opacity-80 group-hover:opacity-100 shrink-0">
-                <button onclick="copyToClipboard('${escapeHtml(item.id)}', this)" title="Copy IOC" class="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors">
+                <button data-val="${escapeHtml(item.id)}" onclick="copyToClipboard(this.dataset.val, this)" title="Copy IOC" class="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors">
                   <i data-lucide="copy" class="w-3.5 h-3.5"></i>
                 </button>
-                <button onclick="jumpToCanvasNode('${escapeHtml(item.id)}')" title="Inspect on Canvas" class="p-1 rounded hover:bg-slate-800 ${isDecoy ? 'text-teal-400' : 'text-amber-400'} hover:text-white transition-colors">
+                <button data-val="${escapeHtml(item.id)}" onclick="jumpToCanvasNode(this.dataset.val)" title="Inspect on Canvas" class="p-1 rounded hover:bg-slate-800 ${isDecoy ? 'text-teal-400' : 'text-amber-400'} hover:text-white transition-colors">
                   <i data-lucide="arrow-up-right" class="w-3.5 h-3.5"></i>
                 </button>
               </div>
@@ -1929,11 +1934,11 @@
             </td>
             <td class="py-3 px-4 text-right">
               <div class="flex items-center justify-end gap-1.5">
-                <button onclick="jumpToCanvasNode('${escapeHtml(ioc.value)}')" title="Inspect on Canvas" class="p-1 rounded hover:bg-slate-800 text-teal-400 hover:text-teal-300 transition-colors flex items-center gap-1 text-[11px]">
+                <button data-val="${escapeHtml(ioc.value)}" onclick="jumpToCanvasNode(this.dataset.val)" title="Inspect on Canvas" class="p-1 rounded hover:bg-slate-800 text-teal-400 hover:text-teal-300 transition-colors flex items-center gap-1 text-[11px]">
                   <i data-lucide="network" class="w-3.5 h-3.5"></i>
                   <span class="hidden sm:inline">Canvas</span>
                 </button>
-                <button onclick="copyToClipboard('${escapeHtml(ioc.value)}')" title="Copy Indicator" class="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white transition-colors">
+                <button data-val="${escapeHtml(ioc.value)}" onclick="copyToClipboard(this.dataset.val, this)" title="Copy Indicator" class="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white transition-colors">
                   <i data-lucide="copy" class="w-3.5 h-3.5"></i>
                 </button>
               </div>
@@ -1973,10 +1978,10 @@
                 return `
                   <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950/80 border border-slate-800 text-xs font-mono text-slate-300">
                     <span class="truncate max-w-[180px] xl:max-w-[240px]" title="${escapeHtml(val)}">${escapeHtml(val)}</span>
-                    <button onclick="copyToClipboard('${escapeHtml(val)}', this)" title="Copy" class="hover:text-white p-0.5 text-slate-500">
+                    <button data-val="${escapeHtml(val)}" onclick="copyToClipboard(this.dataset.val, this)" title="Copy" class="hover:text-white p-0.5 text-slate-500">
                       <i data-lucide="copy" class="w-3 h-3"></i>
                     </button>
-                    <button onclick="jumpToCanvasNode('${escapeHtml(val)}')" title="View in Canvas" class="hover:text-teal-400 p-0.5 text-slate-500">
+                    <button data-val="${escapeHtml(val)}" onclick="jumpToCanvasNode(this.dataset.val)" title="View in Canvas" class="hover:text-teal-400 p-0.5 text-slate-500">
                       <i data-lucide="arrow-up-right" class="w-3 h-3"></i>
                     </button>
                   </span>
@@ -2477,11 +2482,11 @@
             </span>
           </td>
           <td class="py-2.5 px-4 text-right flex items-center justify-end gap-2">
-            <button onclick="jumpToCanvasNode('${escapeHtml(n.id)}')" title="Inspect on Canvas" class="p-1 rounded hover:bg-slate-800 text-teal-400 hover:text-teal-300 transition-colors flex items-center gap-1 text-[11px]">
+            <button data-val="${escapeHtml(n.id)}" onclick="jumpToCanvasNode(this.dataset.val)" title="Inspect on Canvas" class="p-1 rounded hover:bg-slate-800 text-teal-400 hover:text-teal-300 transition-colors flex items-center gap-1 text-[11px]">
               <i data-lucide="network" class="w-3.5 h-3.5"></i>
               <span class="hidden sm:inline">Canvas</span>
             </button>
-            <button onclick="copyToClipboard('${escapeHtml(n.id)}')" title="Copy Indicator" class="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white transition-colors">
+            <button data-val="${escapeHtml(n.id)}" onclick="copyToClipboard(this.dataset.val, this)" title="Copy Indicator" class="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white transition-colors">
               <i data-lucide="copy" class="w-3.5 h-3.5"></i>
             </button>
           </td>
@@ -2500,19 +2505,19 @@
       hudContent.innerHTML = `
         <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1">
           <span class="text-[10px] text-slate-400 uppercase font-mono">Target IOC</span>
-          <div class="font-mono text-xs text-white font-bold break-all">${job.ioc}</div>
+          <div class="font-mono text-xs text-white font-bold break-all">${escapeHtml(job.ioc)}</div>
           <div class="flex items-center gap-2 pt-1">
             <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold ${isMalicious ? 'bg-rose-500/20 text-rose-300' : 'bg-teal-500/20 text-teal-300'}">
-              ${job.risk_level || 'ANALYZED'}
+              ${escapeHtml(job.risk_level || 'ANALYZED')}
             </span>
-            <span class="text-slate-400 text-[11px] font-mono">GTI: <b class="text-white">${job.gti_score ?? 'N/A'}/100</b></span>
+            <span class="text-slate-400 text-[11px] font-mono">GTI: <b class="text-white">${escapeHtml(job.gti_score ?? 'N/A')}/100</b></span>
           </div>
         </div>
 
         <div class="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1 text-xs">
           <span class="text-[10px] uppercase font-mono text-teal-400 font-semibold">Triage Summary</span>
           <p class="text-slate-300 text-[11px] leading-relaxed">
-            ${job.rich_intel?.triage_summary || job.metadata?.triage_summary || 'Investigation completed across specialist agents.'}
+            ${escapeHtml(job.rich_intel?.triage_summary || job.metadata?.triage_summary || 'Investigation completed across specialist agents.')}
           </p>
         </div>
       `;
@@ -2720,17 +2725,17 @@
         <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2">
           <div class="flex items-center justify-between">
             <span class="text-[10px] uppercase font-mono px-2 py-0.5 rounded ${node.isMalicious ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : 'bg-teal-500/20 text-teal-300'} font-bold">
-              ${(node.verdict || 'ASSESSED').replace('VERDICT_', '')}
+              ${escapeHtml((node.verdict || 'ASSESSED').replace('VERDICT_', ''))}
             </span>
-            <span class="text-slate-400 font-mono text-[11px]">Score: <b class="text-white">${node.threatScore ?? 'N/A'}/100</b></span>
+            <span class="text-slate-400 font-mono text-[11px]">Score: <b class="text-white">${escapeHtml(node.threatScore ?? 'N/A')}/100</b></span>
           </div>
-          <div class="font-mono text-xs text-white font-bold break-all">${node.id}</div>
+          <div class="font-mono text-xs text-white font-bold break-all">${escapeHtml(node.id)}</div>
         </div>
 
         <div class="grid grid-cols-2 gap-2">
           <div class="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800">
             <span class="text-[10px] text-slate-400 uppercase block">Detections</span>
-            <span class="font-mono text-sm font-bold text-rose-400">${node.vendorDetections || 'N/A'}</span>
+            <span class="font-mono text-sm font-bold text-rose-400">${escapeHtml(node.vendorDetections || 'N/A')}</span>
           </div>
           <div class="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800">
             <span class="text-[10px] text-slate-400 uppercase block">Role</span>
@@ -2741,7 +2746,7 @@
         ${node.title ? `
         <div class="p-3 rounded-lg bg-slate-900/60 border border-slate-800 space-y-1">
           <span class="text-[10px] uppercase font-mono text-slate-400 font-semibold">Metadata Title</span>
-          <pre class="text-[11px] font-mono text-slate-300 whitespace-pre-wrap">${node.title}</pre>
+          <pre class="text-[11px] font-mono text-slate-300 whitespace-pre-wrap">${escapeHtml(node.title)}</pre>
         </div>` : ''}
       `;
 
@@ -2868,16 +2873,16 @@
           ${subtasks.map(s => `
             <div class="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
               <div class="flex items-center justify-between text-[10px]">
-                <span class="text-teal-400 font-bold">${s.agent || 'Agent'}</span>
-                <span class="text-slate-500 font-mono">${s.timestamp || ''}</span>
+                <span class="text-teal-400 font-bold">${escapeHtml(s.agent || 'Agent')}</span>
+                <span class="text-slate-500 font-mono">${escapeHtml(s.timestamp || '')}</span>
               </div>
-              <div class="text-slate-300 font-medium">${s.task || s.status || ''}</div>
+              <div class="text-slate-300 font-medium">${escapeHtml(s.task || s.status || '')}</div>
             </div>
           `).join('')}
           ${transparency.slice(-10).map(t => `
             <div class="p-2.5 rounded-lg bg-slate-900/60 border border-slate-800/60 text-[11px] space-y-0.5">
-              <span class="text-teal-400/80 font-mono">${t.agent || 'system'}:</span>
-              <span class="text-slate-400 ml-1">${t.tool ? `EXECUTING_${t.tool}` : 'ANALYZING'}</span>
+              <span class="text-teal-400/80 font-mono">${escapeHtml(t.agent || 'system')}:</span>
+              <span class="text-slate-400 ml-1">${escapeHtml(t.tool ? `EXECUTING_${t.tool}` : 'ANALYZING')}</span>
             </div>
           `).join('')}
         `;

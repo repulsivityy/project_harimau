@@ -1,7 +1,7 @@
 import os
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
@@ -298,8 +298,29 @@ async def _has_resumable_checkpoint(job_id: str) -> bool:
         return False
     return True
 
+def _sanitize_pg_payload(obj):
+    """
+    Recursively strip null bytes (\\x00) from strings, dicts, lists, and tuples
+    so that json.dumps() cannot emit an unescaped \\u0000 sequence that PostgreSQL
+    JSONB and TEXT columns would reject.
+    """
+    if isinstance(obj, str):
+        # Strip real null bytes (\x00). Literal 6-character "\u0000" text is safe
+        # because json.dumps() escapes the backslash into "\\u0000", which PostgreSQL
+        # jsonb accepts as valid text; stripping literal "\u0000" corrupts malware/JS evidence.
+        return obj.replace("\x00", "")
+    elif isinstance(obj, dict):
+        return {_sanitize_pg_payload(k): _sanitize_pg_payload(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_sanitize_pg_payload(item) for item in obj]
+    elif isinstance(obj, tuple):
+        return tuple(_sanitize_pg_payload(item) for item in obj)
+    return obj
+
+
 async def save_job(job_id: str, data: dict):
     if db_pool:
+        gti_score_int = None
         try:
             async with db_pool.acquire(timeout=5.0) as conn:
                 # Pack top-level fields INTO metadata so they survive DB round-trip.
@@ -332,9 +353,13 @@ async def save_job(job_id: str, data: dict):
                 if data.get("max_iterations") is not None:
                     metadata["max_iterations"] = data["max_iterations"]
 
+                sanitized_metadata = _sanitize_pg_payload(metadata)
+                metadata_json = json.dumps(sanitized_metadata)
+
                 # Serialise the investigation graph if present (nx.node_link_data() is a plain dict)
                 raw_graph = data.get("investigation_graph")
-                graph_json = json.dumps(raw_graph) if raw_graph is not None else None
+                sanitized_graph = _sanitize_pg_payload(raw_graph) if raw_graph is not None else None
+                graph_json = json.dumps(sanitized_graph) if sanitized_graph is not None else None
 
                 # Safely parse GTI score as integer, fallback to None (NULL in DB)
                 raw_score = data.get("gti_score")
@@ -360,13 +385,13 @@ async def save_job(job_id: str, data: dict):
                        OR investigations.status = EXCLUDED.status
                 """,
                 job_id,
-                data.get("status"),
-                data.get("ioc"),
-                data.get("ioc_type"),
-                data.get("risk_level"),
+                _sanitize_pg_payload(data.get("status")),
+                _sanitize_pg_payload(data.get("ioc")),
+                _sanitize_pg_payload(data.get("ioc_type")),
+                _sanitize_pg_payload(data.get("risk_level")),
                 gti_score_int,
-                data.get("final_report"),
-                json.dumps(metadata),
+                _sanitize_pg_payload(data.get("final_report")),
+                metadata_json,
                 graph_json,
                 )
         except Exception as e:
@@ -374,6 +399,34 @@ async def save_job(job_id: str, data: dict):
                          data_keys=list(data.keys()),
                          metadata_keys=list(metadata.keys()) if 'metadata' in dir() else "N/A")
             JOBS[job_id] = data
+            # Fallback: if full JSONB insert/update failed on a terminal status,
+            # ensure the DB status column is still updated so the job is not
+            # misidentified as orphaned and resumed infinitely.
+            if data.get("status") in ("completed", "failed", "cancelled"):
+                try:
+                    async with db_pool.acquire(timeout=5.0) as conn:
+                        await conn.execute(
+                            """
+                            UPDATE investigations
+                            SET status = $2,
+                                final_report = COALESCE($3, final_report),
+                                ioc_type = COALESCE($4, ioc_type),
+                                risk_level = COALESCE($5, risk_level),
+                                gti_score = COALESCE($6, gti_score),
+                                completed_at = NOW()
+                            WHERE job_id = $1
+                              AND status NOT IN ('completed', 'failed', 'cancelled')
+                            """,
+                            job_id,
+                            _sanitize_pg_payload(data.get("status")),
+                            _sanitize_pg_payload(data.get("final_report")),
+                            _sanitize_pg_payload(data.get("ioc_type")),
+                            _sanitize_pg_payload(data.get("risk_level")),
+                            gti_score_int,
+                        )
+                        logger.info("save_job_db_fallback_status_saved", job_id=job_id, status=data.get("status"))
+                except Exception as fallback_err:
+                    logger.error("save_job_db_fallback_failed", job_id=job_id, error=str(fallback_err))
     else:
         JOBS[job_id] = data
 
@@ -427,6 +480,41 @@ async def get_job(job_id: str):
                     if isinstance(job_data.get("investigation_graph"), str):
                         job_data["investigation_graph"] = json.loads(job_data["investigation_graph"])
 
+                    # If DB row is still 'running' due to a prior DB write failure but this worker
+                    # has the terminal result in memory, merge the terminal in-memory state
+                    # over the normalised DB shape so the response preserves DB formatting
+                    # and unpacked keys while adopting the terminal values.
+                    mem_job = JOBS.get(job_id)
+                    if (
+                        job_data.get("status") == "running"
+                        and mem_job
+                        and mem_job.get("status") in ("completed", "failed", "cancelled")
+                    ):
+                        merged = dict(job_data)
+                        merged.update(mem_job)
+                        if not merged.get("created_at") and job_data.get("created_at"):
+                            merged["created_at"] = job_data["created_at"]
+                        if not merged.get("completed_at"):
+                            merged["completed_at"] = job_data.get("completed_at") or datetime.now(timezone.utc).isoformat()
+
+                        for k in (
+                            "subtasks",
+                            "rich_intel",
+                            "specialist_results",
+                            "transparency_log",
+                            "scheduled_entities",
+                            "processed_entities",
+                            "target_outcomes",
+                            "has_unresolved_specialist_gaps",
+                            "investigation_outcome",
+                            "hunt_config",
+                            "max_iterations",
+                        ):
+                            if k not in merged or merged[k] is None:
+                                if k in job_data and job_data[k] is not None:
+                                    merged[k] = job_data[k]
+                        return merged
+
                     return job_data
         except Exception as e:
             logger.error("get_job_db_failed", job_id=job_id, error=str(e))
@@ -443,6 +531,15 @@ async def list_jobs(limit: int = 50):
                     job_data = dict(row)
                     if job_data.get("created_at"):
                         job_data["created_at"] = job_data["created_at"].isoformat()
+                    mem_job = JOBS.get(job_data.get("job_id"))
+                    if (
+                        job_data.get("status") == "running"
+                        and mem_job
+                        and mem_job.get("status") in ("completed", "failed", "cancelled")
+                    ):
+                        job_data["status"] = mem_job.get("status")
+                        if not job_data.get("ioc_type") and mem_job.get("ioc_type"):
+                            job_data["ioc_type"] = mem_job.get("ioc_type")
                     jobs.append(job_data)
                 return jobs
         except Exception as e:

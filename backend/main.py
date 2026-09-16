@@ -166,6 +166,8 @@ async def root():
 # Persistence Helpers
 JOBS = {}  # In-memory fallback
 ACTIVE_TASKS = {}  # Track background asyncio Tasks for cancellation
+RESUME_ATTEMPTS: dict[str, int] = {}  # Track auto-resume attempts per job_id
+MAX_RESUME_ATTEMPTS = 3
 TERMINAL_JOB_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
 
@@ -319,6 +321,18 @@ def _sanitize_pg_payload(obj):
 
 
 async def save_job(job_id: str, data: dict):
+    is_terminal = str(data.get("status") or "").lower() in TERMINAL_JOB_STATUSES
+    if is_terminal:
+        RESUME_ATTEMPTS.pop(job_id, None)
+    elif job_id in RESUME_ATTEMPTS:
+        if "metadata" not in data or not isinstance(data.get("metadata"), dict):
+            data["metadata"] = {}
+        try:
+            existing_attempts = int(data["metadata"].get("resume_attempts", 0) or 0)
+        except (ValueError, TypeError):
+            existing_attempts = 0
+        data["metadata"]["resume_attempts"] = max(RESUME_ATTEMPTS[job_id], existing_attempts)
+
     if db_pool:
         gti_score_int = None
         try:
@@ -921,7 +935,36 @@ async def get_investigation(job_id: str):
     # graph would turn a transient platform failure into a permanent job failure.
     if job.get("status") == "running" and job_id not in ACTIVE_TASKS:
         if await _has_resumable_checkpoint(job_id):
-            logger.info("resuming_orphaned_job", job_id=job_id)
+            db_attempts = 0
+            if isinstance(job.get("metadata"), dict):
+                try:
+                    db_attempts = int(job["metadata"].get("resume_attempts", 0) or 0)
+                except (ValueError, TypeError):
+                    db_attempts = 0
+            attempts = max(RESUME_ATTEMPTS.get(job_id, 0), db_attempts)
+            if attempts >= MAX_RESUME_ATTEMPTS:
+                logger.error(
+                    "orphan_resume_max_attempts_exceeded",
+                    job_id=job_id,
+                    attempts=attempts,
+                )
+                error_msg = f"Investigation failed: exceeded maximum checkpoint resume attempts ({MAX_RESUME_ATTEMPTS})."
+                if "metadata" not in job or not isinstance(job.get("metadata"), dict):
+                    job["metadata"] = {}
+                job["metadata"]["error"] = error_msg
+                job["metadata"]["resume_attempts"] = attempts
+                job["status"] = "failed"
+                job["final_report"] = job.get("final_report") or error_msg
+                await save_job(job_id, job)
+                return job
+
+            new_attempts = attempts + 1
+            RESUME_ATTEMPTS[job_id] = new_attempts
+            if "metadata" not in job or not isinstance(job.get("metadata"), dict):
+                job["metadata"] = {}
+            job["metadata"]["resume_attempts"] = new_attempts
+            await save_job(job_id, job)
+            logger.info("resuming_orphaned_job", job_id=job_id, attempt=new_attempts)
             ioc = job.get("ioc", "")
             hunt_config = job.get("hunt_config") or {}
             if not isinstance(hunt_config, dict):

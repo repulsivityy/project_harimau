@@ -20,6 +20,17 @@ for mod in [
 ]:
     sys.modules.setdefault(mod, MagicMock())
 
+# Ensure @app.get(...) / @app.post(...) / etc. return the original coroutine function unchanged
+_fastapi_mock = sys.modules["fastapi"]
+def _passthrough_decorator(*args, **kwargs):
+    def _wrapper(fn):
+        return fn
+    return _wrapper
+_app_instance_mock = MagicMock()
+for _method in ("get", "post", "put", "delete", "patch", "options", "head", "on_event"):
+    getattr(_app_instance_mock, _method).side_effect = _passthrough_decorator
+_fastapi_mock.FastAPI.return_value = _app_instance_mock
+
 import backend.main as main
 
 
@@ -271,8 +282,74 @@ def test_get_job_and_list_jobs_terminal_memory_state_merges_normalized_db_shape(
     assert jobs_list[0]["ioc_type"] == "domain"
 
 
+def test_orphan_resume_capped_at_max_attempts():
+    """Verify get_investigation caps auto-resume retries at MAX_RESUME_ATTEMPTS (3)
+    and transitions repeatedly failing/orphaned jobs to 'failed' status instead of looping infinitely.
+    """
+    monkeypatch = DummyPatch()
+    monkeypatch.setattr(main, "db_pool", None)
+    main.JOBS.clear()
+    main.ACTIVE_TASKS.clear()
+    main.RESUME_ATTEMPTS.clear()
+
+    spawned_resumes = []
+
+    async def fake_has_checkpoint(job_id: str) -> bool:
+        return True
+
+    async def fake_run_background(job_id, ioc, max_iters, *, resume=False, hunt_config=None):
+        spawned_resumes.append((job_id, resume, max_iters))
+
+    monkeypatch.setattr(main, "_has_resumable_checkpoint", fake_has_checkpoint)
+    monkeypatch.setattr(main, "_run_investigation_background", fake_run_background)
+
+    job_id = "job-orphan-loop"
+    main.JOBS[job_id] = {
+        "job_id": job_id,
+        "status": "running",
+        "ioc": "bad-domain.com",
+        "metadata": {},
+        "hunt_config": {"max_iterations": 2},
+    }
+
+    async def run_polls():
+        # Polls 1..MAX_RESUME_ATTEMPTS should each spawn a resume task
+        for expected_attempt in range(1, main.MAX_RESUME_ATTEMPTS + 1):
+            res = await main.get_investigation(job_id)
+            assert res["status"] == "running"
+            assert res["metadata"]["resume_attempts"] == expected_attempt
+            # Wait for spawned task coroutine to run, then simulate worker crash / orphan state
+            task = main.ACTIVE_TASKS.get(job_id)
+            assert task is not None
+            await task
+            main.ACTIVE_TASKS.pop(job_id, None)
+
+        assert len(spawned_resumes) == main.MAX_RESUME_ATTEMPTS
+
+        # Simulate a different Cloud Run instance handling the 4th poll (in-memory RESUME_ATTEMPTS empty,
+        # but metadata["resume_attempts"] == 3 persisted in job record)
+        main.RESUME_ATTEMPTS.clear()
+
+        # Poll 4 (exceeds MAX_RESUME_ATTEMPTS): must mark job failed and NOT spawn another task
+        res4 = await main.get_investigation(job_id)
+        assert res4["status"] == "failed"
+        assert "exceeded maximum checkpoint resume attempts" in res4["metadata"]["error"]
+        assert "exceeded maximum checkpoint resume attempts" in res4["final_report"]
+        assert len(spawned_resumes) == main.MAX_RESUME_ATTEMPTS
+        assert job_id not in main.ACTIVE_TASKS
+        assert job_id not in main.RESUME_ATTEMPTS
+
+        # Poll 5: job is now terminal ('failed'), no further resume checks or tasks
+        res5 = await main.get_investigation(job_id)
+        assert res5["status"] == "failed"
+        assert len(spawned_resumes) == main.MAX_RESUME_ATTEMPTS
+
+    asyncio.run(run_polls())
+
+
 if __name__ == "__main__":
     test_sanitize_pg_payload_strips_null_bytes_only()
     test_save_job_strips_null_bytes_and_fallback_prevents_orphan_loop()
     test_get_job_and_list_jobs_terminal_memory_state_merges_normalized_db_shape()
-    print("ALL TESTS PASSED: Null byte sanitization, fallback, and get_job/list_jobs shape normalization verified.")
+    test_orphan_resume_capped_at_max_attempts()
+    print("ALL TESTS PASSED: Null byte sanitization, fallback, get_job/list_jobs shape normalization, and orphan resume cap verified.")

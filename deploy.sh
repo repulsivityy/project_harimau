@@ -349,6 +349,7 @@ if [[ "$TARGET" == "backend" || "$TARGET" == "all" ]]; then
         --memory="2048Mi" \
         --cpu="2" \
         --no-cpu-throttling \
+        --timeout="600" \
         --set-env-vars "LOG_LEVEL=DEBUG,MAX_DEPTH=2,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_REGION=${REGION}${DETECTION_AGENT_VARS}" \
         --set-secrets "VT_APIKEY=${SECRET_NAME}:latest,GTI_API_KEY=${SECRET_NAME}:latest,WEBRISK_API_KEY=${WEBRISK_SECRET_NAME}:latest,SHODAN_API_KEY=${SHODAN_SECRET_NAME}:latest,DATABASE_URL=${DB_URL_SECRET}:latest" \
         --add-cloudsql-instances ${PROJECT_ID}:${REGION}:${DB_INSTANCE} \

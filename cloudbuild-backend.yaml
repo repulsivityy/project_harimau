@@ -30,6 +30,8 @@ steps:
       - 'asia-southeast1'
       - '--add-cloudsql-instances'
       - '$PROJECT_ID:asia-southeast1:harimau-db'
+      - '--no-cpu-throttling'
+      - '--timeout=600'
       - '--quiet'
 
 images:

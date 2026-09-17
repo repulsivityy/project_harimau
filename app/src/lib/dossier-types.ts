@@ -93,7 +93,7 @@ export interface ParsedDotNode {
   isRoot?: boolean;
   entityType: string;
   isDecoy?: boolean;
-  threatScore?: number | null;
+  threatScore?: number;
   verdict?: string;
   isMalicious?: boolean;
 }

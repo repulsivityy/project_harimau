@@ -142,6 +142,7 @@ interface CustomNodeData extends Record<string, unknown> {
   title?: string;
   isRoot?: boolean;
   isMalicious?: boolean;
+  threatScore?: number;
   rawNode?: BackendNode;
 }
 
@@ -282,22 +283,33 @@ export default function InvestigatePage() {
   const [rawGraphData, setRawGraphData] = useState<GraphData | null>(null);
   const [selectedNode, setSelectedNode] = useState<BackendNode | null>(null);
 
+  const lastJobSignatureRef = useRef<string>("");
+  const lastGraphSignatureRef = useRef<string>("");
+  const lastLogSignatureRef = useRef<string>("");
+  const lastPendingJumpRef = useRef<string | null>(null);
+  const jumpFilterAttemptsRef = useRef<number>(0);
+
+  const finalReport = job?.final_report || "";
+  const jobIoc = job?.ioc || "";
+  const jobGtiScore = job?.gti_score;
+
   // Parse Dossier Report & Swim Lanes from job.final_report
   const parsedDossier = useMemo(() => {
     return parseDossierReport(
-      job?.final_report || "",
+      finalReport,
       job || undefined,
       rawGraphData || job?.graph || job?.investigation_graph
     );
-  }, [job, rawGraphData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finalReport, jobIoc, jobGtiScore, rawGraphData]);
 
   const swimLanes = useMemo(() => {
     return deriveSwimLanes(
       parsedDossier.parsedDotGraph,
-      job?.ioc || "",
+      jobIoc,
       job || undefined
     );
-  }, [parsedDossier.parsedDotGraph, job]);
+  }, [parsedDossier.parsedDotGraph, jobIoc, job]);
 
   const graphEntityCount = useMemo(() => {
     const rawCount = rawGraphData?.nodes?.length || 0;
@@ -344,7 +356,7 @@ export default function InvestigatePage() {
             isRoot: dn.isRoot,
             isMalicious: dn.isMalicious,
             inReport: true,
-            threatScore: dn.threatScore,
+            threatScore: dn.threatScore ?? undefined,
             verdict: dn.verdict,
           });
         }
@@ -420,6 +432,7 @@ export default function InvestigatePage() {
               title: n.title,
               isRoot: n.isRoot,
               isMalicious: n.isMalicious,
+              threatScore: n.threatScore ?? undefined,
               rawNode: n,
             },
             style: {
@@ -459,37 +472,127 @@ export default function InvestigatePage() {
 
   // Execute pending node focus when switching to canvas
   useEffect(() => {
-    if (activeView === "canvas" && pendingJumpNodeId && nodes.length > 0) {
-      const targetLower = pendingJumpNodeId.toLowerCase();
-      const targetRfNode = nodes.find(
-        (n) => n.id === pendingJumpNodeId || n.id.toLowerCase() === targetLower
-      );
-      if (targetRfNode) {
-        const raw =
-          targetRfNode.data?.rawNode ||
-          rawGraphRef.current?.nodes.find(
-            (rn) => rn.id === targetRfNode.id || rn.id.toLowerCase() === targetLower
-          );
-        if (raw) setSelectedNode(raw);
-
-        setTimeout(() => {
-          if (reactFlowRef.current) {
-            reactFlowRef.current.setCenter(
-              targetRfNode.position.x,
-              targetRfNode.position.y,
-              { zoom: 1.35, duration: 500 }
-            );
-          }
-        }, 100);
-      }
-      setPendingJumpNodeId(null);
+    if (activeView !== "canvas" || !pendingJumpNodeId) {
+      lastPendingJumpRef.current = null;
+      jumpFilterAttemptsRef.current = 0;
+      return;
     }
-  }, [activeView, pendingJumpNodeId, nodes]);
 
-  // Re-render the spatial graph whenever the parsed DOT graph or filters change.
+    if (pendingJumpNodeId !== lastPendingJumpRef.current) {
+      lastPendingJumpRef.current = pendingJumpNodeId;
+      jumpFilterAttemptsRef.current = 0;
+    }
+
+    const targetLower = pendingJumpNodeId.toLowerCase();
+    const targetRfNode = nodes.find(
+      (n) => n.id === pendingJumpNodeId || n.id.toLowerCase() === targetLower
+    );
+
+    if (targetRfNode) {
+      const raw =
+        targetRfNode.data?.rawNode ||
+        rawGraphRef.current?.nodes.find(
+          (rn) => rn.id === targetRfNode.id || rn.id.toLowerCase() === targetLower
+        );
+      if (raw) setSelectedNode(raw);
+
+      setTimeout(() => {
+        if (reactFlowRef.current) {
+          reactFlowRef.current.setCenter(
+            targetRfNode.position.x,
+            targetRfNode.position.y,
+            { zoom: 1.35, duration: 500 }
+          );
+        }
+      }, 100);
+      setPendingJumpNodeId(null);
+      lastPendingJumpRef.current = null;
+      jumpFilterAttemptsRef.current = 0;
+      return;
+    }
+
+    // Target node was not found in visible `nodes`. Check full unfiltered node sets.
+    const rawMatch = rawGraphRef.current?.nodes?.find(
+      (rn) => rn.id === pendingJumpNodeId || rn.id.toLowerCase() === targetLower
+    );
+    const dotMatch = !rawMatch
+      ? parsedDossier.parsedDotGraph.nodes.find(
+          (dn) => dn.id === pendingJumpNodeId || dn.id.toLowerCase() === targetLower
+        )
+      : null;
+
+    const fullNode = rawMatch || dotMatch;
+
+    if (fullNode) {
+      const entityType = fullNode.entityType || "entity";
+      const isFilteredOut =
+        !fullNode.isRoot &&
+        ((graphFilters.reportOnly && !("inReport" in fullNode && fullNode.inReport)) ||
+          (graphFilters.maliciousOnly && !fullNode.isMalicious) ||
+          graphFilters.types[entityType] === false);
+
+      if (isFilteredOut) {
+        setGraphFilters((prev) => ({
+          ...prev,
+          reportOnly: false,
+          maliciousOnly: false,
+          types: {
+            ...prev.types,
+            [entityType]: true,
+          },
+        }));
+        // Keep pendingJumpNodeId set until graph rebuilds with relaxed filters
+        return;
+      }
+
+      // If filters are already relaxed, give rebuildSpatialGraph up to 3 render passes to populate `nodes`
+      jumpFilterAttemptsRef.current += 1;
+      if (jumpFilterAttemptsRef.current > 3) {
+        const raw: BackendNode =
+          "size" in fullNode
+            ? (fullNode as BackendNode)
+            : {
+                id: fullNode.id,
+                label: fullNode.label || fullNode.id,
+                entityType,
+                size: fullNode.isRoot ? 30 : 22,
+                isRoot: fullNode.isRoot,
+                isMalicious: fullNode.isMalicious,
+                threatScore: fullNode.threatScore ?? undefined,
+                verdict: fullNode.verdict,
+              };
+        setSelectedNode(raw);
+        setPendingJumpNodeId(null);
+        lastPendingJumpRef.current = null;
+        jumpFilterAttemptsRef.current = 0;
+      }
+      return;
+    }
+
+    // If the node truly does not exist in either rawGraphRef.current or parsedDotGraph.nodes,
+    // synthesize a temporary selected node for the inspector.
+    setSelectedNode({
+      id: pendingJumpNodeId,
+      label: pendingJumpNodeId,
+      entityType: "entity",
+      size: 24,
+      threatScore: undefined,
+    });
+    setPendingJumpNodeId(null);
+    lastPendingJumpRef.current = null;
+    jumpFilterAttemptsRef.current = 0;
+  }, [
+    activeView,
+    pendingJumpNodeId,
+    nodes,
+    graphFilters,
+    parsedDossier.parsedDotGraph,
+  ]);
+
+  // Re-render the spatial graph whenever the parsed DOT graph, raw graph data, or filters change.
   useEffect(() => {
-    rebuildSpatialGraph(rawGraphRef.current);
-  }, [rebuildSpatialGraph]);
+    rebuildSpatialGraph(rawGraphData);
+  }, [rebuildSpatialGraph, rawGraphData]);
 
   useEffect(() => {
     if (!id) return;
@@ -563,33 +666,72 @@ export default function InvestigatePage() {
         const terminalFromRest =
           !terminalStatusRef.current && isTerminalInvestigationStatus(fetchedStatus);
         const effectiveStatus = terminalStatusRef.current ?? fetchedStatus;
-        setJob(jobData);
-        setJobStatus(effectiveStatus);
-        if (terminalFromRest) applyTerminalUpdate(fetchedStatus, jobData as unknown as InvestigationStreamData, "investigation_snapshot");
-        if (terminalStatusRef.current && !isTerminalInvestigationStatus(fetchedStatus)) {
-          const snapshot = terminalSnapshotRef.current;
-          setJob({
-            ...jobData,
-            status: terminalStatusRef.current,
-            ...(snapshot?.subtasks ? { subtasks: snapshot.subtasks as DossierJob["subtasks"] } : {}),
-            ...(snapshot?.transparencyLog ? { transparency_log: snapshot.transparencyLog } : {}),
-          });
+
+        const hasTerminalReconciliation = Boolean(
+          terminalStatusRef.current && !isTerminalInvestigationStatus(fetchedStatus)
+        );
+        const resolvedJob: DossierJob = hasTerminalReconciliation
+          ? {
+              ...jobData,
+              status: terminalStatusRef.current!,
+              ...(terminalSnapshotRef.current?.subtasks
+                ? { subtasks: terminalSnapshotRef.current.subtasks as DossierJob["subtasks"] }
+                : {}),
+              ...(terminalSnapshotRef.current?.transparencyLog
+                ? { transparency_log: terminalSnapshotRef.current.transparencyLog }
+                : {}),
+            }
+          : jobData;
+
+        const jobSig = JSON.stringify({
+          status: effectiveStatus,
+          reportLen: resolvedJob.final_report?.length ?? 0,
+          reportHash:
+            (resolvedJob.final_report?.slice(0, 120) ?? "") +
+            (resolvedJob.final_report?.slice(-120) ?? ""),
+          subtasksLen: resolvedJob.subtasks?.length ?? 0,
+          gti: resolvedJob.gti_score,
+          risk: resolvedJob.risk_level,
+          srKeys: Object.keys(
+            resolvedJob.specialist_reports || resolvedJob.specialist_results || {}
+          ),
+        });
+
+        if (jobSig !== lastJobSignatureRef.current || hasTerminalReconciliation) {
+          lastJobSignatureRef.current = jobSig;
+          setJob(resolvedJob);
         }
+        setJobStatus(effectiveStatus);
+
+        if (terminalFromRest) {
+          applyTerminalUpdate(
+            fetchedStatus,
+            jobData as unknown as InvestigationStreamData,
+            "investigation_snapshot"
+          );
+        }
+
         const durableTransparencyLog =
-          jobData?.transparency_log ?? jobData?.metadata?.transparency_log;
+          resolvedJob?.transparency_log ?? resolvedJob?.metadata?.transparency_log;
         if (Array.isArray(durableTransparencyLog) && durableTransparencyLog.length > 0) {
-          setActivityLog(formatTransparencyLog(durableTransparencyLog));
+          const lastEntry = durableTransparencyLog[durableTransparencyLog.length - 1] as
+            | TransparencyEntry
+            | undefined;
+          const logSig = `${durableTransparencyLog.length}:${lastEntry?.timestamp ?? ""}`;
+          if (logSig !== lastLogSignatureRef.current) {
+            lastLogSignatureRef.current = logSig;
+            setActivityLog(formatTransparencyLog(durableTransparencyLog));
+          }
         }
 
         if (graphRes.ok) {
           const graphData: GraphData = await graphRes.json();
-          const prevCount = rawGraphRef.current?.nodes?.length ?? -1;
-          const nextCount = graphData.nodes?.length ?? 0;
-          rawGraphRef.current = graphData;
-          if (prevCount !== nextCount) {
+          const graphSig = `${graphData.nodes?.length ?? 0}:${graphData.edges?.length ?? 0}:${graphData.nodes?.map((n) => n.id).join(",") ?? ""}`;
+          if (graphSig !== lastGraphSignatureRef.current) {
+            lastGraphSignatureRef.current = graphSig;
+            rawGraphRef.current = graphData;
             setRawGraphData(graphData);
           }
-          rebuildRef.current(graphData);
         }
         return effectiveStatus;
       } catch (e) {

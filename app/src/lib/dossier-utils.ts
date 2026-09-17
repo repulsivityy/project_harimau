@@ -20,50 +20,50 @@ export const CANONICAL_SECTIONS: Array<{
     number: 1,
     id: "section-1-executive-summary",
     defaultTitle: "1. Executive Summary",
-    numberedMatcher: /^###\s*\d+\.\s*Executive\s*Summary([^\n]*)/i,
-    unnumberedMatcher: /^###\s*Executive\s*Summary(\s*:[^\n]*)?$/i,
+    numberedMatcher: /^#{1,4}\s*\d+\.\s*Executive\s*Summary([^\n]*)/i,
+    unnumberedMatcher: /^#{1,4}\s*Executive\s*Summary(\s*:[^\n]*)?$/i,
   },
   {
     number: 2,
     id: "section-2-attack-narrative",
     defaultTitle: "2. Attack Narrative",
-    numberedMatcher: /^###\s*\d+\.\s*Attack\s*Narrative([^\n]*)/i,
-    unnumberedMatcher: /^###\s*Attack\s*Narrative(\s*:[^\n]*)?$/i,
+    numberedMatcher: /^#{1,4}\s*\d+\.\s*Attack\s*Narrative([^\n]*)/i,
+    unnumberedMatcher: /^#{1,4}\s*Attack\s*Narrative(\s*:[^\n]*)?$/i,
   },
   {
     number: 3,
     id: "section-3-specialist-reports",
     defaultTitle: "3. Specialist Reports",
-    numberedMatcher: /^###\s*\d+\.\s*Specialist\s*Reports([^\n]*)/i,
-    unnumberedMatcher: /^###\s*Specialist\s*Reports(\s*:[^\n]*)?$/i,
+    numberedMatcher: /^#{1,4}\s*\d+\.\s*Specialist\s*Reports([^\n]*)/i,
+    unnumberedMatcher: /^#{1,4}\s*Specialist\s*Reports(\s*:[^\n]*)?$/i,
   },
   {
     number: 4,
     id: "section-4-investigation-timeline",
     defaultTitle: "4. Investigation Timeline",
-    numberedMatcher: /^###\s*\d+\.\s*(?:Investigation\s*)?Timeline([^\n]*)/i,
-    unnumberedMatcher: /^###\s*(?:Investigation\s*)?Timeline(\s*:[^\n]*)?$/i,
+    numberedMatcher: /^#{1,4}\s*\d+\.\s*(?:Investigation\s*)?Timeline([^\n]*)/i,
+    unnumberedMatcher: /^#{1,4}\s*(?:Investigation\s*)?Timeline(\s*:[^\n]*)?$/i,
   },
   {
     number: 5,
     id: "section-5-technical-analysis",
     defaultTitle: "5. Technical Analysis",
-    numberedMatcher: /^###\s*\d+\.\s*Technical\s*Analysis([^\n]*)/i,
-    unnumberedMatcher: /^###\s*Technical\s*Analysis(\s*:[^\n]*)?$/i,
+    numberedMatcher: /^#{1,4}\s*\d+\.\s*Technical\s*Analysis([^\n]*)/i,
+    unnumberedMatcher: /^#{1,4}\s*Technical\s*Analysis(\s*:[^\n]*)?$/i,
   },
   {
     number: 6,
     id: "section-6-attack-flow-diagram",
     defaultTitle: "6. Attack Flow Diagram",
-    numberedMatcher: /^###\s*\d+\.\s*Attack\s*Flow([^\n]*)/i,
-    unnumberedMatcher: /^###\s*Attack\s*Flow(?:\s*Diagram)?(\s*:[^\n]*)?$/i,
+    numberedMatcher: /^#{1,4}\s*\d+\.\s*Attack\s*Flow([^\n]*)/i,
+    unnumberedMatcher: /^#{1,4}\s*Attack\s*Flow(?:\s*Diagram)?(\s*:[^\n]*)?$/i,
   },
   {
     number: 7,
     id: "section-7-appendix",
     defaultTitle: "7. Appendix",
-    numberedMatcher: /^###\s*\d+\.\s*Appendix([^\n]*)/i,
-    unnumberedMatcher: /^###\s*Appendix(\s*:[^\n]*)?$/i,
+    numberedMatcher: /^#{1,4}\s*\d+\.\s*Appendix([^\n]*)/i,
+    unnumberedMatcher: /^#{1,4}\s*Appendix(\s*:[^\n]*)?$/i,
   },
 ];
 
@@ -122,9 +122,11 @@ export function normalizeReportSections(markdown: string): string {
       }
     }
 
-    if (matchedSection && !bucketMap.has(matchedSection.number)) {
+    if (matchedSection) {
       currentBucket = matchedSection.number;
-      bucketMap.set(currentBucket, { headerSuffix: suffix, bodyLines: [] });
+      if (!bucketMap.has(currentBucket)) {
+        bucketMap.set(currentBucket, { headerSuffix: suffix, bodyLines: [] });
+      }
     } else {
       if (currentBucket === null) {
         preambleLines.push(line);
@@ -267,24 +269,15 @@ export function parseDotToGraph(
       isRoot,
       entityType,
       isDecoy,
-      threatScore: isRoot
-        ? rootGtiScore
-        : isDecoy
-          ? 0
-          : isMalicious
-            ? 90
-            : isSuspicious
-              ? 50
-              : 0,
-      verdict: isRoot
-        ? "TARGET / LURE"
-        : isDecoy
-          ? "LEGITIMATE / DUAL-USE"
-          : isMalicious
-            ? "MALICIOUS"
-            : isSuspicious
-              ? "SUSPICIOUS LOLBIN"
-              : "BENIGN",
+      threatScore: isRoot ? rootGtiScore : undefined,
+      verdict:
+        isRoot || isMalicious
+          ? "MALICIOUS"
+          : isSuspicious
+            ? "SUSPICIOUS"
+            : isDecoy
+              ? "BENIGN"
+              : "UNKNOWN",
       isMalicious: isMalicious && !isDecoy,
     });
   }
@@ -303,7 +296,8 @@ export function parseDotToGraph(
         id: source,
         label: source,
         entityType: "entity",
-        threatScore: 40,
+        threatScore: undefined,
+        verdict: "UNKNOWN",
       });
     }
     if (!nodesMap.has(target)) {
@@ -311,7 +305,8 @@ export function parseDotToGraph(
         id: target,
         label: target,
         entityType: "entity",
-        threatScore: 40,
+        threatScore: undefined,
+        verdict: "UNKNOWN",
       });
     }
     edges.push({ source, target, label });
@@ -411,7 +406,8 @@ export function deriveSwimLanes(
       label: rootIoc,
       entityType: rootJob?.ioc_type || "target",
       verdict: rootJob?.risk_level || "TARGET",
-      threatScore: rootJob?.gti_score ?? 90,
+      threatScore:
+        typeof rootJob?.gti_score === "number" ? rootJob.gti_score : 90,
       isMalicious: true,
     });
   }
@@ -556,24 +552,111 @@ export function parseDossierReport(
   }
 
   // 2. Extract Appendix IOCs JSON block
-  const iocsRegex = /```(?:iocs|json)?\s*(\[\s*\{[\s\S]*?\}\s*\])\s*```/i;
-  const iocsMatch = iocsRegex.exec(cleanMarkdown);
   let extractedIocs: IocEntry[] = [];
-  if (iocsMatch) {
+  let chosenMatch: { full: string; json: string } | null = null;
+
+  // 2a. Look specifically for an explicit ```iocs block anywhere
+  const explicitIocsRegex = /```iocs\s*(\[\s*\{[\s\S]*?\}\s*\])\s*```/i;
+  const explicitMatch = explicitIocsRegex.exec(cleanMarkdown);
+  if (explicitMatch) {
     try {
-      const parsed = JSON.parse(iocsMatch[1]);
+      const parsed = JSON.parse(explicitMatch[1]);
       if (Array.isArray(parsed)) {
-        extractedIocs = parsed.map((item: Record<string, unknown>) => ({
-          type: String(item.type || "IOC"),
-          value: String(item.value || ""),
-          notes: String(item.notes || "--"),
-          confidence: String(item.confidence || "MEDIUM"),
-        }));
+        const candidate: IocEntry[] = parsed
+          .map((item: Record<string, unknown>) => ({
+            type: String(item.type || "IOC"),
+            value: String(item.value || "").trim(),
+            notes: String(item.notes || "--"),
+            confidence: String(item.confidence || "MEDIUM"),
+          }))
+          .filter((item) => Boolean(item.value));
+        if (candidate.length > 0) {
+          extractedIocs = candidate;
+        }
+        chosenMatch = { full: explicitMatch[0], json: explicitMatch[1] };
       }
-      cleanMarkdown = cleanMarkdown.replace(iocsMatch[0], "");
     } catch {
       // Ignore malformed JSON block
     }
+  }
+
+  // 2b. OR look for a ```json array block that appears within or after the Appendix section heading
+  if (!chosenMatch) {
+    const appendixHeadingRegex =
+      /(?:^|\n)\s*#{1,4}\s*(?:\d+\.\s*)?Appendix[^\n]*/i;
+    const appMatch = appendixHeadingRegex.exec(cleanMarkdown);
+    if (appMatch && appMatch.index !== undefined) {
+      const textAfterAppendix = cleanMarkdown.slice(appMatch.index);
+      const jsonRegex = /```(?:json)?\s*(\[\s*\{[\s\S]*?\}\s*\])\s*```/i;
+      const jsonMatch = jsonRegex.exec(textAfterAppendix);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[1]);
+          if (Array.isArray(parsed)) {
+            const candidate: IocEntry[] = parsed
+              .map((item: Record<string, unknown>) => ({
+                type: String(item.type || "IOC"),
+                value: String(item.value || "").trim(),
+                notes: String(item.notes || "--"),
+                confidence: String(item.confidence || "MEDIUM"),
+              }))
+              .filter((item) => Boolean(item.value));
+            if (candidate.length > 0) {
+              extractedIocs = candidate;
+            }
+            chosenMatch = { full: jsonMatch[0], json: jsonMatch[1] };
+          }
+        } catch {
+          // Ignore malformed JSON block
+        }
+      }
+    }
+  }
+
+  // 2c. If no Appendix heading is found yet, scan all JSON array blocks
+  // and only accept one whose items have a valid non-empty value property (and type or confidence or notes).
+  if (!chosenMatch) {
+    const allJsonRegex = /```(?:json)?\s*(\[\s*\{[\s\S]*?\}\s*\])\s*```/gi;
+    let match: RegExpExecArray | null;
+    while ((match = allJsonRegex.exec(cleanMarkdown)) !== null) {
+      try {
+        const parsed = JSON.parse(match[1]);
+        if (Array.isArray(parsed)) {
+          const validItems = parsed.filter(
+            (item: Record<string, unknown>) =>
+              item &&
+              typeof item === "object" &&
+              item.value !== undefined &&
+              item.value !== null &&
+              String(item.value).trim().length > 0 &&
+              (item.type !== undefined ||
+                item.confidence !== undefined ||
+                item.notes !== undefined)
+          );
+          if (validItems.length > 0) {
+            extractedIocs = validItems.map((item: Record<string, unknown>) => ({
+              type: String(item.type || "IOC"),
+              value: String(item.value).trim(),
+              notes: String(item.notes || "--"),
+              confidence: String(item.confidence || "MEDIUM"),
+            }));
+            chosenMatch = { full: match[0], json: match[1] };
+            break;
+          }
+        }
+      } catch {
+        // Ignore malformed JSON block
+      }
+    }
+  }
+
+  // Filter extractedIocs so that any item with an empty or whitespace-only value is discarded
+  extractedIocs = extractedIocs.filter(
+    (item) => item.value && String(item.value).trim().length > 0
+  );
+
+  if (chosenMatch) {
+    cleanMarkdown = cleanMarkdown.replace(chosenMatch.full, "");
   }
 
   const parsedDotGraph = rawDotCode
@@ -583,7 +666,10 @@ export function parseDossierReport(
   const appendixIocs =
     extractedIocs.length > 0
       ? extractedIocs
-      : extractFallbackIocs(parsedDotGraph, rawGraphData || job?.graph || job?.investigation_graph);
+      : extractFallbackIocs(
+          parsedDotGraph,
+          rawGraphData || job?.graph || job?.investigation_graph
+        );
 
   const normalizedMarkdown = normalizeReportSections(cleanMarkdown);
 
@@ -603,10 +689,12 @@ export function parseDossierReport(
       }
     }
 
-    if (matched && !sectionMap.has(matched.number)) {
+    if (matched) {
       activeSecNum = matched.number;
-      const titleText = line.replace(/^###\s*/, "").trim();
-      sectionMap.set(activeSecNum, { title: titleText, lines: [] });
+      if (!sectionMap.has(activeSecNum)) {
+        const titleText = line.replace(/^#{1,4}\s*/, "").trim();
+        sectionMap.set(activeSecNum, { title: titleText, lines: [] });
+      }
     } else {
       if (activeSecNum === null) {
         preambleLines.push(line);
@@ -634,4 +722,47 @@ export function parseDossierReport(
     appendixIocs,
     normalizedMarkdown,
   };
+}
+
+/**
+ * Adapt a Graphviz DOT string for dark theme display, enforcing transparent background,
+ * specified rankdir orientation, and stripping potentially malicious URL/href attributes.
+ */
+export function adaptDotForDarkTheme(
+  rawDot: string | null | undefined,
+  ori: "LR" | "TB" | string = "LR"
+): string {
+  const baseDot =
+    rawDot && rawDot.trim().length > 0
+      ? rawDot
+      : `digraph AttackFlow {\n  rankdir=${ori};\n  bgcolor="transparent";\n  node [shape=box, style="rounded,filled", fillcolor="#0f172a", color="#334155", fontcolor="#e2e8f0", fontname="monospace"];\n  "Target" [label="No DOT Graph Available"];\n}`;
+
+  let adapted = baseDot;
+
+  // Strip any URL="..." or href="..." attributes to prevent malicious javascript: links at the utility level
+  adapted = adapted.replace(/\b(?:URL|href)\s*=\s*(?:"[^"]*"|'[^']*')/gi, "");
+  adapted = adapted.replace(/,\s*,/g, ",");
+  adapted = adapted.replace(/,\s*\]/g, "]");
+  adapted = adapted.replace(/\[\s*,/g, "[");
+
+  if (/rankdir\s*=\s*[A-Za-z]+/i.test(adapted)) {
+    adapted = adapted.replace(/rankdir\s*=\s*[A-Za-z]+/gi, `rankdir=${ori}`);
+  } else if (/digraph\s+[^{]*\{/i.test(adapted)) {
+    adapted = adapted.replace(/(digraph\s+[^{]*\{)/i, `$1\n  rankdir=${ori};`);
+  } else {
+    adapted = `digraph G {\n  rankdir=${ori};\n${adapted}\n}`;
+  }
+
+  adapted = adapted.replace(
+    /bgcolor\s*=\s*"[^"]*"/gi,
+    'bgcolor="transparent"'
+  );
+  if (!/bgcolor\s*=/i.test(adapted) && /digraph\s+[^{]*\{/i.test(adapted)) {
+    adapted = adapted.replace(
+      /(digraph\s+[^{]*\{)/i,
+      `$1\n  bgcolor="transparent";`
+    );
+  }
+
+  return adapted;
 }

@@ -36,6 +36,9 @@ function buildAdaptedDot(rawDot: string | null, ori: DotOrientation): string {
     );
   }
 
+  // Strip URL and href attributes to prevent XSS and unintended navigation
+  adapted = adapted.replace(/\b(?:URL|href)\s*=\s*"[^"]*"/gi, "");
+
   return adapted;
 }
 
@@ -57,7 +60,7 @@ export function AttackFlowSection({
   const [renderError, setRenderError] = useState<string | null>(null);
 
   const diagramContainerRef = useRef<HTMLDivElement>(null);
-  const gvInstanceRef = useRef<any>(null);
+  const gvInstanceRef = useRef<ReturnType<typeof graphviz> | null>(null);
 
   // Sync orientation if rawDotCode changes externally
   useEffect(() => {
@@ -89,7 +92,12 @@ export function AttackFlowSection({
       .select(diagramContainerRef.current)
       .select<SVGSVGElement>("svg");
     if (zoom && !svg.empty()) {
-      svg.transition().duration(250).call(zoom.scaleBy as any, 1.3);
+      zoom.scaleBy(
+        svg
+          .transition()
+          .duration(250) as unknown as Parameters<typeof zoom.scaleBy>[0],
+        1.3
+      );
     }
   }, []);
 
@@ -101,7 +109,12 @@ export function AttackFlowSection({
       .select(diagramContainerRef.current)
       .select<SVGSVGElement>("svg");
     if (zoom && !svg.empty()) {
-      svg.transition().duration(250).call(zoom.scaleBy as any, 0.75);
+      zoom.scaleBy(
+        svg
+          .transition()
+          .duration(250) as unknown as Parameters<typeof zoom.scaleBy>[0],
+        0.75
+      );
     }
   }, []);
 
@@ -109,17 +122,23 @@ export function AttackFlowSection({
     const gv = gvInstanceRef.current;
     if (!gv || !diagramContainerRef.current) return;
     try {
-      gv.resetZoom(d3.transition().duration(400) as any);
+      gv.resetZoom(
+        d3
+          .transition()
+          .duration(400) as unknown as Parameters<typeof gv.resetZoom>[0]
+      );
     } catch {
       const zoom = gv.zoomBehavior();
       const svg = d3
         .select(diagramContainerRef.current)
         .select<SVGSVGElement>("svg");
       if (zoom && !svg.empty()) {
-        svg
-          .transition()
-          .duration(400)
-          .call(zoom.transform as any, d3.zoomIdentity);
+        zoom.transform(
+          svg
+            .transition()
+            .duration(400) as unknown as Parameters<typeof zoom.transform>[0],
+          d3.zoomIdentity
+        );
       }
     }
   }, []);
@@ -166,14 +185,21 @@ export function AttackFlowSection({
           }
         }
 
-        const origDatum = d3.select(graphG).datum() as any;
+        const origDatum = d3.select(graphG).datum() as
+          | { scale?: number }
+          | undefined;
         const baseScale = origDatum?.scale || 1;
         const targetScale = Math.max(baseScale * 1.25, 1.1);
         const tx = centerX - cx * targetScale;
         const ty = centerY - cy * targetScale;
 
         const transform = d3.zoomIdentity.translate(tx, ty).scale(targetScale);
-        svg.transition().duration(400).call(zoom.transform as any, transform);
+        zoom.transform(
+          svg
+            .transition()
+            .duration(400) as unknown as Parameters<typeof zoom.transform>[0],
+          transform
+        );
         return;
       } catch {
         // Fallback to resetZoom
@@ -181,7 +207,11 @@ export function AttackFlowSection({
     }
 
     try {
-      gv.resetZoom(d3.transition().duration(400) as any);
+      gv.resetZoom(
+        d3
+          .transition()
+          .duration(400) as unknown as Parameters<typeof gv.resetZoom>[0]
+      );
     } catch {
       // Ignore fallback error
     }
@@ -209,7 +239,7 @@ export function AttackFlowSection({
         .fit(true)
         .zoom(true)
         .zoomScaleExtent([0.1, 6])
-        .onerror((err: any) => {
+        .onerror((err: unknown) => {
           if (!isCancelled) {
             setRenderError(String(err || "Graphviz render error"));
             setIsRendering(false);
@@ -226,6 +256,27 @@ export function AttackFlowSection({
         if (!svg.empty()) {
           svg.attr("width", "100%").attr("height", "100%");
 
+          // Sanitize the live SVG DOM: remove href / xlink:href to prevent XSS and unexpected navigation
+          svg.selectAll("a").each(function () {
+            const el = this as Element;
+            el.removeAttribute("href");
+            el.removeAttribute("xlink:href");
+            el.removeAttributeNS("http://www.w3.org/1999/xlink", "href");
+            el.removeAttribute("target");
+          });
+          svg.selectAll("a").attr("href", null).attr("xlink:href", null);
+
+          svg.selectAll("[href], [xlink\\:href]").each(function () {
+            const el = this as Element;
+            el.removeAttribute("href");
+            el.removeAttribute("xlink:href");
+            el.removeAttributeNS("http://www.w3.org/1999/xlink", "href");
+          });
+          svg
+            .selectAll("[href], [xlink\\:href]")
+            .attr("href", null)
+            .attr("xlink:href", null);
+
           // Make SVG nodes clickable to inspect in Spatial Canvas
           svg.selectAll<SVGGElement, unknown>(".node").each(function () {
             const nodeSelection = d3.select(this);
@@ -238,7 +289,7 @@ export function AttackFlowSection({
                   `Click to inspect [${nodeId}] on Spatial Canvas`
                 )
                 .style("cursor", "pointer")
-                .on("click", (event: any) => {
+                .on("click", (event: MouseEvent) => {
                   event.stopPropagation();
                   onJumpToNode(nodeId);
                 });
@@ -246,7 +297,7 @@ export function AttackFlowSection({
           });
         }
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (!isCancelled) {
         setRenderError(
           err instanceof Error ? err.message : "Diagram rendering error"
@@ -257,6 +308,26 @@ export function AttackFlowSection({
 
     return () => {
       isCancelled = true;
+      if (gvInstanceRef.current) {
+        try {
+          // Destroy or release worker/instance if supported
+          if (
+            typeof (
+              gvInstanceRef.current as unknown as { destroy?: () => void }
+            ).destroy === "function"
+          ) {
+            (
+              gvInstanceRef.current as unknown as { destroy: () => void }
+            ).destroy();
+          }
+        } catch {
+          // ignore
+        }
+        gvInstanceRef.current = null;
+      }
+      if (container) {
+        d3.select(container).selectAll("*").remove();
+      }
     };
   }, [adaptedDotString, showDiagramStage, onJumpToNode]);
 

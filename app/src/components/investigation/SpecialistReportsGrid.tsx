@@ -183,6 +183,281 @@ function ArrowUpRightIcon({ className }: { className?: string }) {
   );
 }
 
+function renderMitreChips(mitre?: MitreTechnique[]) {
+  if (!mitre || !Array.isArray(mitre) || mitre.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5 pt-1">
+      {mitre.map((m, idx) => {
+        const truncatedName = m.name
+          ? m.name.length > 28
+            ? `${m.name.slice(0, 26)}...`
+            : m.name
+          : "";
+        return (
+          <span
+            key={`${m.id}-${idx}`}
+            className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400 font-medium"
+            title={m.name || ""}
+          >
+            <b className="text-teal-400 font-semibold">{m.id}</b> {truncatedName}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function renderFindings(findings?: string[]) {
+  if (!findings || !Array.isArray(findings) || findings.length === 0)
+    return null;
+  return (
+    <div className="pt-2">
+      <span className="text-[10px] font-mono text-slate-500 uppercase font-semibold block mb-1.5">
+        Key Findings &amp; Discoveries:
+      </span>
+      <ul className="space-y-1.5 text-xs text-slate-300 list-disc list-inside">
+        {findings.map((finding, idx) => (
+          <li key={idx} className="leading-relaxed text-slate-300/90">
+            {finding}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function renderTargetChips(
+  targets?: Array<string | { id?: string; value?: string }>,
+  onJumpToNode?: (nodeId: string) => void,
+  onCopyIoc?: (ioc: string) => void
+) {
+  if (!targets || !Array.isArray(targets) || targets.length === 0) return null;
+  return (
+    <div className="pt-2">
+      <span className="text-[10px] font-mono text-slate-500 uppercase font-semibold block mb-1.5">
+        Investigated Targets &amp; Artifacts:
+      </span>
+      <div className="flex flex-wrap gap-1.5">
+        {targets.map((t, idx) => {
+          const val =
+            typeof t === "string"
+              ? t
+              : t.id || t.value || JSON.stringify(t);
+          return (
+            <span
+              key={`${val}-${idx}`}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950/80 border border-slate-800 text-xs font-mono text-slate-300"
+            >
+              <span
+                className="truncate max-w-[180px] xl:max-w-[240px]"
+                title={val}
+              >
+                {val}
+              </span>
+              {onCopyIoc && (
+                <button
+                  type="button"
+                  onClick={() => onCopyIoc(val)}
+                  title="Copy"
+                  className="hover:text-white p-0.5 text-slate-500 transition-colors"
+                >
+                  <CopyIcon className="w-3 h-3" />
+                </button>
+              )}
+              {onJumpToNode && (
+                <button
+                  type="button"
+                  onClick={() => onJumpToNode(val)}
+                  title="View in Canvas"
+                  className="hover:text-teal-400 p-0.5 text-slate-500 transition-colors"
+                >
+                  <ArrowUpRightIcon className="w-3 h-3" />
+                </button>
+              )}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export type SpecialistTheme = "amber" | "teal" | "sky";
+
+export interface SpecialistThemeStyles {
+  border: string;
+  iconContainer: string;
+  badge: string;
+  verdictCol: string;
+  accentText: string;
+}
+
+export const SPECIALIST_THEMES: Record<SpecialistTheme, SpecialistThemeStyles> = {
+  amber: {
+    border: "border-amber-500/30",
+    iconContainer:
+      "bg-amber-500/15 text-amber-400 border border-amber-500/30 shadow-amber-500/10",
+    badge: "bg-amber-950 text-amber-300 border border-amber-800/60",
+    verdictCol: "bg-amber-500/20 text-amber-300 border-amber-500/40",
+    accentText: "text-amber-400",
+  },
+  sky: {
+    border: "border-sky-500/30",
+    iconContainer:
+      "bg-sky-500/15 text-sky-400 border border-sky-500/30 shadow-sky-500/10",
+    badge: "bg-sky-950 text-sky-300 border border-sky-800/60",
+    verdictCol: "bg-sky-500/20 text-sky-300 border-sky-500/40",
+    accentText: "text-sky-400",
+  },
+  teal: {
+    border: "border-teal-500/30",
+    iconContainer:
+      "bg-teal-500/15 text-teal-400 border border-teal-500/30 shadow-teal-500/10",
+    badge: "bg-teal-950 text-teal-300 border border-teal-800/60",
+    verdictCol: "bg-teal-500/20 text-teal-300 border-teal-500/40",
+    accentText: "text-teal-400",
+  },
+};
+
+export interface SpecialistCardProps {
+  theme: SpecialistTheme;
+  icon: React.ReactNode;
+  title: string;
+  agentBadge: string;
+  subtitle: string;
+  synthesisIcon: React.ReactNode;
+  defaultSummary?: string;
+  report?: SpecialistReportData | null;
+  reportData?: SpecialistReportData | null;
+  expanded?: boolean;
+  isExpanded?: boolean;
+  toggleExpanded?: () => void;
+  onToggleExpanded?: () => void;
+  expandButtonIcon: React.ReactNode;
+  expandButtonLabel: string;
+  targets?: Array<string | { id?: string; value?: string }>;
+  onJumpToNode: (nodeId: string) => void;
+  onCopyIoc: (ioc: string) => void;
+}
+
+export function SpecialistCard({
+  theme,
+  icon,
+  title,
+  agentBadge,
+  subtitle,
+  synthesisIcon,
+  defaultSummary = "Analysis completed.",
+  report,
+  reportData,
+  expanded,
+  isExpanded,
+  toggleExpanded,
+  onToggleExpanded,
+  expandButtonIcon,
+  expandButtonLabel,
+  targets = [],
+  onJumpToNode,
+  onCopyIoc,
+}: SpecialistCardProps) {
+  const currentReport = report || reportData;
+  if (!currentReport) return null;
+
+  const styles = SPECIALIST_THEMES[theme] || SPECIALIST_THEMES.amber;
+  const isMal = (currentReport.verdict || "")
+    .toUpperCase()
+    .includes("MALICIOUS");
+  const verdictCol = isMal
+    ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
+    : styles.verdictCol;
+
+  const isCardExpanded = Boolean(expanded ?? isExpanded);
+  const handleToggle = toggleExpanded || onToggleExpanded || (() => {});
+
+  return (
+    <div
+      className={`rounded-2xl bg-gradient-to-b from-slate-900/90 to-slate-950 border ${styles.border} p-5 space-y-4 shadow-xl flex flex-col justify-between`}
+    >
+      <div className="space-y-3">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-800/80">
+          <div className="flex items-center gap-3">
+            <div
+              className={`w-10 h-10 rounded-xl ${styles.iconContainer} flex items-center justify-center font-bold shadow-md shrink-0`}
+            >
+              {icon}
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="font-bold text-sm text-white">{title}</h4>
+                <span
+                  className={`text-[9px] font-mono px-2 py-0.5 rounded ${styles.badge} font-semibold`}
+                >
+                  {agentBadge}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400">{subtitle}</p>
+            </div>
+          </div>
+          <div className="flex flex-col items-end gap-1 shrink-0">
+            <span
+              className={`text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full border ${verdictCol}`}
+            >
+              {currentReport.verdict || "ANALYZED"}
+            </span>
+            {currentReport.confidence && (
+              <span className="text-[9px] font-mono text-slate-500 uppercase">
+                {currentReport.confidence} CONFIDENCE
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Specialist Synthesis Box */}
+        <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/90 text-xs text-slate-300 leading-relaxed font-sans">
+          <div
+            className={`flex items-center gap-1.5 ${styles.accentText} font-semibold text-[11px] mb-1 font-mono uppercase`}
+          >
+            {synthesisIcon}
+            <span>Specialist Synthesis:</span>
+          </div>
+          {currentReport.summary || defaultSummary}
+        </div>
+
+        {renderMitreChips(currentReport.mitre_attack)}
+        {renderFindings(currentReport.key_findings)}
+        {renderTargetChips(targets, onJumpToNode, onCopyIoc)}
+      </div>
+
+      {/* Expandable Detailed Technical Report */}
+      {currentReport.markdown_report && (
+        <div className="pt-3 border-t border-slate-800/60 mt-2">
+          <button
+            type="button"
+            onClick={handleToggle}
+            className="w-full py-2 px-3 rounded-lg bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold flex items-center justify-between transition-colors"
+          >
+            <span className="flex items-center gap-2 font-mono">
+              {expandButtonIcon}
+              <span>{expandButtonLabel}</span>
+            </span>
+            <span className="text-[11px] text-slate-400 font-mono">
+              {isCardExpanded ? "Hide Report ▴" : "View Report ▾"}
+            </span>
+          </button>
+          {isCardExpanded && (
+            <div className="mt-3 p-4 rounded-xl bg-slate-950 border border-slate-800/90 threat-dossier-prose text-xs text-slate-300 max-h-[500px] overflow-y-auto">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {currentReport.markdown_report}
+              </ReactMarkdown>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SpecialistReportsGrid({
   job,
   onJumpToNode,
@@ -213,103 +488,8 @@ export function SpecialistReportsGrid({
     );
   }
 
-  const renderMitreChips = (mitre?: MitreTechnique[]) => {
-    if (!mitre || !Array.isArray(mitre) || mitre.length === 0) return null;
-    return (
-      <div className="flex flex-wrap gap-1.5 pt-1">
-        {mitre.map((m, idx) => {
-          const truncatedName = m.name
-            ? m.name.length > 28
-              ? `${m.name.slice(0, 26)}...`
-              : m.name
-            : "";
-          return (
-            <span
-              key={`${m.id}-${idx}`}
-              className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400 font-medium"
-              title={m.name || ""}
-            >
-              <b className="text-teal-400 font-semibold">{m.id}</b>{" "}
-              {truncatedName}
-            </span>
-          );
-        })}
-      </div>
-    );
-  };
-
-  const renderFindings = (findings?: string[]) => {
-    if (!findings || !Array.isArray(findings) || findings.length === 0)
-      return null;
-    return (
-      <div className="pt-2">
-        <span className="text-[10px] font-mono text-slate-500 uppercase font-semibold block mb-1.5">
-          Key Findings &amp; Discoveries:
-        </span>
-        <ul className="space-y-1.5 text-xs text-slate-300 list-disc list-inside">
-          {findings.map((finding, idx) => (
-            <li key={idx} className="leading-relaxed text-slate-300/90">
-              {finding}
-            </li>
-          ))}
-        </ul>
-      </div>
-    );
-  };
-
-  const renderTargetChips = (
-    targets?: Array<string | { id?: string; value?: string }>
-  ) => {
-    if (!targets || !Array.isArray(targets) || targets.length === 0) return null;
-    return (
-      <div className="pt-2">
-        <span className="text-[10px] font-mono text-slate-500 uppercase font-semibold block mb-1.5">
-          Investigated Targets &amp; Artifacts:
-        </span>
-        <div className="flex flex-wrap gap-1.5">
-          {targets.map((t, idx) => {
-            const val =
-              typeof t === "string"
-                ? t
-                : t.id || t.value || JSON.stringify(t);
-            return (
-              <span
-                key={`${val}-${idx}`}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950/80 border border-slate-800 text-xs font-mono text-slate-300"
-              >
-                <span
-                  className="truncate max-w-[180px] xl:max-w-[240px]"
-                  title={val}
-                >
-                  {val}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onCopyIoc(val)}
-                  title="Copy"
-                  className="hover:text-white p-0.5 text-slate-500 transition-colors"
-                >
-                  <CopyIcon className="w-3 h-3" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onJumpToNode(val)}
-                  title="View in Canvas"
-                  className="hover:text-teal-400 p-0.5 text-slate-500 transition-colors"
-                >
-                  <ArrowUpRightIcon className="w-3 h-3" />
-                </button>
-              </span>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
-
   return (
     <div className="my-8 space-y-4 not-prose">
-      <div id="section-specialist-reports" className="scroll-mt-20" />
       <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-teal-500/20 text-teal-400 flex items-center justify-center font-bold shadow-md shadow-teal-500/10">
@@ -331,187 +511,49 @@ export function SpecialistReportsGrid({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
-        {malware && (() => {
-          const isMal = (malware.verdict || "")
-            .toUpperCase()
-            .includes("MALICIOUS");
-          const verdictCol = isMal
-            ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
-            : "bg-amber-500/20 text-amber-300 border-amber-500/40";
-          const targets =
-            malware.analyzed_targets || malware.iocs_extracted || [];
+        {malware && (
+          <SpecialistCard
+            theme="amber"
+            icon={<BinaryIcon className="w-5 h-5" />}
+            title="Malware Analysis Specialist"
+            agentBadge="AGENT-01"
+            subtitle="Binary disassembly, LOLBin execution, living-off-the-land & script analysis"
+            synthesisIcon={<TerminalIcon className="w-3.5 h-3.5" />}
+            defaultSummary="Malware analysis completed."
+            report={malware}
+            expanded={malwareExpanded}
+            onToggleExpanded={() => setMalwareExpanded((prev) => !prev)}
+            expandButtonIcon={
+              <FileCodeIcon className="w-3.5 h-3.5 text-amber-400" />
+            }
+            expandButtonLabel="Technical Reverse-Engineering Teardown"
+            targets={malware.analyzed_targets || malware.iocs_extracted || []}
+            onJumpToNode={onJumpToNode}
+            onCopyIoc={onCopyIoc}
+          />
+        )}
 
-          return (
-            <div className="rounded-2xl bg-gradient-to-b from-slate-900/90 to-slate-950 border border-amber-500/30 p-5 space-y-4 shadow-xl flex flex-col justify-between">
-              <div className="space-y-3">
-                {/* Header */}
-                <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-800/80">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/30 flex items-center justify-center font-bold shadow-md shadow-amber-500/10 shrink-0">
-                      <BinaryIcon className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-bold text-sm text-white">
-                          Malware Analysis Specialist
-                        </h4>
-                        <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800/60 font-semibold">
-                          AGENT-01
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-400">
-                        Binary disassembly, LOLBin execution, living-off-the-land
-                        &amp; script analysis
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex flex-col items-end gap-1 shrink-0">
-                    <span
-                      className={`text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full border ${verdictCol}`}
-                    >
-                      {malware.verdict || "ANALYZED"}
-                    </span>
-                    {malware.confidence && (
-                      <span className="text-[9px] font-mono text-slate-500 uppercase">
-                        {malware.confidence} CONFIDENCE
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Specialist Synthesis Box */}
-                <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/90 text-xs text-slate-300 leading-relaxed font-sans">
-                  <div className="flex items-center gap-1.5 text-amber-400 font-semibold text-[11px] mb-1 font-mono uppercase">
-                    <TerminalIcon className="w-3.5 h-3.5" />
-                    <span>Specialist Synthesis:</span>
-                  </div>
-                  {malware.summary || "Malware analysis completed."}
-                </div>
-
-                {renderMitreChips(malware.mitre_attack)}
-                {renderFindings(malware.key_findings)}
-                {renderTargetChips(targets)}
-              </div>
-
-              {/* Expandable Detailed Technical Report */}
-              {malware.markdown_report && (
-                <div className="pt-3 border-t border-slate-800/60 mt-2">
-                  <button
-                    type="button"
-                    onClick={() => setMalwareExpanded((prev) => !prev)}
-                    className="w-full py-2 px-3 rounded-lg bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold flex items-center justify-between transition-colors"
-                  >
-                    <span className="flex items-center gap-2 font-mono">
-                      <FileCodeIcon className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Technical Reverse-Engineering Teardown</span>
-                    </span>
-                    <span className="text-[11px] text-slate-400 font-mono">
-                      {malwareExpanded ? "Hide Report ▴" : "View Report ▾"}
-                    </span>
-                  </button>
-                  {malwareExpanded && (
-                    <div className="mt-3 p-4 rounded-xl bg-slate-950 border border-slate-800/90 threat-dossier-prose text-xs text-slate-300 max-h-[500px] overflow-y-auto">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {malware.markdown_report}
-                      </ReactMarkdown>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })()}
-
-        {infra && (() => {
-          const isMal = (infra.verdict || "")
-            .toUpperCase()
-            .includes("MALICIOUS");
-          const verdictCol = isMal
-            ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
-            : "bg-sky-500/20 text-sky-300 border-sky-500/40";
-          const targets =
-            infra.analyzed_targets || infra.iocs_extracted || [];
-
-          return (
-            <div className="rounded-2xl bg-gradient-to-b from-slate-900/90 to-slate-950 border border-sky-500/30 p-5 space-y-4 shadow-xl flex flex-col justify-between">
-              <div className="space-y-3">
-                {/* Header */}
-                <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-800/80">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-sky-500/15 text-sky-400 border border-sky-500/30 flex items-center justify-center font-bold shadow-md shadow-sky-500/10 shrink-0">
-                      <GlobeIcon className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-bold text-sm text-white">
-                          Infrastructure &amp; Network Specialist
-                        </h4>
-                        <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-800/60 font-semibold">
-                          AGENT-02
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-400">
-                        Passive DNS, registrar profiling, ASN routing, TLS
-                        fingerprints &amp; C2 pivoting
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex flex-col items-end gap-1 shrink-0">
-                    <span
-                      className={`text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full border ${verdictCol}`}
-                    >
-                      {infra.verdict || "ANALYZED"}
-                    </span>
-                    {infra.confidence && (
-                      <span className="text-[9px] font-mono text-slate-500 uppercase">
-                        {infra.confidence} CONFIDENCE
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Specialist Synthesis Box */}
-                <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/90 text-xs text-slate-300 leading-relaxed font-sans">
-                  <div className="flex items-center gap-1.5 text-sky-400 font-semibold text-[11px] mb-1 font-mono uppercase">
-                    <RadioIcon className="w-3.5 h-3.5" />
-                    <span>Specialist Synthesis:</span>
-                  </div>
-                  {infra.summary || "Infrastructure analysis completed."}
-                </div>
-
-                {renderMitreChips(infra.mitre_attack)}
-                {renderFindings(infra.key_findings)}
-                {renderTargetChips(targets)}
-              </div>
-
-              {/* Expandable Detailed Technical Report */}
-              {infra.markdown_report && (
-                <div className="pt-3 border-t border-slate-800/60 mt-2">
-                  <button
-                    type="button"
-                    onClick={() => setInfraExpanded((prev) => !prev)}
-                    className="w-full py-2 px-3 rounded-lg bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold flex items-center justify-between transition-colors"
-                  >
-                    <span className="flex items-center gap-2 font-mono">
-                      <NetworkIcon className="w-3.5 h-3.5 text-sky-400" />
-                      <span>Technical Infrastructure Teardown</span>
-                    </span>
-                    <span className="text-[11px] text-slate-400 font-mono">
-                      {infraExpanded ? "Hide Report ▴" : "View Report ▾"}
-                    </span>
-                  </button>
-                  {infraExpanded && (
-                    <div className="mt-3 p-4 rounded-xl bg-slate-950 border border-slate-800/90 threat-dossier-prose text-xs text-slate-300 max-h-[500px] overflow-y-auto">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {infra.markdown_report}
-                      </ReactMarkdown>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })()}
+        {infra && (
+          <SpecialistCard
+            theme="sky"
+            icon={<GlobeIcon className="w-5 h-5" />}
+            title="Infrastructure & Network Specialist"
+            agentBadge="AGENT-02"
+            subtitle="Passive DNS, registrar profiling, ASN routing, TLS fingerprints & C2 pivoting"
+            synthesisIcon={<RadioIcon className="w-3.5 h-3.5" />}
+            defaultSummary="Infrastructure analysis completed."
+            report={infra}
+            expanded={infraExpanded}
+            onToggleExpanded={() => setInfraExpanded((prev) => !prev)}
+            expandButtonIcon={
+              <NetworkIcon className="w-3.5 h-3.5 text-sky-400" />
+            }
+            expandButtonLabel="Technical Infrastructure Teardown"
+            targets={infra.analyzed_targets || infra.iocs_extracted || []}
+            onJumpToNode={onJumpToNode}
+            onCopyIoc={onCopyIoc}
+          />
+        )}
       </div>
     </div>
   );

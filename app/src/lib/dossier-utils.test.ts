@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  adaptDotForDarkTheme,
   deriveSwimLanes,
   extractFallbackIocs,
   normalizeReportSections,
@@ -14,7 +15,7 @@ import {
 import type { DossierJob } from "./dossier-types";
 
 function loadSampleJson(filename: string): DossierJob {
-  const filePath = path.resolve(process.cwd(), "..", "prototype", "data", filename);
+  const filePath = path.resolve(process.cwd(), "src", "lib", "__fixtures__", filename);
   return JSON.parse(fs.readFileSync(filePath, "utf8")) as DossierJob;
 }
 
@@ -130,4 +131,126 @@ Tech text.`;
   assert.match(sec2.markdownBody, /### Initial Timeline Notes/);
   assert.equal(sec4.markdownBody, "");
   assert.equal(sec6.markdownBody, "");
+});
+
+test("normalizeReportSections handles heading-level drift (#, ##, ####) and merges repeated canonical headings", () => {
+  const markdownWithDriftAndRepeats = `# 1. Executive Summary
+Overview part 1.
+
+## 2. Attack Narrative
+Initial infection vectors.
+
+#### Mutex Creation
+Mutex details under section 2.
+
+### 2. Attack Narrative: Secondary Phase
+Secondary lateral movement notes.
+
+#### 5. Technical Analysis
+Reverse engineering deep dive.
+
+### 5. Technical Analysis
+Further binary disassembly.`;
+
+  const normalized = normalizeReportSections(markdownWithDriftAndRepeats);
+  const headings = (normalized.match(/^###\s+\d+\..*$/gm) || []).map((h) => h.trim());
+
+  assert.equal(headings.length, 7);
+  assert.match(headings[0], /^### 1\. Executive Summary/);
+  assert.match(headings[1], /^### 2\. Attack Narrative/);
+  assert.match(headings[4], /^### 5\. Technical Analysis/);
+
+  assert.match(normalized, /Overview part 1\./);
+  assert.match(normalized, /Initial infection vectors\./);
+  assert.match(normalized, /#### Mutex Creation/);
+  assert.match(normalized, /Secondary lateral movement notes\./);
+  assert.match(normalized, /Reverse engineering deep dive\./);
+  assert.match(normalized, /Further binary disassembly\./);
+});
+
+test("parseDossierReport ignores non-IOC JSON blocks earlier in the report and objects without value, falling back to extractFallbackIocs", () => {
+  const markdownWithEarlyJson = `### 1. Executive Summary
+Executive overview.
+
+### 3. Specialist Reports
+Example payload configuration:
+\`\`\`json
+[
+  { "setting": "debug", "enabled": true }
+]
+\`\`\`
+
+\`\`\`dot
+digraph G {
+  "target.exe" [label="target.exe", color="#ef4444"];
+  "198.51.100.1" [label="198.51.100.1", color="#ef4444"];
+  "target.exe" -> "198.51.100.1" [label="c2_connect"];
+}
+\`\`\`
+
+### 7. Appendix
+\`\`\`json
+[
+  { "type": "ip", "value": "   ", "notes": "blank value should be discarded" }
+]
+\`\`\`
+`;
+
+  const parsed = parseDossierReport(markdownWithEarlyJson);
+  assert.equal(parsed.appendixIocs.length, 2);
+  assert.equal(parsed.appendixIocs[0].value, "target.exe");
+  assert.equal(parsed.appendixIocs[1].value, "198.51.100.1");
+});
+
+test("parseDotToGraph sets threatScore to undefined for non-root nodes and preserves rootGtiScore for root node", () => {
+  const dot = `digraph G {
+    "malicious.exe" [label="malicious.exe", color="#ef4444"];
+    "legit_decoy.dll" [label="legit_decoy.dll\\n(Legitimate)", style="dashed"];
+    "suspicious_tool.exe" [label="suspicious_tool.exe\\n(LOLBin)", color="#f59e0b"];
+    "unknown_host" [label="unknown_host"];
+    "malicious.exe" -> "legit_decoy.dll";
+    "malicious.exe" -> "suspicious_tool.exe";
+    "malicious.exe" -> "unknown_host";
+    "implicit_node" -> "malicious.exe";
+  }`;
+
+  const graph = parseDotToGraph(dot, "malicious.exe", 95);
+  const rootNode = graph.nodes.find((n) => n.id === "malicious.exe");
+  const decoyNode = graph.nodes.find((n) => n.id === "legit_decoy.dll");
+  const suspNode = graph.nodes.find((n) => n.id === "suspicious_tool.exe");
+  const unkNode = graph.nodes.find((n) => n.id === "unknown_host");
+  const implicitNode = graph.nodes.find((n) => n.id === "implicit_node");
+
+  assert.ok(rootNode);
+  assert.equal(rootNode.threatScore, 95);
+  assert.equal(rootNode.verdict, "MALICIOUS");
+
+  assert.ok(decoyNode);
+  assert.equal(decoyNode.threatScore, undefined);
+  assert.equal(decoyNode.verdict, "BENIGN");
+
+  assert.ok(suspNode);
+  assert.equal(suspNode.threatScore, undefined);
+  assert.equal(suspNode.verdict, "SUSPICIOUS");
+
+  assert.ok(unkNode);
+  assert.equal(unkNode.threatScore, undefined);
+  assert.equal(unkNode.verdict, "UNKNOWN");
+
+  assert.ok(implicitNode);
+  assert.equal(implicitNode.threatScore, undefined);
+  assert.equal(implicitNode.verdict, "UNKNOWN");
+});
+
+test("adaptDotForDarkTheme strips URL and href attributes to sanitize malicious javascript links", () => {
+  const maliciousDot = `digraph G {
+    "node1" [label="node1", URL="javascript:alert('XSS')", color="#ef4444"];
+    "node2" [label="node2", href="javascript:void(0)"];
+  }`;
+
+  const adapted = adaptDotForDarkTheme(maliciousDot);
+  assert.doesNotMatch(adapted, /\bURL\s*=/i);
+  assert.doesNotMatch(adapted, /\bhref\s*=/i);
+  assert.match(adapted, /bgcolor="transparent"/);
+  assert.match(adapted, /rankdir=LR/);
 });

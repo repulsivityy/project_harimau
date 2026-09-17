@@ -60,8 +60,15 @@ body {
   font-family: var(--font-epilogue);
 }
 
-/* Fractured Precision: Global Sharp Edges */
-* {
+/* Fractured Precision: Global Sharp Edges
+ *
+ * Applies everywhere EXCEPT the Investigation Threat Dossier workbench, which was
+ * designed against the rounded prototype (`prototype/index.html`). Anything
+ * inside `.dossier-surface` opts out of the reset so its `rounded-*`
+ * utilities, the `.threat-dossier-prose` radii, and the circular Spatial Canvas
+ * entity nodes render as designed.
+ */
+*:not(.dossier-surface, .dossier-surface *) {
   border-radius: 0 !important;
 }
 
@@ -245,3 +252,134 @@ body {
 .animate-slide-in-right {
   animation: slide-in-right 0.25s ease-out;
 }
+
+/* Threat Dossier Prose Styling */
+.threat-dossier-prose h1 {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #ffffff;
+  margin-top: 2rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid #1e293b;
+  padding-bottom: 0.5rem;
+}
+
+.threat-dossier-prose h2 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #f8fafc;
+  margin-top: 1.75rem;
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid #1e293b;
+  padding-bottom: 0.35rem;
+}
+
+.threat-dossier-prose h3 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #2dd4bf;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.threat-dossier-prose h4 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #cbd5e1;
+  margin-top: 1rem;
+  margin-bottom: 0.35rem;
+}
+
+.threat-dossier-prose p {
+  margin-bottom: 1rem;
+  line-height: 1.7;
+  color: #cbd5e1;
+  font-size: 0.875rem;
+}
+
+.threat-dossier-prose ul {
+  list-style-type: disc;
+  padding-left: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.threat-dossier-prose ol {
+  list-style-type: decimal;
+  padding-left: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.threat-dossier-prose li {
+  margin-bottom: 0.35rem;
+  color: #cbd5e1;
+  font-size: 0.875rem;
+}
+
+.threat-dossier-prose code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.85em;
+  background: rgba(15, 23, 42, 0.8);
+  color: #2dd4bf;
+  padding: 0.15rem 0.35rem;
+  border-radius: 0.25rem;
+  border: 1px solid rgba(45, 212, 191, 0.2);
+}
+
+.threat-dossier-prose pre {
+  background: #0b1120;
+  border: 1px solid #1e293b;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  overflow-x: auto;
+  margin-bottom: 1.25rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+
+.threat-dossier-prose pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: inherit;
+}
+
+.threat-dossier-prose blockquote {
+  border-left: 3px solid #14b8a6;
+  font-style: italic;
+  color: #94a3b8;
+  margin: 1rem 0;
+  background: rgba(20, 184, 166, 0.05);
+  padding: 0.75rem 1rem;
+}
+
+.threat-dossier-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1.5rem;
+  font-size: 0.8rem;
+}
+
+.threat-dossier-prose th {
+  background: #0f172a;
+  padding: 0.6rem 0.75rem;
+  text-align: left;
+  font-weight: 600;
+  color: #94a3b8;
+  border-bottom: 1px solid #1e293b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+}
+
+.threat-dossier-prose td {
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid #1e293b;
+  color: #cbd5e1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.threat-dossier-prose tr:hover td {
+  background: rgba(30, 41, 59, 0.5);
+}
+

@@ -4,12 +4,13 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import type { DossierJob } from "@/lib/dossier-types";
 
 export default function Home() {
   const router = useRouter();
   const [ioc, setIoc] = useState("");
   const [depth, setDepth] = useState(2);
-  const [recentJobs, setRecentJobs] = useState<any[]>([]);
+  const [recentJobs, setRecentJobs] = useState<DossierJob[]>([]);
 
   // Fetch past jobs from Cloud SQL for the history dropdown
   useEffect(() => {
@@ -171,7 +172,7 @@ export default function Home() {
               Recent Investigations
             </h2>
             <div className="space-y-3">
-              {recentJobs.slice(0, 3).map((job: any) => (
+              {recentJobs.slice(0, 3).map((job) => (
                 <Link key={job.job_id} href={`/investigate/${job.job_id}`} className="flex items-center justify-between group cursor-pointer">
                   <div className="flex flex-col">
                     <span className="font-headline text-base tracking-tighter text-on-surface group-hover:text-primary transition-colors">{job.ioc}</span>

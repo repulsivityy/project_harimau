@@ -10,12 +10,12 @@ import {
   normalizeReportSections,
   parseDossierReport,
   parseDotToGraph,
-} from "./dossier-utils";
+} from "../src/lib/dossier-utils";
 
-import type { DossierJob } from "./dossier-types";
+import type { DossierJob } from "../src/lib/dossier-types";
 
 function loadSampleJson(filename: string): DossierJob {
-  const filePath = path.resolve(process.cwd(), "src", "lib", "__fixtures__", filename);
+  const filePath = path.resolve(process.cwd(), "tests", "fixtures", filename);
   return JSON.parse(fs.readFileSync(filePath, "utf8")) as DossierJob;
 }
 

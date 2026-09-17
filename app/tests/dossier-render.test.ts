@@ -5,18 +5,18 @@ import test from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { DossierMasthead } from "../components/investigation/DossierMasthead";
-import { SpecialistReportsGrid } from "../components/investigation/SpecialistReportsGrid";
-import { DossierCompanionRail } from "../components/investigation/DossierCompanionRail";
-import { AttackFlowSection } from "../components/investigation/AttackFlowSection";
-import { TacticalSwimLanes } from "../components/investigation/TacticalSwimLanes";
-import { DecoyInsightBanner } from "../components/investigation/DecoyInsightBanner";
-import { AppendixIocTable } from "../components/investigation/AppendixIocTable";
-import { deriveSwimLanes, parseDossierReport } from "./dossier-utils";
-import type { DossierJob } from "./dossier-types";
+import { DossierMasthead } from "../src/components/investigation/DossierMasthead";
+import { SpecialistReportsGrid } from "../src/components/investigation/SpecialistReportsGrid";
+import { DossierCompanionRail } from "../src/components/investigation/DossierCompanionRail";
+import { AttackFlowSection } from "../src/components/investigation/AttackFlowSection";
+import { TacticalSwimLanes } from "../src/components/investigation/TacticalSwimLanes";
+import { DecoyInsightBanner } from "../src/components/investigation/DecoyInsightBanner";
+import { AppendixIocTable } from "../src/components/investigation/AppendixIocTable";
+import { deriveSwimLanes, parseDossierReport } from "../src/lib/dossier-utils";
+import type { DossierJob } from "../src/lib/dossier-types";
 
 function loadSampleJob(filename: string): DossierJob {
-  const samplePath = path.resolve(process.cwd(), "..", "prototype", "data", filename);
+  const samplePath = path.resolve(process.cwd(), "tests", "fixtures", filename);
   const raw = fs.readFileSync(samplePath, "utf8");
   return JSON.parse(raw) as DossierJob;
 }

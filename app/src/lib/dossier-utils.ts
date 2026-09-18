@@ -123,9 +123,26 @@ export function normalizeReportSections(markdown: string): string {
     }
 
     if (matchedSection) {
+      const isRepeat = bucketMap.has(matchedSection.number);
       currentBucket = matchedSection.number;
-      if (!bucketMap.has(currentBucket)) {
+      if (!isRepeat) {
         bucketMap.set(currentBucket, { headerSuffix: suffix, bodyLines: [] });
+      } else {
+        // A repeated/variant heading for an already-bucketed section (e.g. a
+        // second "### 2. Attack Narrative" further down the report). Keep
+        // its text as a sub-heading in the body instead of silently
+        // dropping it while still merging the content into the same
+        // canonical section. Strip the leading section number too (not just
+        // the "#" markers) so the synthesized "####" line can't itself be
+        // re-matched as a numbered heading by parseDossierReport's second
+        // pass over this function's output.
+        const headingText = trimmed
+          .replace(/^#{1,4}\s*/, "")
+          .replace(/^\d+\.\s*/, "")
+          .trim();
+        if (headingText) {
+          bucketMap.get(currentBucket)!.bodyLines.push(`#### ${headingText}`);
+        }
       }
     } else {
       if (currentBucket === null) {
@@ -176,7 +193,7 @@ export function normalizeReportSections(markdown: string): string {
 export function parseDotToGraph(
   dotString: string,
   rootIoc: string = "",
-  rootGtiScore: number = 92
+  rootGtiScore: number | undefined = undefined
 ): ParsedDotGraph {
   const nodesMap = new Map<string, ParsedDotNode>();
   const edges: ParsedDotEdge[] = [];
@@ -407,7 +424,7 @@ export function deriveSwimLanes(
       entityType: rootJob?.ioc_type || "target",
       verdict: rootJob?.risk_level || "TARGET",
       threatScore:
-        typeof rootJob?.gti_score === "number" ? rootJob.gti_score : 90,
+        typeof rootJob?.gti_score === "number" ? rootJob.gti_score : undefined,
       isMalicious: true,
     });
   }
@@ -660,7 +677,7 @@ export function parseDossierReport(
   }
 
   const parsedDotGraph = rawDotCode
-    ? parseDotToGraph(rawDotCode, job?.ioc || "", job?.gti_score ?? 92)
+    ? parseDotToGraph(rawDotCode, job?.ioc || "", job?.gti_score ?? undefined)
     : { nodes: [], edges: [] };
 
   const appendixIocs =
@@ -728,6 +745,22 @@ export function parseDossierReport(
  * Adapt a Graphviz DOT string for dark theme display, enforcing transparent background,
  * specified rankdir orientation, and stripping potentially malicious URL/href attributes.
  */
+// Applies attribute-separator cleanup regexes only to the portions of a DOT
+// string that fall outside quoted string literals, so a label like
+// `label="a, b"` or `label="x]y"` is never corrupted by the cleanup.
+function collapseAttributeSeparatorsOutsideQuotes(dot: string): string {
+  const segments = dot.split(/("(?:[^"\\]|\\.)*")/g);
+  return segments
+    .map((segment, index) => {
+      if (index % 2 === 1) return segment; // quoted literal, leave untouched
+      return segment
+        .replace(/,(?:\s*,)+/g, ",")
+        .replace(/,\s*\]/g, "]")
+        .replace(/\[\s*,/g, "[");
+    })
+    .join("");
+}
+
 export function adaptDotForDarkTheme(
   rawDot: string | null | undefined,
   ori: "LR" | "TB" | string = "LR"
@@ -741,9 +774,7 @@ export function adaptDotForDarkTheme(
 
   // Strip any URL="..." or href="..." attributes to prevent malicious javascript: links at the utility level
   adapted = adapted.replace(/\b(?:URL|href)\s*=\s*(?:"[^"]*"|'[^']*')/gi, "");
-  adapted = adapted.replace(/,\s*,/g, ",");
-  adapted = adapted.replace(/,\s*\]/g, "]");
-  adapted = adapted.replace(/\[\s*,/g, "[");
+  adapted = collapseAttributeSeparatorsOutsideQuotes(adapted);
 
   if (/rankdir\s*=\s*[A-Za-z]+/i.test(adapted)) {
     adapted = adapted.replace(/rankdir\s*=\s*[A-Za-z]+/gi, `rankdir=${ori}`);

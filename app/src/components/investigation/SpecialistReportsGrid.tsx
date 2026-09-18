@@ -328,10 +328,7 @@ export interface SpecialistCardProps {
   synthesisIcon: React.ReactNode;
   defaultSummary?: string;
   report?: SpecialistReportData | null;
-  reportData?: SpecialistReportData | null;
   expanded?: boolean;
-  isExpanded?: boolean;
-  toggleExpanded?: () => void;
   onToggleExpanded?: () => void;
   expandButtonIcon: React.ReactNode;
   expandButtonLabel: string;
@@ -349,10 +346,7 @@ export function SpecialistCard({
   synthesisIcon,
   defaultSummary = "Analysis completed.",
   report,
-  reportData,
   expanded,
-  isExpanded,
-  toggleExpanded,
   onToggleExpanded,
   expandButtonIcon,
   expandButtonLabel,
@@ -360,7 +354,7 @@ export function SpecialistCard({
   onJumpToNode,
   onCopyIoc,
 }: SpecialistCardProps) {
-  const currentReport = report || reportData;
+  const currentReport = report;
   if (!currentReport) return null;
 
   const styles = SPECIALIST_THEMES[theme] || SPECIALIST_THEMES.amber;
@@ -371,8 +365,8 @@ export function SpecialistCard({
     ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
     : styles.verdictCol;
 
-  const isCardExpanded = Boolean(expanded ?? isExpanded);
-  const handleToggle = toggleExpanded || onToggleExpanded || (() => {});
+  const isCardExpanded = Boolean(expanded);
+  const handleToggle = onToggleExpanded || (() => {});
 
   return (
     <div

@@ -4,43 +4,12 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import * as d3 from "d3";
 import { graphviz } from "d3-graphviz";
 import type { AttackFlowSectionProps } from "@/lib/dossier-types";
+import { adaptDotForDarkTheme } from "@/lib/dossier-utils";
 import { DecoyInsightBanner } from "./DecoyInsightBanner";
 import { TacticalSwimLanes } from "./TacticalSwimLanes";
 
 type AttackFlowViewMode = "unified" | "diagram" | "sequence";
 type DotOrientation = "LR" | "TB";
-
-function buildAdaptedDot(rawDot: string | null, ori: DotOrientation): string {
-  const baseDot =
-    rawDot && rawDot.trim().length > 0
-      ? rawDot
-      : `digraph AttackFlow {\n  rankdir=${ori};\n  bgcolor="transparent";\n  node [shape=box, style="rounded,filled", fillcolor="#0f172a", color="#334155", fontcolor="#e2e8f0", fontname="monospace"];\n  "Target" [label="No DOT Graph Available"];\n}`;
-
-  let adapted = baseDot;
-  if (/rankdir\s*=\s*[A-Za-z]+/i.test(adapted)) {
-    adapted = adapted.replace(/rankdir\s*=\s*[A-Za-z]+/gi, `rankdir=${ori}`);
-  } else if (/digraph\s+[^{]*\{/i.test(adapted)) {
-    adapted = adapted.replace(/(digraph\s+[^{]*\{)/i, `$1\n  rankdir=${ori};`);
-  } else {
-    adapted = `digraph G {\n  rankdir=${ori};\n${adapted}\n}`;
-  }
-
-  adapted = adapted.replace(
-    /bgcolor\s*=\s*"[^"]*"/gi,
-    'bgcolor="transparent"'
-  );
-  if (!/bgcolor\s*=/i.test(adapted) && /digraph\s+[^{]*\{/i.test(adapted)) {
-    adapted = adapted.replace(
-      /(digraph\s+[^{]*\{)/i,
-      `$1\n  bgcolor="transparent";`
-    );
-  }
-
-  // Strip URL and href attributes to prevent XSS and unintended navigation
-  adapted = adapted.replace(/\b(?:URL|href)\s*=\s*"[^"]*"/gi, "");
-
-  return adapted;
-}
 
 export function AttackFlowSection({
   job,
@@ -62,12 +31,16 @@ export function AttackFlowSection({
   const diagramContainerRef = useRef<HTMLDivElement>(null);
   const gvInstanceRef = useRef<ReturnType<typeof graphviz> | null>(null);
 
-  // Sync orientation if rawDotCode changes externally
-  useEffect(() => {
+  // Sync orientation if rawDotCode changes externally. Adjusted during render
+  // (rather than in an effect) so a new rawDotCode never causes an extra
+  // render pass with a stale orientation.
+  const [prevRawDotCode, setPrevRawDotCode] = useState(rawDotCode);
+  if (rawDotCode !== prevRawDotCode) {
+    setPrevRawDotCode(rawDotCode);
     if (rawDotCode) {
       setOrientation(rawDotCode.includes("rankdir=TB") ? "TB" : "LR");
     }
-  }, [rawDotCode]);
+  }
 
   const decoyCount = useMemo(() => {
     const fromGraph =
@@ -80,7 +53,7 @@ export function AttackFlowSection({
   }, [parsedGraph, swimLanes]);
 
   const adaptedDotString = useMemo(
-    () => buildAdaptedDot(rawDotCode, orientation),
+    () => adaptDotForDarkTheme(rawDotCode, orientation),
     [rawDotCode, orientation]
   );
 
@@ -158,14 +131,16 @@ export function AttackFlowSection({
       parsedGraph?.nodes?.[0]?.id;
 
     let targetNodeEl: SVGGElement | null = null;
-    svg.selectAll<SVGGElement, unknown>(".node").each(function () {
-      const titleText = this.querySelector("title")?.textContent?.trim();
+    for (const nodeEl of svg.selectAll<SVGGElement, unknown>(".node").nodes()) {
+      const titleText = nodeEl.querySelector("title")?.textContent?.trim();
       if (rootId && titleText === rootId) {
-        targetNodeEl = this;
-      } else if (!targetNodeEl) {
-        targetNodeEl = this;
+        targetNodeEl = nodeEl;
+        break;
       }
-    });
+      if (!targetNodeEl) {
+        targetNodeEl = nodeEl;
+      }
+    }
 
     const graphG = svg.select<SVGGElement>("g.graph").node();
     if (targetNodeEl && graphG) {
@@ -298,12 +273,16 @@ export function AttackFlowSection({
         }
       });
     } catch (err: unknown) {
-      if (!isCancelled) {
-        setRenderError(
-          err instanceof Error ? err.message : "Diagram rendering error"
-        );
-        setIsRendering(false);
-      }
+      const message =
+        err instanceof Error ? err.message : "Diagram rendering error";
+      // Deferred to match the async callback pattern used by onerror/renderDot
+      // above, rather than setting state synchronously within the effect body.
+      queueMicrotask(() => {
+        if (!isCancelled) {
+          setRenderError(message);
+          setIsRendering(false);
+        }
+      });
     }
 
     return () => {

@@ -47,13 +47,6 @@ export default function Home() {
     }
   };
 
-  const rotationDegrees = (depth - 3) * 30;
-
-  const imageSrc =
-    process.env.NODE_ENV === "development"
-      ? "/tiger_logo.png?v=2"
-      : "/tiger_logo.png";
-
   return (
     <div className="min-h-screen bg-surface text-foreground relative flex flex-col selection:bg-primary selection:text-on-primary overflow-hidden font-body">
       {/* Background HUD elements */}

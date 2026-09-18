@@ -267,6 +267,7 @@ export default function InvestigatePage() {
   const [recentJobs, setRecentJobs] = useState<DossierJob[]>([]);
   const [showAgentDrawer, setShowAgentDrawer] = useState(false);
   const [copiedToast, setCopiedToast] = useState<string | null>(null);
+  const [jumpNotice, setJumpNotice] = useState<string | null>(null);
   const [pendingJumpNodeId, setPendingJumpNodeId] = useState<string | null>(null);
 
   const reactFlowRef = useRef<ReactFlowInstance<Node<CustomNodeData>, Edge> | null>(null);
@@ -288,10 +289,22 @@ export default function InvestigatePage() {
   const lastLogSignatureRef = useRef<string>("");
   const lastPendingJumpRef = useRef<string | null>(null);
   const jumpFilterAttemptsRef = useRef<number>(0);
+  const jumpFiltersRelaxedNoticeRef = useRef<boolean>(false);
+  const pendingJumpNodeIdRef = useRef<string | null>(null);
 
   const finalReport = job?.final_report || "";
   const jobIoc = job?.ioc || "";
   const jobGtiScore = job?.gti_score;
+
+  // job.graph/investigation_graph get a new object identity on every poll
+  // (fresh JSON.parse each time), even when unchanged, so depending on them
+  // directly would defeat jobSig's content-gating of setJob. Derive a stable
+  // primitive signature instead — cheap to recompute, only changes identity
+  // when the fallback graph's shape actually changes.
+  const jobGraphSig = useMemo(() => {
+    const g = job?.graph || job?.investigation_graph;
+    return g ? `${g.nodes?.length ?? 0}:${g.edges?.length ?? 0}` : "";
+  }, [job?.graph, job?.investigation_graph]);
 
   // Parse Dossier Report & Swim Lanes from job.final_report
   const parsedDossier = useMemo(() => {
@@ -301,7 +314,7 @@ export default function InvestigatePage() {
       rawGraphData || job?.graph || job?.investigation_graph
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finalReport, jobIoc, jobGtiScore, rawGraphData]);
+  }, [finalReport, jobIoc, jobGtiScore, rawGraphData, jobGraphSig]);
 
   const swimLanes = useMemo(() => {
     return deriveSwimLanes(
@@ -330,6 +343,13 @@ export default function InvestigatePage() {
     if (!nodeId) return;
     setActiveView("canvas");
     setPendingJumpNodeId(nodeId);
+  }, []);
+
+  const showJumpNotice = useCallback((message: string) => {
+    setJumpNotice(message);
+    setTimeout(() => {
+      setJumpNotice((prev) => (prev === message ? null : prev));
+    }, 3500);
   }, []);
 
   // Build / rebuild ReactFlow graph nodes whenever rawGraphRef, parsedDotGraph, or filters change
@@ -475,12 +495,14 @@ export default function InvestigatePage() {
     if (activeView !== "canvas" || !pendingJumpNodeId) {
       lastPendingJumpRef.current = null;
       jumpFilterAttemptsRef.current = 0;
+      jumpFiltersRelaxedNoticeRef.current = false;
       return;
     }
 
     if (pendingJumpNodeId !== lastPendingJumpRef.current) {
       lastPendingJumpRef.current = pendingJumpNodeId;
       jumpFilterAttemptsRef.current = 0;
+      jumpFiltersRelaxedNoticeRef.current = false;
     }
 
     const targetLower = pendingJumpNodeId.toLowerCase();
@@ -532,6 +554,10 @@ export default function InvestigatePage() {
           graphFilters.types[entityType] === false);
 
       if (isFilteredOut) {
+        if (!jumpFiltersRelaxedNoticeRef.current) {
+          jumpFiltersRelaxedNoticeRef.current = true;
+          showJumpNotice(`Adjusted graph filters to reveal "${pendingJumpNodeId}"`);
+        }
         setGraphFilters((prev) => ({
           ...prev,
           reportOnly: false,
@@ -562,6 +588,7 @@ export default function InvestigatePage() {
                 verdict: fullNode.verdict,
               };
         setSelectedNode(raw);
+        showJumpNotice(`"${pendingJumpNodeId}" isn't rendered on the canvas — showing details in the inspector only.`);
         setPendingJumpNodeId(null);
         lastPendingJumpRef.current = null;
         jumpFilterAttemptsRef.current = 0;
@@ -578,6 +605,7 @@ export default function InvestigatePage() {
       size: 24,
       threatScore: undefined,
     });
+    showJumpNotice(`"${pendingJumpNodeId}" was not found in this investigation's graph.`);
     setPendingJumpNodeId(null);
     lastPendingJumpRef.current = null;
     jumpFilterAttemptsRef.current = 0;
@@ -587,7 +615,67 @@ export default function InvestigatePage() {
     nodes,
     graphFilters,
     parsedDossier.parsedDotGraph,
+    showJumpNotice,
   ]);
+
+  // Mirror pendingJumpNodeId into a ref so the watchdog below can check the
+  // latest value from inside a plain setTimeout without doing side effects
+  // inside a setState updater (updaters run during React's render phase and
+  // are double-invoked under StrictMode).
+  useEffect(() => {
+    pendingJumpNodeIdRef.current = pendingJumpNodeId;
+  }, [pendingJumpNodeId]);
+
+  // Mirror parsedDossier.parsedDotGraph into a ref so the watchdog's timer
+  // doesn't restart every time the dossier recomputes (e.g. while specialist
+  // markdown is still streaming in) — a restart on every poll could starve
+  // the watchdog for the entire duration of a live investigation.
+  const parsedDotGraphRef = useRef(parsedDossier.parsedDotGraph);
+  useEffect(() => {
+    parsedDotGraphRef.current = parsedDossier.parsedDotGraph;
+  }, [parsedDossier.parsedDotGraph]);
+
+  // Watchdog: guarantee a jump request always resolves even if rebuildSpatialGraph
+  // never repopulates `nodes` (e.g. an empty merged graph keeps the effect above
+  // from re-firing enough times to hit its own attempt-count escape hatch).
+  useEffect(() => {
+    if (activeView !== "canvas" || !pendingJumpNodeId) return;
+    const targetId = pendingJumpNodeId;
+    const timer = setTimeout(() => {
+      if (pendingJumpNodeIdRef.current !== targetId) return;
+
+      const targetLower = targetId.toLowerCase();
+      const fallback =
+        rawGraphRef.current?.nodes?.find(
+          (n) => n.id === targetId || n.id.toLowerCase() === targetLower
+        ) ||
+        parsedDotGraphRef.current.nodes.find(
+          (n) => n.id === targetId || n.id.toLowerCase() === targetLower
+        );
+      setSelectedNode(
+        fallback
+          ? "size" in fallback
+            ? (fallback as BackendNode)
+            : {
+                id: fallback.id,
+                label: fallback.label || fallback.id,
+                entityType: fallback.entityType || "entity",
+                size: fallback.isRoot ? 30 : 22,
+                isRoot: fallback.isRoot,
+                isMalicious: fallback.isMalicious,
+                threatScore: fallback.threatScore ?? undefined,
+                verdict: fallback.verdict,
+              }
+          : { id: targetId, label: targetId, entityType: "entity", size: 24, threatScore: undefined }
+      );
+      showJumpNotice(`Couldn't focus "${targetId}" on the canvas — showing details in the inspector only.`);
+      lastPendingJumpRef.current = null;
+      jumpFilterAttemptsRef.current = 0;
+      jumpFiltersRelaxedNoticeRef.current = false;
+      setPendingJumpNodeId(null);
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [activeView, pendingJumpNodeId, showJumpNotice]);
 
   // Re-render the spatial graph whenever the parsed DOT graph, raw graph data, or filters change.
   useEffect(() => {
@@ -683,18 +771,40 @@ export default function InvestigatePage() {
             }
           : jobData;
 
+        const sr =
+          resolvedJob.specialist_reports ||
+          resolvedJob.specialist_results ||
+          resolvedJob.metadata?.specialist_results ||
+          {};
+        // Resolve each specialist as one whole object (matching
+        // SpecialistReportsGrid's `sr.malware_specialist || sr.malware`
+        // convention) rather than per-field, so a signature never blends
+        // fields from two different report objects.
+        const malwareReport = sr.malware_specialist || sr.malware;
+        const infraReport = sr.infrastructure_specialist || sr.infrastructure;
+        const specialistContentSig = [malwareReport, infraReport].map((report) =>
+          report
+            ? [
+                report.verdict,
+                (report.markdown_report || "").length,
+                (report.summary || "").length,
+              ]
+            : null
+        );
+
         const jobSig = JSON.stringify({
           status: effectiveStatus,
           reportLen: resolvedJob.final_report?.length ?? 0,
           reportHash:
             (resolvedJob.final_report?.slice(0, 120) ?? "") +
             (resolvedJob.final_report?.slice(-120) ?? ""),
-          subtasksLen: resolvedJob.subtasks?.length ?? 0,
+          subtaskStatuses: (resolvedJob.subtasks || []).map(
+            (t) => `${t.agent ?? ""}:${t.status ?? ""}:${t.timestamp ?? ""}:${(t.task ?? "").length}`
+          ),
           gti: resolvedJob.gti_score,
           risk: resolvedJob.risk_level,
-          srKeys: Object.keys(
-            resolvedJob.specialist_reports || resolvedJob.specialist_results || {}
-          ),
+          srKeys: Object.keys(sr),
+          specialistContentSig,
         });
 
         if (jobSig !== lastJobSignatureRef.current || hasTerminalReconciliation) {
@@ -902,6 +1012,17 @@ export default function InvestigatePage() {
         <div className="fixed bottom-5 right-5 z-50 bg-slate-900 border border-teal-500/50 text-teal-300 px-4 py-2.5 rounded-xl shadow-2xl text-xs font-mono flex items-center gap-2">
           <span>✔ Copied indicator to clipboard:</span>
           <strong className="text-white truncate max-w-[240px]">{copiedToast}</strong>
+        </div>
+      )}
+
+      {/* Jump-to-Canvas Notice */}
+      {jumpNotice && (
+        <div
+          className={`fixed right-5 z-50 bg-slate-900 border border-amber-500/50 text-amber-300 px-4 py-2.5 rounded-xl shadow-2xl text-xs font-mono flex items-center gap-2 max-w-sm ${
+            copiedToast ? "bottom-16" : "bottom-5"
+          }`}
+        >
+          <span>{jumpNotice}</span>
         </div>
       )}
 

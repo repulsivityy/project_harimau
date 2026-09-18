@@ -166,6 +166,23 @@ Further binary disassembly.`;
   assert.match(normalized, /Secondary lateral movement notes\./);
   assert.match(normalized, /Reverse engineering deep dive\./);
   assert.match(normalized, /Further binary disassembly\./);
+
+  // Repeated/variant canonical headings must not be silently dropped: their
+  // text survives as a "####" sub-heading ahead of their body content, and
+  // (critically) without a leading section number so it can't be re-matched
+  // as its own numbered heading downstream.
+  assert.match(normalized, /#### Attack Narrative: Secondary Phase\nSecondary lateral movement notes\./);
+  assert.match(normalized, /#### Technical Analysis\nFurther binary disassembly\./);
+  assert.doesNotMatch(normalized, /#### \d+\./);
+
+  // End-to-end through parseDossierReport's own section split: the
+  // sub-heading and its body must land in the correct canonical section,
+  // not get swallowed or bucketed elsewhere.
+  const parsed = parseDossierReport(markdownWithDriftAndRepeats, undefined, null);
+  const attackNarrative = parsed.sections.find((s) => s.number === 2)!;
+  const technicalAnalysis = parsed.sections.find((s) => s.number === 5)!;
+  assert.match(attackNarrative.markdownBody, /Secondary lateral movement notes\./);
+  assert.match(technicalAnalysis.markdownBody, /Further binary disassembly\./);
 });
 
 test("parseDossierReport ignores non-IOC JSON blocks earlier in the report and objects without value, falling back to extractFallbackIocs", () => {
@@ -251,6 +268,29 @@ test("adaptDotForDarkTheme strips URL and href attributes to sanitize malicious 
   const adapted = adaptDotForDarkTheme(maliciousDot);
   assert.doesNotMatch(adapted, /\bURL\s*=/i);
   assert.doesNotMatch(adapted, /\bhref\s*=/i);
+  assert.doesNotMatch(adapted, /,\s*,/);
   assert.match(adapted, /bgcolor="transparent"/);
   assert.match(adapted, /rankdir=LR/);
+});
+
+test("adaptDotForDarkTheme collapses dangling commas when both URL and href are stripped from the same node", () => {
+  const maliciousDot = `digraph G {
+    "node1" [label="node1", URL="http://evil.example", href="javascript:alert(1)", color="#ef4444"];
+  }`;
+
+  const adapted = adaptDotForDarkTheme(maliciousDot);
+  assert.doesNotMatch(adapted, /\bURL\s*=/i);
+  assert.doesNotMatch(adapted, /\bhref\s*=/i);
+  assert.doesNotMatch(adapted, /,\s*,/);
+  assert.match(adapted, /"node1"\s*\[label="node1",\s*color="#ef4444"\]/);
+});
+
+test("adaptDotForDarkTheme does not corrupt commas or brackets inside quoted label text", () => {
+  const dot = `digraph G {
+    "node1" [label="Alice, Bob] and Carol", URL="javascript:alert(1)", color="#ef4444"];
+  }`;
+
+  const adapted = adaptDotForDarkTheme(dot);
+  assert.doesNotMatch(adapted, /\bURL\s*=/i);
+  assert.match(adapted, /label="Alice, Bob\] and Carol"/);
 });

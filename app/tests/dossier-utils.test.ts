@@ -294,3 +294,104 @@ test("adaptDotForDarkTheme does not corrupt commas or brackets inside quoted lab
   assert.doesNotMatch(adapted, /\bURL\s*=/i);
   assert.match(adapted, /label="Alice, Bob\] and Carol"/);
 });
+
+test("parseDossierReport does not let an earlier unterminated JSON fence bridge across and swallow a later valid IOC block", () => {
+  const markdownWithBrokenFence = `### 1. Executive Summary
+Text.
+
+\`\`\`json
+[{"broken": "no closing bracket here
+\`\`\`
+
+More narrative text between blocks.
+
+\`\`\`json
+[{"type": "ip_address", "value": "1.2.3.4", "notes": "C2 server", "confidence": "HIGH"}]
+\`\`\``;
+
+  const parsed = parseDossierReport(markdownWithBrokenFence, undefined, null);
+  assert.equal(parsed.appendixIocs.length, 1);
+  assert.equal(parsed.appendixIocs[0].value, "1.2.3.4");
+});
+
+test("parseDossierReport falls through to a later JSON block when an explicit ```iocs fence has no valid items", () => {
+  const markdownWithEmptyIocsFence = `### 1. Executive Summary
+Text.
+
+\`\`\`iocs
+[{"notes": "placeholder entry with no value field"}]
+\`\`\`
+
+### 7. Appendix
+\`\`\`json
+[{"type": "domain", "value": "evil.example", "notes": "C2", "confidence": "HIGH"}]
+\`\`\``;
+
+  const parsed = parseDossierReport(markdownWithEmptyIocsFence, undefined, null);
+  assert.equal(parsed.appendixIocs.length, 1);
+  assert.equal(parsed.appendixIocs[0].value, "evil.example");
+});
+
+test("parseDotToGraph does not flag a benign root as MALICIOUS just for being the root", () => {
+  const dot = `digraph G {
+    "clean-app.exe" [label="clean-app.exe", fillcolor="#0f172a", color="#334155"];
+  }`;
+
+  const graph = parseDotToGraph(dot, "clean-app.exe", 0, "BENIGN");
+  const root = graph.nodes.find((n) => n.isRoot);
+  assert.ok(root);
+  assert.equal(root!.isMalicious, false);
+  assert.equal(root!.verdict, "BENIGN");
+});
+
+test("parseDotToGraph still flags a root MALICIOUS when the job's risk level says so", () => {
+  const dot = `digraph G {
+    "evil.example.com" [label="evil.example.com", fillcolor="#0f172a", color="#334155"];
+  }`;
+
+  const graph = parseDotToGraph(dot, "evil.example.com", 95, "MALICIOUS");
+  const root = graph.nodes.find((n) => n.isRoot);
+  assert.ok(root);
+  assert.equal(root!.isMalicious, true);
+  assert.equal(root!.verdict, "MALICIOUS");
+});
+
+test("deriveSwimLanes does not flag a benign root as malicious in its no-graph fallback entry", () => {
+  const emptyGraph = { nodes: [], edges: [] };
+  const stages = deriveSwimLanes(emptyGraph, "clean.example.com", {
+    risk_level: "BENIGN",
+    gti_score: 0,
+  });
+  const execStage = stages.find((s) => s.category === "execution");
+  assert.ok(execStage);
+  const rootEntry = execStage!.nodes.find((n) => n.id === "clean.example.com");
+  assert.ok(rootEntry);
+  assert.equal(rootEntry!.isMalicious, false);
+  assert.equal(rootEntry!.verdict, "BENIGN");
+});
+
+test("normalizeReportSections does not split a fenced code block on a heading-like comment line", () => {
+  const markdownWithCodeHeadings = `### 5. Technical Analysis
+Here is a decoded script:
+
+\`\`\`powershell
+# Timeline
+# 4. Timeline calculation
+Get-Date
+\`\`\`
+
+End of analysis.`;
+
+  const normalized = normalizeReportSections(markdownWithCodeHeadings);
+
+  // Section 4 (Investigation Timeline) must stay empty — a fenced comment
+  // reading "# Timeline" must not be treated as its heading.
+  assert.match(normalized, /### 4\. Investigation Timeline\n\n### 5\. Technical Analysis/);
+
+  // The whole code fence and the trailing sentence must remain inside
+  // section 5's body, not get split off into section 4.
+  assert.match(
+    normalized,
+    /```powershell\n# Timeline\n# 4\. Timeline calculation\nGet-Date\n```\n\nEnd of analysis\./
+  );
+});

@@ -78,6 +78,15 @@ export const CANONICAL_SECTIONS: Array<{
  * 6. Attack Flow Diagram
  * 7. Appendix
  */
+// A fenced code block (```...```) can legitimately contain a line like
+// "# Timeline" or "# Appendix" (e.g. a Python/Bash/PowerShell comment) that
+// would otherwise be misread as a section heading, splitting the snippet
+// across two canonical sections. Both heading-matching passes below track
+// fence state and skip heading detection entirely while inside one.
+function isFenceDelimiterLine(trimmedLine: string): boolean {
+  return /^```/.test(trimmedLine);
+}
+
 export function normalizeReportSections(markdown: string): string {
   if (!markdown || !markdown.trim()) return "";
 
@@ -87,40 +96,49 @@ export function normalizeReportSections(markdown: string): string {
 
   // Check which canonical sections already have explicit numbered headings
   const numberedPresent = new Set<number>();
+  let prescanInFence = false;
   for (const line of lines) {
     const trimmed = line.trim();
-    for (const sec of CANONICAL_SECTIONS) {
-      if (sec.numberedMatcher.test(trimmed)) {
-        numberedPresent.add(sec.number);
+    if (!prescanInFence) {
+      for (const sec of CANONICAL_SECTIONS) {
+        if (sec.numberedMatcher.test(trimmed)) {
+          numberedPresent.add(sec.number);
+        }
       }
     }
+    if (isFenceDelimiterLine(trimmed)) prescanInFence = !prescanInFence;
   }
 
   let currentBucket: number | null = null;
+  let inFence = false;
 
   for (const line of lines) {
     const trimmed = line.trim();
     let matchedSection: (typeof CANONICAL_SECTIONS)[number] | null = null;
     let suffix = "";
 
-    for (const sec of CANONICAL_SECTIONS) {
-      const numMatch = sec.numberedMatcher.exec(trimmed);
-      if (numMatch) {
-        matchedSection = sec;
-        suffix = numMatch[1] || "";
-        break;
-      }
-      // Only allow unnumbered header if this section does not have a numbered header anywhere
-      // AND it hasn't been bucketed yet
-      if (!numberedPresent.has(sec.number) && !bucketMap.has(sec.number)) {
-        const unnumMatch = sec.unnumberedMatcher.exec(trimmed);
-        if (unnumMatch) {
+    if (!inFence) {
+      for (const sec of CANONICAL_SECTIONS) {
+        const numMatch = sec.numberedMatcher.exec(trimmed);
+        if (numMatch) {
           matchedSection = sec;
-          suffix = unnumMatch[1] || "";
+          suffix = numMatch[1] || "";
           break;
+        }
+        // Only allow unnumbered header if this section does not have a numbered header anywhere
+        // AND it hasn't been bucketed yet
+        if (!numberedPresent.has(sec.number) && !bucketMap.has(sec.number)) {
+          const unnumMatch = sec.unnumberedMatcher.exec(trimmed);
+          if (unnumMatch) {
+            matchedSection = sec;
+            suffix = unnumMatch[1] || "";
+            break;
+          }
         }
       }
     }
+
+    if (isFenceDelimiterLine(trimmed)) inFence = !inFence;
 
     if (matchedSection) {
       const isRepeat = bucketMap.has(matchedSection.number);
@@ -193,7 +211,8 @@ export function normalizeReportSections(markdown: string): string {
 export function parseDotToGraph(
   dotString: string,
   rootIoc: string = "",
-  rootGtiScore: number | undefined = undefined
+  rootGtiScore: number | undefined = undefined,
+  rootRiskLevel: string | undefined = undefined
 ): ParsedDotGraph {
   const nodesMap = new Map<string, ParsedDotNode>();
   const edges: ParsedDotEdge[] = [];
@@ -222,6 +241,15 @@ export function parseDotToGraph(
       rawLabelLower.includes("legitimate") ||
       rawLabelLower.includes("decoy");
 
+    // The root's own DOT color/label is an LLM heuristic like any other
+    // node's, so it should not be overridden by "isRoot" alone — a benign
+    // investigation's root must not always render as MALICIOUS. Where the
+    // DOT doesn't clearly color the root, fall back to the job's actual
+    // assessed risk level rather than assuming malice.
+    const rootRiskLevelUpper = (rootRiskLevel || "").toUpperCase();
+    const rootLooksMalicious = isRoot && rootRiskLevelUpper.includes("MALICIOUS");
+    const rootLooksSuspicious = isRoot && rootRiskLevelUpper.includes("SUSPICIOUS");
+
     const isMalicious =
       attrs.includes("#ef4444") ||
       attrs.includes("#7f1d1d") ||
@@ -230,13 +258,14 @@ export function parseDotToGraph(
       rawLabelLower.includes("malicious") ||
       rawLabelLower.includes("lure") ||
       rawLabelLower.includes("c2") ||
-      isRoot;
+      rootLooksMalicious;
 
     const isSuspicious =
       !isMalicious &&
       (attrs.includes("#f59e0b") ||
         attrs.includes("#451a03") ||
-        rawLabelLower.includes("lolbin"));
+        rawLabelLower.includes("lolbin") ||
+        rootLooksSuspicious);
 
     let entityType = "entity";
     if (
@@ -287,13 +316,14 @@ export function parseDotToGraph(
       entityType,
       isDecoy,
       threatScore: isRoot ? rootGtiScore : undefined,
-      verdict:
-        isRoot || isMalicious
-          ? "MALICIOUS"
-          : isSuspicious
-            ? "SUSPICIOUS"
-            : isDecoy
-              ? "BENIGN"
+      verdict: isMalicious
+        ? "MALICIOUS"
+        : isSuspicious
+          ? "SUSPICIOUS"
+          : isDecoy
+            ? "BENIGN"
+            : isRoot
+              ? rootRiskLevel || "TARGET"
               : "UNKNOWN",
       isMalicious: isMalicious && !isDecoy,
     });
@@ -425,7 +455,9 @@ export function deriveSwimLanes(
       verdict: rootJob?.risk_level || "TARGET",
       threatScore:
         typeof rootJob?.gti_score === "number" ? rootJob.gti_score : undefined,
-      isMalicious: true,
+      // Derived from the job's actual assessed risk level, not assumed —
+      // a benign root must not be flagged malicious just for being the root.
+      isMalicious: Boolean(rootJob?.risk_level?.toUpperCase().includes("MALICIOUS")),
     });
   }
 
@@ -573,7 +605,12 @@ export function parseDossierReport(
   let chosenMatch: { full: string; json: string } | null = null;
 
   // 2a. Look specifically for an explicit ```iocs block anywhere
-  const explicitIocsRegex = /```iocs\s*(\[\s*\{[\s\S]*?\}\s*\])\s*```/i;
+  // The JSON body is matched with a "not a fence" guard ((?!```)) on every
+  // character, not just a non-greedy [\s\S]*? — otherwise an earlier,
+  // unrelated fenced block whose content never closes with `}]` lets the
+  // match bridge across that fence's closing ``` and swallow (or corrupt)
+  // a later, valid JSON block, advancing lastIndex past it in the process.
+  const explicitIocsRegex = /```iocs\s*(\[\s*\{(?:(?!```)[\s\S])*?\}\s*\])\s*```/i;
   const explicitMatch = explicitIocsRegex.exec(cleanMarkdown);
   if (explicitMatch) {
     try {
@@ -587,10 +624,13 @@ export function parseDossierReport(
             confidence: String(item.confidence || "MEDIUM"),
           }))
           .filter((item) => Boolean(item.value));
+        // Only claim this block (and skip 2b/2c) if it actually yielded
+        // usable IOCs — an empty/valueless match must fall through instead
+        // of silently discarding a real IOC block found later.
         if (candidate.length > 0) {
           extractedIocs = candidate;
+          chosenMatch = { full: explicitMatch[0], json: explicitMatch[1] };
         }
-        chosenMatch = { full: explicitMatch[0], json: explicitMatch[1] };
       }
     } catch {
       // Ignore malformed JSON block
@@ -604,7 +644,7 @@ export function parseDossierReport(
     const appMatch = appendixHeadingRegex.exec(cleanMarkdown);
     if (appMatch && appMatch.index !== undefined) {
       const textAfterAppendix = cleanMarkdown.slice(appMatch.index);
-      const jsonRegex = /```(?:json)?\s*(\[\s*\{[\s\S]*?\}\s*\])\s*```/i;
+      const jsonRegex = /```(?:json)?\s*(\[\s*\{(?:(?!```)[\s\S])*?\}\s*\])\s*```/i;
       const jsonMatch = jsonRegex.exec(textAfterAppendix);
       if (jsonMatch) {
         try {
@@ -620,8 +660,8 @@ export function parseDossierReport(
               .filter((item) => Boolean(item.value));
             if (candidate.length > 0) {
               extractedIocs = candidate;
+              chosenMatch = { full: jsonMatch[0], json: jsonMatch[1] };
             }
-            chosenMatch = { full: jsonMatch[0], json: jsonMatch[1] };
           }
         } catch {
           // Ignore malformed JSON block
@@ -633,7 +673,7 @@ export function parseDossierReport(
   // 2c. If no Appendix heading is found yet, scan all JSON array blocks
   // and only accept one whose items have a valid non-empty value property (and type or confidence or notes).
   if (!chosenMatch) {
-    const allJsonRegex = /```(?:json)?\s*(\[\s*\{[\s\S]*?\}\s*\])\s*```/gi;
+    const allJsonRegex = /```(?:json)?\s*(\[\s*\{(?:(?!```)[\s\S])*?\}\s*\])\s*```/gi;
     let match: RegExpExecArray | null;
     while ((match = allJsonRegex.exec(cleanMarkdown)) !== null) {
       try {
@@ -677,7 +717,7 @@ export function parseDossierReport(
   }
 
   const parsedDotGraph = rawDotCode
-    ? parseDotToGraph(rawDotCode, job?.ioc || "", job?.gti_score ?? undefined)
+    ? parseDotToGraph(rawDotCode, job?.ioc || "", job?.gti_score ?? undefined, job?.risk_level)
     : { nodes: [], edges: [] };
 
   const appendixIocs =
@@ -696,15 +736,20 @@ export function parseDossierReport(
   const sectionMap = new Map<number, { title: string; lines: string[] }>();
 
   let activeSecNum: number | null = null;
+  let sectionSplitInFence = false;
 
   for (const line of lines) {
+    const trimmedLine = line.trim();
     let matched: (typeof CANONICAL_SECTIONS)[number] | null = null;
-    for (const sec of CANONICAL_SECTIONS) {
-      if (sec.numberedMatcher.test(line.trim())) {
-        matched = sec;
-        break;
+    if (!sectionSplitInFence) {
+      for (const sec of CANONICAL_SECTIONS) {
+        if (sec.numberedMatcher.test(trimmedLine)) {
+          matched = sec;
+          break;
+        }
       }
     }
+    if (isFenceDelimiterLine(trimmedLine)) sectionSplitInFence = !sectionSplitInFence;
 
     if (matched) {
       activeSecNum = matched.number;

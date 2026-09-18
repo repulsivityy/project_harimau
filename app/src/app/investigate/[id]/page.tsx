@@ -292,6 +292,46 @@ export default function InvestigatePage() {
   const jumpFiltersRelaxedNoticeRef = useRef<boolean>(false);
   const pendingJumpNodeIdRef = useRef<string | null>(null);
 
+  // Switching investigations (e.g. via the Case Switcher) keeps this page
+  // mounted with a new `id` — nothing resets automatically, so the previous
+  // investigation's job/graph/canvas state would otherwise leak into the new
+  // one until fresh data happens to overwrite it. Reset synchronously during
+  // render (React's documented pattern for resetting state on a changed prop)
+  // rather than in an effect, so the stale state is never even briefly shown.
+  const [prevId, setPrevId] = useState(id);
+  if (id !== prevId) {
+    setPrevId(id);
+    setJob(null);
+    setJobStatus("running");
+    setProgress(0);
+    setStatusMessage("Initializing secure channel...");
+    setActivityLog([]);
+    setRawGraphData(null);
+    rawGraphRef.current = null;
+    setNodes([]);
+    setEdges([]);
+    setSelectedNode(null);
+    setActiveView("dossier");
+    setPendingJumpNodeId(null);
+    lastJobSignatureRef.current = "";
+    lastGraphSignatureRef.current = "";
+    lastLogSignatureRef.current = "";
+    lastPendingJumpRef.current = null;
+    jumpFilterAttemptsRef.current = 0;
+    jumpFiltersRelaxedNoticeRef.current = false;
+    pendingJumpNodeIdRef.current = null;
+  }
+
+  // <ReactFlow> only mounts in the "canvas" view (see the activeView ternary
+  // below); switching away unmounts it without React Flow itself clearing
+  // reactFlowRef.current, so the ref would otherwise keep pointing at a
+  // disposed instance for any code that later checks `if (reactFlowRef.current)`.
+  useEffect(() => {
+    if (activeView !== "canvas") {
+      reactFlowRef.current = null;
+    }
+  }, [activeView]);
+
   const finalReport = job?.final_report || "";
   const jobIoc = job?.ioc || "";
   const jobGtiScore = job?.gti_score;
@@ -324,11 +364,31 @@ export default function InvestigatePage() {
     );
   }, [parsedDossier.parsedDotGraph, jobIoc, job]);
 
+  // Same fallback chain as parseDossierReport's rawGraphData argument above —
+  // when the /graph endpoint hasn't returned data yet (or is failing), fall
+  // back to whatever graph is embedded on the job record itself, so the
+  // canvas, entity count, and jump-to-node lookups stay consistent with
+  // what the Appendix IOC table (fed by the same fallback) is showing.
+  // Keyed on jobGraphSig (not job?.graph/job?.investigation_graph directly)
+  // so this only gets a new identity when the fallback graph's shape
+  // actually changes, not on every poll.
+  const effectiveGraphData = useMemo(() => {
+    if (rawGraphData) return rawGraphData;
+    const fallback = job?.graph || job?.investigation_graph;
+    return fallback ? (fallback as GraphData) : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawGraphData, jobGraphSig]);
+
+  const effectiveGraphRef = useRef<GraphData | null>(null);
+  useEffect(() => {
+    effectiveGraphRef.current = effectiveGraphData;
+  }, [effectiveGraphData]);
+
   const graphEntityCount = useMemo(() => {
-    const rawCount = rawGraphData?.nodes?.length || 0;
+    const rawCount = effectiveGraphData?.nodes?.length || 0;
     const dotCount = parsedDossier.parsedDotGraph.nodes.length;
     return Math.max(rawCount, dotCount);
-  }, [rawGraphData?.nodes?.length, parsedDossier.parsedDotGraph.nodes.length]);
+  }, [effectiveGraphData?.nodes?.length, parsedDossier.parsedDotGraph.nodes.length]);
 
   const handleCopyIoc = useCallback((value: string) => {
     if (!value) return;
@@ -383,7 +443,18 @@ export default function InvestigatePage() {
       });
 
       const allNodes = Array.from(mergedNodesMap.values());
-      if (allNodes.length === 0) return;
+      if (allNodes.length === 0) {
+        // A genuinely empty merged graph must still clear the canvas —
+        // otherwise the previous investigation's (or previous filter
+        // state's) nodes/edges stay rendered indefinitely.
+        if (simulationRef.current) {
+          simulationRef.current.stop();
+          simulationRef.current = null;
+        }
+        setNodes([]);
+        setEdges([]);
+        return;
+      }
 
       const allEdges: BackendEdge[] = [...(backendGraph?.edges || [])];
       dotEdges.forEach((de) => {
@@ -513,7 +584,7 @@ export default function InvestigatePage() {
     if (targetRfNode) {
       const raw =
         targetRfNode.data?.rawNode ||
-        rawGraphRef.current?.nodes.find(
+        effectiveGraphRef.current?.nodes.find(
           (rn) => rn.id === targetRfNode.id || rn.id.toLowerCase() === targetLower
         );
       if (raw) setSelectedNode(raw);
@@ -534,7 +605,7 @@ export default function InvestigatePage() {
     }
 
     // Target node was not found in visible `nodes`. Check full unfiltered node sets.
-    const rawMatch = rawGraphRef.current?.nodes?.find(
+    const rawMatch = effectiveGraphRef.current?.nodes?.find(
       (rn) => rn.id === pendingJumpNodeId || rn.id.toLowerCase() === targetLower
     );
     const dotMatch = !rawMatch
@@ -596,7 +667,7 @@ export default function InvestigatePage() {
       return;
     }
 
-    // If the node truly does not exist in either rawGraphRef.current or parsedDotGraph.nodes,
+    // If the node truly does not exist in either effectiveGraphRef.current or parsedDotGraph.nodes,
     // synthesize a temporary selected node for the inspector.
     setSelectedNode({
       id: pendingJumpNodeId,
@@ -646,7 +717,7 @@ export default function InvestigatePage() {
 
       const targetLower = targetId.toLowerCase();
       const fallback =
-        rawGraphRef.current?.nodes?.find(
+        effectiveGraphRef.current?.nodes?.find(
           (n) => n.id === targetId || n.id.toLowerCase() === targetLower
         ) ||
         parsedDotGraphRef.current.nodes.find(
@@ -679,8 +750,8 @@ export default function InvestigatePage() {
 
   // Re-render the spatial graph whenever the parsed DOT graph, raw graph data, or filters change.
   useEffect(() => {
-    rebuildSpatialGraph(rawGraphData);
-  }, [rebuildSpatialGraph, rawGraphData]);
+    rebuildSpatialGraph(effectiveGraphData);
+  }, [rebuildSpatialGraph, effectiveGraphData]);
 
   useEffect(() => {
     if (!id) return;
@@ -750,7 +821,10 @@ export default function InvestigatePage() {
         if (!jobRes.ok) throw new Error("Failed to fetch job details");
 
         const jobData: DossierJob = await jobRes.json();
-        const fetchedStatus = jobData.status ?? "running";
+        // Normalized once here so every downstream comparison (including the
+        // render's case-sensitive `jobStatus === "failed"` checks) stays
+        // correct even if the backend ever returns non-lowercase status.
+        const fetchedStatus = (jobData.status ?? "running").toLowerCase();
         const terminalFromRest =
           !terminalStatusRef.current && isTerminalInvestigationStatus(fetchedStatus);
         const effectiveStatus = terminalStatusRef.current ?? fetchedStatus;
@@ -1292,7 +1366,7 @@ export default function InvestigatePage() {
               onNodeClick={(_event, node) => {
                 const raw =
                   node.data?.rawNode ||
-                  rawGraphRef.current?.nodes.find((n) => n.id === node.id);
+                  effectiveGraphRef.current?.nodes.find((n) => n.id === node.id);
                 if (raw) setSelectedNode(raw);
               }}
             >

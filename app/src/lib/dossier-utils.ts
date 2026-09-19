@@ -78,13 +78,24 @@ export const CANONICAL_SECTIONS: Array<{
  * 6. Attack Flow Diagram
  * 7. Appendix
  */
-// A fenced code block (```...```) can legitimately contain a line like
-// "# Timeline" or "# Appendix" (e.g. a Python/Bash/PowerShell comment) that
-// would otherwise be misread as a section heading, splitting the snippet
-// across two canonical sections. Both heading-matching passes below track
-// fence state and skip heading detection entirely while inside one.
-function isFenceDelimiterLine(trimmedLine: string): boolean {
-  return /^```/.test(trimmedLine);
+// A fenced code block (```...``` or ~~~...~~~) can legitimately contain a line
+// like "# Timeline" or "# Appendix" (e.g. a Python/Bash/PowerShell comment)
+// that would otherwise be misread as a section heading, splitting the snippet
+// across two canonical sections. Track the active opening fence marker and
+// ignore single-line inline triple-backtick spans (e.g. ```cmd /c ...```)
+// so a same-line closing span never leaves the parser stuck in `inFence` mode.
+function updateFenceState(
+  trimmedLine: string,
+  currentFence: string | null
+): string | null {
+  if (currentFence === null) {
+    const openMatch = /^(`{3,}|~{3,})([^`~]*)$/.exec(trimmedLine);
+    return openMatch ? openMatch[1] : null;
+  }
+  const fenceChar = currentFence[0];
+  const minLen = currentFence.length;
+  const closeRegex = new RegExp(`^\\${fenceChar}{${minLen},}\\s*$`);
+  return closeRegex.test(trimmedLine) ? null : currentFence;
 }
 
 export function normalizeReportSections(markdown: string): string {
@@ -96,28 +107,28 @@ export function normalizeReportSections(markdown: string): string {
 
   // Check which canonical sections already have explicit numbered headings
   const numberedPresent = new Set<number>();
-  let prescanInFence = false;
+  let prescanFence: string | null = null;
   for (const line of lines) {
     const trimmed = line.trim();
-    if (!prescanInFence) {
+    if (prescanFence === null) {
       for (const sec of CANONICAL_SECTIONS) {
         if (sec.numberedMatcher.test(trimmed)) {
           numberedPresent.add(sec.number);
         }
       }
     }
-    if (isFenceDelimiterLine(trimmed)) prescanInFence = !prescanInFence;
+    prescanFence = updateFenceState(trimmed, prescanFence);
   }
 
   let currentBucket: number | null = null;
-  let inFence = false;
+  let activeFence: string | null = null;
 
   for (const line of lines) {
     const trimmed = line.trim();
     let matchedSection: (typeof CANONICAL_SECTIONS)[number] | null = null;
     let suffix = "";
 
-    if (!inFence) {
+    if (activeFence === null) {
       for (const sec of CANONICAL_SECTIONS) {
         const numMatch = sec.numberedMatcher.exec(trimmed);
         if (numMatch) {
@@ -138,7 +149,7 @@ export function normalizeReportSections(markdown: string): string {
       }
     }
 
-    if (isFenceDelimiterLine(trimmed)) inFence = !inFence;
+    activeFence = updateFenceState(trimmed, activeFence);
 
     if (matchedSection) {
       const isRepeat = bucketMap.has(matchedSection.number);
@@ -644,27 +655,38 @@ export function parseDossierReport(
     const appMatch = appendixHeadingRegex.exec(cleanMarkdown);
     if (appMatch && appMatch.index !== undefined) {
       const textAfterAppendix = cleanMarkdown.slice(appMatch.index);
-      const jsonRegex = /```(?:json)?\s*(\[\s*\{(?:(?!```)[\s\S])*?\}\s*\])\s*```/i;
-      const jsonMatch = jsonRegex.exec(textAfterAppendix);
-      if (jsonMatch) {
+      const jsonRegex = /```(?:json)?\s*(\[\s*\{(?:(?!```)[\s\S])*?\}\s*\])\s*```/gi;
+      let jsonMatch: RegExpExecArray | null;
+      while ((jsonMatch = jsonRegex.exec(textAfterAppendix)) !== null) {
         try {
           const parsed = JSON.parse(jsonMatch[1]);
           if (Array.isArray(parsed)) {
             const candidate: IocEntry[] = parsed
+              .filter(
+                (item: Record<string, unknown>) =>
+                  item &&
+                  typeof item === "object" &&
+                  item.value !== undefined &&
+                  item.value !== null &&
+                  String(item.value).trim().length > 0 &&
+                  (item.type !== undefined ||
+                    item.confidence !== undefined ||
+                    item.notes !== undefined)
+              )
               .map((item: Record<string, unknown>) => ({
                 type: String(item.type || "IOC"),
                 value: String(item.value || "").trim(),
                 notes: String(item.notes || "--"),
                 confidence: String(item.confidence || "MEDIUM"),
-              }))
-              .filter((item) => Boolean(item.value));
+              }));
             if (candidate.length > 0) {
               extractedIocs = candidate;
               chosenMatch = { full: jsonMatch[0], json: jsonMatch[1] };
+              break;
             }
           }
         } catch {
-          // Ignore malformed JSON block
+          // Ignore malformed JSON block and continue scanning subsequent Appendix JSON blocks
         }
       }
     }
@@ -736,12 +758,12 @@ export function parseDossierReport(
   const sectionMap = new Map<number, { title: string; lines: string[] }>();
 
   let activeSecNum: number | null = null;
-  let sectionSplitInFence = false;
+  let sectionSplitFence: string | null = null;
 
   for (const line of lines) {
     const trimmedLine = line.trim();
     let matched: (typeof CANONICAL_SECTIONS)[number] | null = null;
-    if (!sectionSplitInFence) {
+    if (sectionSplitFence === null) {
       for (const sec of CANONICAL_SECTIONS) {
         if (sec.numberedMatcher.test(trimmedLine)) {
           matched = sec;
@@ -749,7 +771,7 @@ export function parseDossierReport(
         }
       }
     }
-    if (isFenceDelimiterLine(trimmedLine)) sectionSplitInFence = !sectionSplitInFence;
+    sectionSplitFence = updateFenceState(trimmedLine, sectionSplitFence);
 
     if (matched) {
       activeSecNum = matched.number;
@@ -786,6 +808,203 @@ export function parseDossierReport(
   };
 }
 
+export interface NormalizedFallbackNode {
+  id: string;
+  label: string;
+  color?: string;
+  entityType: string;
+  size: number;
+  title?: string;
+  isRoot?: boolean;
+  isMalicious?: boolean;
+  inReport?: boolean;
+  threatScore?: number | null;
+  verdict?: string | null;
+  vendorDetections?: string | null;
+}
+
+export interface NormalizedFallbackEdge {
+  source: string;
+  target: string;
+  label: string;
+}
+
+export interface NormalizedFallbackGraph {
+  nodes: NormalizedFallbackNode[];
+  edges: NormalizedFallbackEdge[];
+}
+
+/**
+ * Normalize a fallback graph object (`job.graph` or raw NetworkX `job.investigation_graph`
+ * serialized via `nx.node_link_data`) into the formatted `GraphData` shape expected by
+ * the Spatial Canvas (`rebuildSpatialGraph`, `getSmartLabel`, and node inspector).
+ *
+ * Raw `job.investigation_graph` records store snake_case `entity_type`, nested
+ * `gti_assessment`, `links` instead of `edges`, `relationship` instead of `label`,
+ * and omit `label`, `isRoot`, `isMalicious`, and `inReport`.
+ */
+export function normalizeFallbackGraphData(
+  rawGraph:
+    | {
+        nodes?: unknown[];
+        edges?: unknown[];
+        links?: unknown[];
+      }
+    | null
+    | undefined,
+  rootIoc: string = "",
+  rootGtiScore?: number | null,
+  rootRiskLevel?: string | null
+): NormalizedFallbackGraph | null {
+  if (!rawGraph || !Array.isArray(rawGraph.nodes)) return null;
+
+  const rootLower = (rootIoc || "").trim().toLowerCase();
+  const rootRiskUpper = (rootRiskLevel || "").toUpperCase();
+  const rootIsMalicious = rootRiskUpper.includes("MALICIOUS");
+
+  const nodes: NormalizedFallbackNode[] = [];
+
+  for (const rawItem of rawGraph.nodes) {
+    if (!rawItem || typeof rawItem !== "object") continue;
+    const n = rawItem as Record<string, unknown>;
+    const id = String(n.id ?? "").trim();
+    if (!id) continue;
+
+    const idLower = id.toLowerCase();
+    const isRoot =
+      typeof n.isRoot === "boolean"
+        ? n.isRoot
+        : Boolean(rootLower && idLower === rootLower);
+
+    const entityType = String(
+      n.entityType || n.entity_type || n.type || "entity"
+    );
+
+    // Extract nested GTI fields when present on raw NetworkX nodes
+    const gti =
+      n.gti_assessment && typeof n.gti_assessment === "object"
+        ? (n.gti_assessment as Record<string, unknown>)
+        : null;
+    const gtiVerdictObj =
+      gti?.verdict && typeof gti.verdict === "object"
+        ? (gti.verdict as Record<string, unknown>)
+        : null;
+    const gtiScoreObj =
+      gti?.threat_score && typeof gti.threat_score === "object"
+        ? (gti.threat_score as Record<string, unknown>)
+        : null;
+    const statsObj =
+      n.last_analysis_stats && typeof n.last_analysis_stats === "object"
+        ? (n.last_analysis_stats as Record<string, unknown>)
+        : null;
+
+    const rawVerdictValue =
+      typeof n.verdict === "string"
+        ? n.verdict
+        : typeof gtiVerdictObj?.value === "string"
+          ? gtiVerdictObj.value
+          : isRoot && rootRiskLevel
+            ? rootRiskLevel
+            : null;
+    const rawVerdict = rawVerdictValue
+      ? rawVerdictValue.replace(/^VERDICT_/i, "").toUpperCase()
+      : null;
+
+    const rawThreatScore =
+      typeof n.threatScore === "number"
+        ? n.threatScore
+        : typeof gtiScoreObj?.value === "number"
+          ? gtiScoreObj.value
+          : isRoot && typeof rootGtiScore === "number"
+            ? rootGtiScore
+            : undefined;
+
+    const maliciousVendors =
+      typeof statsObj?.malicious === "number" ? statsObj.malicious : 0;
+
+    const isMalicious =
+      typeof n.isMalicious === "boolean"
+        ? n.isMalicious
+        : Boolean(
+            (rawVerdict && rawVerdict.toUpperCase().includes("MALICIOUS")) ||
+              maliciousVendors > 3 ||
+              (isRoot && rootIsMalicious)
+          );
+
+    // Derive a guaranteed non-empty string label so getSmartLabel never crashes
+    let derivedLabel = "";
+    if (typeof n.label === "string" && n.label.trim()) {
+      derivedLabel = n.label.trim();
+    } else if (typeof n.host_name === "string" && n.host_name.trim()) {
+      derivedLabel = n.host_name.trim();
+    } else if (
+      typeof n.meaningful_name === "string" &&
+      n.meaningful_name.trim()
+    ) {
+      derivedLabel =
+        entityType === "file"
+          ? `${id}\n(${n.meaningful_name.trim()})`
+          : n.meaningful_name.trim();
+    } else if (typeof n.url === "string" && n.url.trim()) {
+      derivedLabel = n.url.trim();
+    } else if (typeof n.name === "string" && n.name.trim()) {
+      derivedLabel = n.name.trim();
+    } else {
+      derivedLabel = id;
+    }
+
+    // Raw NetworkX nodes omit `inReport`; default to true when absent so
+    // the default `reportOnly: true` filter does not hide the entire fallback graph.
+    const inReport = typeof n.inReport === "boolean" ? n.inReport : true;
+
+    nodes.push({
+      id,
+      label: derivedLabel,
+      color: typeof n.color === "string" ? n.color : undefined,
+      entityType,
+      size: typeof n.size === "number" ? n.size : isRoot ? 30 : 22,
+      title: typeof n.title === "string" ? n.title : undefined,
+      isRoot,
+      isMalicious,
+      inReport,
+      threatScore: rawThreatScore,
+      verdict: rawVerdict,
+      vendorDetections:
+        typeof n.vendorDetections === "string"
+          ? n.vendorDetections
+          : maliciousVendors > 0
+            ? `${maliciousVendors} malicious`
+            : null,
+    });
+  }
+
+  const rawEdgeList = Array.isArray(rawGraph.edges)
+    ? rawGraph.edges
+    : Array.isArray(rawGraph.links)
+      ? rawGraph.links
+      : [];
+
+  const edges: NormalizedFallbackEdge[] = [];
+  for (const rawEdge of rawEdgeList) {
+    if (!rawEdge || typeof rawEdge !== "object") continue;
+    const e = rawEdge as Record<string, unknown>;
+    const source =
+      typeof e.source === "object" && e.source !== null
+        ? String((e.source as Record<string, unknown>).id ?? "")
+        : String(e.source ?? "");
+    const target =
+      typeof e.target === "object" && e.target !== null
+        ? String((e.target as Record<string, unknown>).id ?? "")
+        : String(e.target ?? "");
+    if (!source || !target) continue;
+
+    const label = String(e.label || e.relationship || "related_to");
+    edges.push({ source, target, label });
+  }
+
+  return { nodes, edges };
+}
+
 /**
  * Adapt a Graphviz DOT string for dark theme display, enforcing transparent background,
  * specified rankdir orientation, and stripping potentially malicious URL/href attributes.
@@ -817,23 +1036,59 @@ export function adaptDotForDarkTheme(
 
   let adapted = baseDot;
 
-  // Strip any URL="..." or href="..." attributes to prevent malicious javascript: links at the utility level
-  adapted = adapted.replace(/\b(?:URL|href)\s*=\s*(?:"[^"]*"|'[^']*')/gi, "");
+  // 1. Strip any Graphviz link/target attributes (URL, href, edgeURL, headURL, tailURL,
+  // labelURL, edgehref, headhref, tailhref, labelhref, target, edgetarget, headtarget,
+  // tailtarget, labeltarget) with double-quoted, single-quoted, HTML-like <...>, or unquoted
+  // values, while preserving double-quoted string literals (e.g., label="...") verbatim.
+  adapted = adapted.replace(
+    /("(?:[^"\\]|\\.)*")|\b(?:[A-Za-z]*(?:URL|href|target))\s*=\s*(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|<(?:[^<>]|<[^<>]*>)*>|[^\s,\];]+)/gi,
+    (_match, quotedLiteral?: string) => (quotedLiteral ? quotedLiteral : "")
+  );
+
+  // 2. Also strip any href / xlink:href / on* attributes inside HTML-like label tags (<TABLE HREF=...>)
+  adapted = adapted.replace(
+    /("(?:[^"\\]|\\.)*")|(<(?:[^<>]|<[^<>]*>)*>)/g,
+    (_match, quotedLiteral?: string, htmlLabel?: string) => {
+      if (quotedLiteral) return quotedLiteral;
+      if (!htmlLabel) return _match;
+      return htmlLabel.replace(
+        /\s*\b(?:href|xlink:href|url|on[a-z]+)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi,
+        ""
+      );
+    }
+  );
+
   adapted = collapseAttributeSeparatorsOutsideQuotes(adapted);
 
-  if (/rankdir\s*=\s*[A-Za-z]+/i.test(adapted)) {
-    adapted = adapted.replace(/rankdir\s*=\s*[A-Za-z]+/gi, `rankdir=${ori}`);
-  } else if (/digraph\s+[^{]*\{/i.test(adapted)) {
-    adapted = adapted.replace(/(digraph\s+[^{]*\{)/i, `$1\n  rankdir=${ori};`);
-  } else {
-    adapted = `digraph G {\n  rankdir=${ori};\n${adapted}\n}`;
+  // 3. Update or inject rankdir outside quoted strings
+  let hasRankdirOutsideQuotes = false;
+  adapted = adapted.replace(
+    /("(?:[^"\\]|\\.)*")|\brankdir\s*=\s*(?:"[^"]*"|'[^']*'|[A-Za-z]+)/gi,
+    (_match, quotedLiteral?: string) => {
+      if (quotedLiteral) return quotedLiteral;
+      hasRankdirOutsideQuotes = true;
+      return `rankdir=${ori}`;
+    }
+  );
+  if (!hasRankdirOutsideQuotes) {
+    if (/digraph\s+[^{]*\{/i.test(adapted)) {
+      adapted = adapted.replace(/(digraph\s+[^{]*\{)/i, `$1\n  rankdir=${ori};`);
+    } else {
+      adapted = `digraph G {\n  rankdir=${ori};\n${adapted}\n}`;
+    }
   }
 
+  // 4. Update or inject bgcolor="transparent" outside quoted strings
+  let hasBgcolorOutsideQuotes = false;
   adapted = adapted.replace(
-    /bgcolor\s*=\s*"[^"]*"/gi,
-    'bgcolor="transparent"'
+    /("(?:[^"\\]|\\.)*")|\bbgcolor\s*=\s*(?:"[^"]*"|'[^']*'|[^\s,\];]+)/gi,
+    (_match, quotedLiteral?: string) => {
+      if (quotedLiteral) return quotedLiteral;
+      hasBgcolorOutsideQuotes = true;
+      return 'bgcolor="transparent"';
+    }
   );
-  if (!/bgcolor\s*=/i.test(adapted) && /digraph\s+[^{]*\{/i.test(adapted)) {
+  if (!hasBgcolorOutsideQuotes && /digraph\s+[^{]*\{/i.test(adapted)) {
     adapted = adapted.replace(
       /(digraph\s+[^{]*\{)/i,
       `$1\n  bgcolor="transparent";`

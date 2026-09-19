@@ -28,6 +28,7 @@ import {
 } from "@/lib/investigation-stream";
 import {
   deriveSwimLanes,
+  normalizeFallbackGraphData,
   parseDossierReport,
 } from "@/lib/dossier-utils";
 import type { DossierJob } from "@/lib/dossier-types";
@@ -225,7 +226,9 @@ const CustomNode = ({ data, style }: CustomNodeProps) => {
 const nodeTypes = { custom: CustomNode };
 
 function getSmartLabel(node: BackendNode): string {
-  const { label, entityType, id } = node;
+  const label = node.label || node.id || "";
+  const id = node.id || label;
+  const entityType = node.entityType || "entity";
   if (node.isRoot) return label;
 
   switch (entityType) {
@@ -295,9 +298,9 @@ export default function InvestigatePage() {
   // Switching investigations (e.g. via the Case Switcher) keeps this page
   // mounted with a new `id` — nothing resets automatically, so the previous
   // investigation's job/graph/canvas state would otherwise leak into the new
-  // one until fresh data happens to overwrite it. Reset synchronously during
-  // render (React's documented pattern for resetting state on a changed prop)
-  // rather than in an effect, so the stale state is never even briefly shown.
+  // one until fresh data happens to overwrite it. Reset React state
+  // synchronously during render (refs are reset in the `[id]` effect below to
+  // satisfy React 19's `react-hooks/refs` render-purity constraint).
   const [prevId, setPrevId] = useState(id);
   if (id !== prevId) {
     setPrevId(id);
@@ -307,19 +310,11 @@ export default function InvestigatePage() {
     setStatusMessage("Initializing secure channel...");
     setActivityLog([]);
     setRawGraphData(null);
-    rawGraphRef.current = null;
     setNodes([]);
     setEdges([]);
     setSelectedNode(null);
     setActiveView("dossier");
     setPendingJumpNodeId(null);
-    lastJobSignatureRef.current = "";
-    lastGraphSignatureRef.current = "";
-    lastLogSignatureRef.current = "";
-    lastPendingJumpRef.current = null;
-    jumpFilterAttemptsRef.current = 0;
-    jumpFiltersRelaxedNoticeRef.current = false;
-    pendingJumpNodeIdRef.current = null;
   }
 
   // <ReactFlow> only mounts in the "canvas" view (see the activeView ternary
@@ -335,6 +330,7 @@ export default function InvestigatePage() {
   const finalReport = job?.final_report || "";
   const jobIoc = job?.ioc || "";
   const jobGtiScore = job?.gti_score;
+  const jobRiskLevel = job?.risk_level;
 
   // job.graph/investigation_graph get a new object identity on every poll
   // (fresh JSON.parse each time), even when unchanged, so depending on them
@@ -342,19 +338,47 @@ export default function InvestigatePage() {
   // primitive signature instead — cheap to recompute, only changes identity
   // when the fallback graph's shape actually changes.
   const jobGraphSig = useMemo(() => {
-    const g = job?.graph || job?.investigation_graph;
-    return g ? `${g.nodes?.length ?? 0}:${g.edges?.length ?? 0}` : "";
+    const g = (job?.graph || job?.investigation_graph) as
+      | { nodes?: unknown[]; edges?: unknown[]; links?: unknown[] }
+      | undefined;
+    const edgeLen = g?.edges?.length ?? g?.links?.length ?? 0;
+    return g ? `${g.nodes?.length ?? 0}:${edgeLen}` : "";
   }, [job?.graph, job?.investigation_graph]);
+
+  // Same fallback chain as parseDossierReport's rawGraphData argument below —
+  // when the /graph endpoint hasn't returned data yet (or is failing), fall
+  // back to whatever graph is embedded on the job record itself (`job.graph` or
+  // raw NetworkX `job.investigation_graph` serialized via `nx.node_link_data`),
+  // normalized so every node has `label`, `entityType`, `isRoot`, `isMalicious`,
+  // and `inReport`.
+  const effectiveGraphData = useMemo<GraphData | null>(() => {
+    if (rawGraphData && Array.isArray(rawGraphData.nodes) && rawGraphData.nodes.length > 0) {
+      return normalizeFallbackGraphData(rawGraphData, jobIoc, jobGtiScore, jobRiskLevel);
+    }
+    const fallback = (job?.graph || job?.investigation_graph) as
+      | { nodes?: unknown[]; edges?: unknown[]; links?: unknown[] }
+      | undefined;
+    if (fallback) {
+      return normalizeFallbackGraphData(fallback, jobIoc, jobGtiScore, jobRiskLevel);
+    }
+    return rawGraphData;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawGraphData, jobGraphSig, jobIoc, jobGtiScore, jobRiskLevel]);
+
+  const effectiveGraphRef = useRef<GraphData | null>(null);
+  useEffect(() => {
+    effectiveGraphRef.current = effectiveGraphData;
+  }, [effectiveGraphData]);
 
   // Parse Dossier Report & Swim Lanes from job.final_report
   const parsedDossier = useMemo(() => {
     return parseDossierReport(
       finalReport,
       job || undefined,
-      rawGraphData || job?.graph || job?.investigation_graph
+      effectiveGraphData
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finalReport, jobIoc, jobGtiScore, rawGraphData, jobGraphSig]);
+  }, [finalReport, jobIoc, jobGtiScore, jobRiskLevel, effectiveGraphData]);
 
   const swimLanes = useMemo(() => {
     return deriveSwimLanes(
@@ -363,26 +387,6 @@ export default function InvestigatePage() {
       job || undefined
     );
   }, [parsedDossier.parsedDotGraph, jobIoc, job]);
-
-  // Same fallback chain as parseDossierReport's rawGraphData argument above —
-  // when the /graph endpoint hasn't returned data yet (or is failing), fall
-  // back to whatever graph is embedded on the job record itself, so the
-  // canvas, entity count, and jump-to-node lookups stay consistent with
-  // what the Appendix IOC table (fed by the same fallback) is showing.
-  // Keyed on jobGraphSig (not job?.graph/job?.investigation_graph directly)
-  // so this only gets a new identity when the fallback graph's shape
-  // actually changes, not on every poll.
-  const effectiveGraphData = useMemo(() => {
-    if (rawGraphData) return rawGraphData;
-    const fallback = job?.graph || job?.investigation_graph;
-    return fallback ? (fallback as GraphData) : null;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rawGraphData, jobGraphSig]);
-
-  const effectiveGraphRef = useRef<GraphData | null>(null);
-  useEffect(() => {
-    effectiveGraphRef.current = effectiveGraphData;
-  }, [effectiveGraphData]);
 
   const graphEntityCount = useMemo(() => {
     const rawCount = effectiveGraphData?.nodes?.length || 0;
@@ -427,7 +431,8 @@ export default function InvestigatePage() {
       }
 
       dotNodes.forEach((dn) => {
-        if (!mergedNodesMap.has(dn.id)) {
+        const existing = mergedNodesMap.get(dn.id);
+        if (!existing) {
           mergedNodesMap.set(dn.id, {
             id: dn.id,
             label: dn.label || dn.id,
@@ -438,6 +443,19 @@ export default function InvestigatePage() {
             inReport: true,
             threatScore: dn.threatScore ?? undefined,
             verdict: dn.verdict,
+          });
+        } else {
+          // Ensure any node explicitly present in the report's DOT diagram is
+          // marked `inReport: true` and has non-empty label/type fields.
+          mergedNodesMap.set(dn.id, {
+            ...existing,
+            label: existing.label || dn.label || dn.id,
+            entityType: existing.entityType || dn.entityType || "entity",
+            isRoot: Boolean(existing.isRoot || dn.isRoot),
+            isMalicious: Boolean(existing.isMalicious ?? dn.isMalicious),
+            inReport: true,
+            threatScore: existing.threatScore ?? dn.threatScore ?? undefined,
+            verdict: existing.verdict || dn.verdict,
           });
         }
       });
@@ -756,15 +774,32 @@ export default function InvestigatePage() {
   useEffect(() => {
     if (!id) return;
 
-    fetch("/api/investigations")
+    let isCancelled = false;
+    const abortController = new AbortController();
+
+    rawGraphRef.current = null;
+    effectiveGraphRef.current = null;
+    terminalStatusRef.current = null;
+    terminalSnapshotRef.current = null;
+    lastJobSignatureRef.current = "";
+    lastGraphSignatureRef.current = "";
+    lastLogSignatureRef.current = "";
+    lastPendingJumpRef.current = null;
+    jumpFilterAttemptsRef.current = 0;
+    jumpFiltersRelaxedNoticeRef.current = false;
+    pendingJumpNodeIdRef.current = null;
+
+    fetch("/api/investigations", { signal: abortController.signal })
       .then((r) => r.json())
-      .then((jobs) => setRecentJobs(Array.isArray(jobs) ? jobs : []))
-      .catch(() => setRecentJobs([]));
+      .then((jobs) => {
+        if (!isCancelled) setRecentJobs(Array.isArray(jobs) ? jobs : []);
+      })
+      .catch(() => {
+        if (!isCancelled) setRecentJobs([]);
+      });
 
     let pollInterval: ReturnType<typeof setInterval> | null = null;
     let eventSource: EventSource | null = null;
-    terminalStatusRef.current = null;
-    terminalSnapshotRef.current = null;
 
     const formatTransparencyLog = (entries: unknown[]) =>
       entries
@@ -786,22 +821,30 @@ export default function InvestigatePage() {
       data: InvestigationStreamData,
       eventType: string
     ) => {
-      const update = reconcileTerminalInvestigationEvent(eventType, data);
+      if (isCancelled) return;
+      const normalizedStatus = status.toLowerCase() as TerminalInvestigationStatus;
+      const update =
+        reconcileTerminalInvestigationEvent(eventType, data) ||
+        reconcileTerminalInvestigationEvent("investigation_snapshot", {
+          ...data,
+          status: normalizedStatus,
+        });
       if (!update) return;
 
-      terminalStatusRef.current = status;
+      const resolvedStatus = update.status;
+      terminalStatusRef.current = resolvedStatus;
       terminalSnapshotRef.current = {
         subtasks: update.subtasks,
         transparencyLog: update.transparencyLog,
       };
-      setJobStatus(status);
+      setJobStatus(resolvedStatus);
       setProgress(update.progress);
       setStatusMessage(update.message);
       setJob((previous) =>
         previous
           ? {
               ...previous,
-              status,
+              status: resolvedStatus,
               ...(update.subtasks ? { subtasks: update.subtasks as DossierJob["subtasks"] } : {}),
             }
           : previous
@@ -812,15 +855,19 @@ export default function InvestigatePage() {
     };
 
     const refetch = async (): Promise<string> => {
+      if (isCancelled) return terminalStatusRef.current ?? "running";
       try {
         const [graphRes, jobRes] = await Promise.all([
-          fetch(`/api/investigations/${id}/graph`),
-          fetch(`/api/investigations/${id}`),
+          fetch(`/api/investigations/${id}/graph`, { signal: abortController.signal }),
+          fetch(`/api/investigations/${id}`, { signal: abortController.signal }),
         ]);
 
+        if (isCancelled) return terminalStatusRef.current ?? "running";
         if (!jobRes.ok) throw new Error("Failed to fetch job details");
 
         const jobData: DossierJob = await jobRes.json();
+        if (isCancelled) return terminalStatusRef.current ?? "running";
+
         // Normalized once here so every downstream comparison (including the
         // render's case-sensitive `jobStatus === "failed"` checks) stays
         // correct even if the backend ever returns non-lowercase status.
@@ -889,7 +936,7 @@ export default function InvestigatePage() {
 
         if (terminalFromRest) {
           applyTerminalUpdate(
-            fetchedStatus,
+            fetchedStatus as TerminalInvestigationStatus,
             jobData as unknown as InvestigationStreamData,
             "investigation_snapshot"
           );
@@ -910,6 +957,7 @@ export default function InvestigatePage() {
 
         if (graphRes.ok) {
           const graphData: GraphData = await graphRes.json();
+          if (isCancelled) return effectiveStatus;
           const graphSig = `${graphData.nodes?.length ?? 0}:${graphData.edges?.length ?? 0}:${graphData.nodes?.map((n) => n.id).join(",") ?? ""}`;
           if (graphSig !== lastGraphSignatureRef.current) {
             lastGraphSignatureRef.current = graphSig;
@@ -919,6 +967,7 @@ export default function InvestigatePage() {
         }
         return effectiveStatus;
       } catch (e) {
+        if (isCancelled) return "running";
         console.error(e);
         return terminalStatusRef.current ?? "running";
       }
@@ -929,6 +978,7 @@ export default function InvestigatePage() {
     eventSource = new EventSource(`/api/investigations/${id}/stream`);
 
     eventSource.onmessage = (event) => {
+      if (isCancelled) return;
       try {
         const payload = JSON.parse(event.data);
         const eventType = payload.event || "message";
@@ -948,8 +998,10 @@ export default function InvestigatePage() {
           setActivityLog((prev) => [line, ...prev.slice(0, 24)]);
         }
 
-        const terminalStatus = isTerminalInvestigationStatus(data.status)
-          ? data.status
+        const terminalStatus: TerminalInvestigationStatus | null = isTerminalInvestigationStatus(
+          data.status
+        )
+          ? (String(data.status).toLowerCase() as TerminalInvestigationStatus)
           : eventType === "investigation_completed"
             ? "completed"
             : eventType === "investigation_failed"
@@ -968,6 +1020,7 @@ export default function InvestigatePage() {
     };
 
     pollInterval = setInterval(async () => {
+      if (isCancelled) return;
       const currentStatus = await refetch();
       if (isTerminalInvestigationStatus(currentStatus)) {
         if (pollInterval) clearInterval(pollInterval);
@@ -975,6 +1028,8 @@ export default function InvestigatePage() {
     }, 4000);
 
     return () => {
+      isCancelled = true;
+      abortController.abort();
       if (pollInterval) clearInterval(pollInterval);
       eventSource?.close();
     };

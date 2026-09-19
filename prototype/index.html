@@ -863,10 +863,11 @@
           return;
         }
 
-        // Live backend fetch
+        // Live backend fetch (encode jobId to prevent path traversal / query injection)
+        const encodedJobId = encodeURIComponent(String(jobId).trim());
         const [jobRes, graphRes] = await Promise.all([
-          fetch(`/api/investigations/${jobId}`),
-          fetch(`/api/investigations/${jobId}/graph`)
+          fetch(`/api/investigations/${encodedJobId}`),
+          fetch(`/api/investigations/${encodedJobId}/graph`)
         ]);
 
         if (jobRes.ok) {
@@ -1117,14 +1118,9 @@
         }
       }
 
-      // 4. Render Markdown Report Body via marked.js
+      // 4. Render Markdown Report Body via marked.js (sanitized)
       const reportContainer = document.getElementById('section-report-body');
-      let reportHtml = '';
-      if (cleanReport && typeof marked !== 'undefined') {
-        reportHtml = marked.parse(cleanReport);
-      } else if (cleanReport) {
-        reportHtml = `<pre class="whitespace-pre-wrap">${cleanReport}</pre>`;
-      }
+      let reportHtml = renderSafeMarkdown(cleanReport);
 
       // 5. Inject anchor IDs for companion rail navigation
       reportHtml = reportHtml
@@ -1540,6 +1536,56 @@
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+    }
+
+    function sanitizeHtml(dirtyHtml) {
+      if (!dirtyHtml) return '';
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(String(dirtyHtml), 'text/html');
+      const blockedTags = new Set([
+        'SCRIPT', 'IFRAME', 'OBJECT', 'EMBED', 'FORM',
+        'META', 'LINK', 'STYLE', 'BASE', 'SVG', 'MATH', 'TEMPLATE'
+      ]);
+      const allNodes = Array.from(doc.body.querySelectorAll('*'));
+      for (const el of allNodes) {
+        if (blockedTags.has(el.tagName)) {
+          el.remove();
+          continue;
+        }
+        const attrs = Array.from(el.attributes);
+        for (const attr of attrs) {
+          const name = attr.name.toLowerCase();
+          const val = (attr.value || '').trim();
+          if (name.startsWith('on') || name === 'srcdoc' || name === 'formaction') {
+            el.removeAttribute(attr.name);
+            continue;
+          }
+          if (name === 'href' || name === 'src' || name === 'xlink:href' || name === 'action') {
+            const normalized = val.replace(/[\u0000-\u0020]+/g, '').toLowerCase();
+            const isSafe =
+              normalized.startsWith('http://') ||
+              normalized.startsWith('https://') ||
+              normalized.startsWith('mailto:') ||
+              normalized.startsWith('#') ||
+              normalized.startsWith('/');
+            if (!isSafe) {
+              el.removeAttribute(attr.name);
+            } else if (el.tagName === 'A') {
+              el.setAttribute('rel', 'noopener noreferrer');
+              el.setAttribute('target', '_blank');
+            }
+          }
+        }
+      }
+      return doc.body.innerHTML;
+    }
+
+    function renderSafeMarkdown(mdString) {
+      if (!mdString) return '';
+      if (typeof marked !== 'undefined') {
+        return sanitizeHtml(marked.parse(String(mdString)));
+      }
+      return `<pre class="whitespace-pre-wrap">${escapeHtml(mdString)}</pre>`;
     }
 
     function getAttackFlowCardHtml(job, rawDotCode, parsedDotGraph) {
@@ -2074,7 +2120,7 @@
                   <span class="text-[11px] text-slate-400 font-mono" id="label-toggle-malware">View Report ▾</span>
                 </button>
                 <div id="teardown-malware" class="hidden mt-3 p-4 rounded-xl bg-slate-950 border border-slate-800/90 editorial-prose text-xs text-slate-300 max-h-[500px] overflow-y-auto">
-                  ${typeof marked !== 'undefined' ? marked.parse(malware.markdown_report) : `<pre>${escapeHtml(malware.markdown_report)}</pre>`}
+                  ${renderSafeMarkdown(malware.markdown_report)}
                 </div>
               </div>` : ''}
           </div>
@@ -2138,7 +2184,7 @@
                   <span class="text-[11px] text-slate-400 font-mono" id="label-toggle-infra">View Report ▾</span>
                 </button>
                 <div id="teardown-infra" class="hidden mt-3 p-4 rounded-xl bg-slate-950 border border-slate-800/90 editorial-prose text-xs text-slate-300 max-h-[500px] overflow-y-auto">
-                  ${typeof marked !== 'undefined' ? marked.parse(infra.markdown_report) : `<pre>${escapeHtml(infra.markdown_report)}</pre>`}
+                  ${renderSafeMarkdown(infra.markdown_report)}
                 </div>
               </div>` : ''}
           </div>
@@ -2264,8 +2310,15 @@
             }
           });
 
-          // Adapt DOT for orientation and dark theme
-          let adaptedDot = dotCode;
+          // Adapt DOT for orientation, dark theme, and strip any link/target attributes outside quoted strings
+          let adaptedDot = dotCode.replace(
+            /("(?:[^"\\]|\\.)*")|\b(?:[A-Za-z]*(?:URL|href|target))\s*=\s*(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|<(?:[^<>]|<[^<>]*>)*>|[^\s,\];]+)/gi,
+            (match, quotedLiteral) => (quotedLiteral ? quotedLiteral : '')
+          );
+          adaptedDot = adaptedDot
+            .split(/("(?:[^"\\]|\\.)*")/g)
+            .map((seg, idx) => (idx % 2 === 1 ? seg : seg.replace(/,(?:\s*,)+/g, ',').replace(/,\s*\]/g, ']').replace(/\[\s*,/g, '[')))
+            .join('');
           if (/rankdir\s*=\s*[A-Z]+/i.test(adaptedDot)) {
             adaptedDot = adaptedDot.replace(/rankdir\s*=\s*[A-Z]+/gi, `rankdir=${effectiveOri}`);
           } else {
@@ -2276,7 +2329,29 @@
           const svgOutput = g.dot(adaptedDot);
 
           loading?.remove();
-          container.innerHTML = svgOutput;
+          const svgDoc = new DOMParser().parseFromString(svgOutput, 'image/svg+xml');
+          const parsedSvg = svgDoc.querySelector('svg');
+          if (parsedSvg) {
+            parsedSvg.querySelectorAll('script, foreignObject, iframe, object, embed').forEach(el => el.remove());
+            parsedSvg.querySelectorAll('*').forEach(el => {
+              Array.from(el.attributes).forEach(attr => {
+                const name = attr.name.toLowerCase();
+                if (name.startsWith('on') || name === 'href' || name === 'xlink:href') {
+                  el.removeAttribute(attr.name);
+                }
+              });
+            });
+            parsedSvg.querySelectorAll('a').forEach(aEl => {
+              const parent = aEl.parentNode;
+              if (parent) {
+                while (aEl.firstChild) parent.insertBefore(aEl.firstChild, aEl);
+                parent.removeChild(aEl);
+              }
+            });
+            container.replaceChildren(parsedSvg);
+          } else {
+            container.replaceChildren();
+          }
 
           // Attach D3 Zoom and Pan to the generated SVG
           const svgEl = d3.select(container).select('svg');

@@ -1,4 +1,5 @@
 import http.server
+import json
 import socketserver
 import os
 import sys
@@ -66,11 +67,13 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
-            self.wfile.write(f'{{"error":"Failed to connect to backend: {str(err)}"}}'.encode())
+            payload = json.dumps({"error": f"Failed to connect to backend: {str(err)}"}).encode("utf-8")
+            self.wfile.write(payload)
 
     def end_headers(self):
         # Enable CORS and disable aggressive caching for smooth live prototyping
         self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
         super().end_headers()
 

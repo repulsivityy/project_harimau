@@ -7,6 +7,7 @@ import {
   adaptDotForDarkTheme,
   deriveSwimLanes,
   extractFallbackIocs,
+  normalizeFallbackGraphData,
   normalizeReportSections,
   parseDossierReport,
   parseDotToGraph,
@@ -395,3 +396,143 @@ End of analysis.`;
     /```powershell\n# Timeline\n# 4\. Timeline calculation\nGet-Date\n```\n\nEnd of analysis\./
   );
 });
+
+test("normalizeFallbackGraphData converts raw NetworkX node_link_data into valid GraphData with labels, entityType, inReport, and edges", () => {
+  const rawNetworkxGraph = {
+    directed: true,
+    multigraph: false,
+    graph: {},
+    nodes: [
+      {
+        id: "evil-root.com",
+        entity_type: "domain",
+        gti_assessment: {
+          verdict: { value: "VERDICT_MALICIOUS" },
+          threat_score: { value: 92 },
+        },
+      },
+      {
+        id: "198.51.100.77",
+        entity_type: "ip_address",
+        gti_assessment: {
+          verdict: { value: "VERDICT_SUSPICIOUS" },
+          threat_score: { value: 45 },
+        },
+      },
+    ],
+    links: [
+      {
+        source: "evil-root.com",
+        target: "198.51.100.77",
+        relationship: "resolutions",
+      },
+    ],
+  };
+
+  const normalized = normalizeFallbackGraphData(
+    rawNetworkxGraph,
+    "evil-root.com",
+    92,
+    "MALICIOUS"
+  );
+
+  assert.equal(normalized.nodes.length, 2);
+  assert.equal(normalized.edges.length, 1);
+
+  const root = normalized.nodes.find((n) => n.id === "evil-root.com")!;
+  assert.ok(root);
+  assert.equal(root.label, "evil-root.com");
+  assert.equal(root.entityType, "domain");
+  assert.equal(root.inReport, true);
+  assert.equal(root.isRoot, true);
+  assert.equal(root.isMalicious, true);
+  assert.equal(root.threatScore, 92);
+  assert.equal(root.verdict, "MALICIOUS");
+
+  const ipNode = normalized.nodes.find((n) => n.id === "198.51.100.77")!;
+  assert.ok(ipNode);
+  assert.equal(ipNode.label, "198.51.100.77");
+  assert.equal(ipNode.entityType, "ip_address");
+  assert.equal(ipNode.inReport, true);
+  assert.equal(ipNode.isRoot, false);
+  assert.equal(ipNode.isMalicious, false);
+  assert.equal(ipNode.threatScore, 45);
+  assert.equal(ipNode.verdict, "SUSPICIOUS");
+
+  assert.deepEqual(normalized.edges[0], {
+    source: "evil-root.com",
+    target: "198.51.100.77",
+    label: "resolutions",
+  });
+});
+
+test("normalizeReportSections and parseDossierReport do not get stuck in inFence mode on single-line inline triple backticks or tilde fences", () => {
+  const markdownWithInlineTripleBackticks = `### 1. Executive Summary
+Executive overview.
+
+### 2. Attack Narrative
+The attacker executed the following one-liner:
+\`\`\`cmd.exe /c powershell -enc ZQBjAGgAbwA=\`\`\`
+
+~~~bash
+# 5. Technical Analysis comment inside tilde fence
+echo "hello"
+~~~
+
+### 4. Investigation Timeline
+- 10:00 UTC: Initial execution.
+
+### 5. Technical Analysis
+Actual technical analysis section.`;
+
+  const parsed = parseDossierReport(markdownWithInlineTripleBackticks);
+  const sec2 = parsed.sections.find((s) => s.number === 2)!;
+  const sec4 = parsed.sections.find((s) => s.number === 4)!;
+  const sec5 = parsed.sections.find((s) => s.number === 5)!;
+
+  assert.match(sec2.markdownBody, /cmd\.exe \/c powershell/);
+  assert.match(sec2.markdownBody, /# 5\. Technical Analysis comment inside tilde fence/);
+  assert.match(sec4.markdownBody, /10:00 UTC: Initial execution\./);
+  assert.match(sec5.markdownBody, /Actual technical analysis section\./);
+});
+
+test("adaptDotForDarkTheme strips edgeURL, headURL, tailhref, and HTML-like <...> links without altering URL= text inside quoted labels", () => {
+  const dot = `digraph G {
+    "n1" [label="Check URL=\\"http://benign.example\\" and rankdir=TB", edgeURL="javascript:alert(1)", headhref=<javascript:alert(2)>, tailURL=javascript:alert(3), color="#ef4444"];
+    "n2" [label=<<TABLE HREF="javascript:alert(4)"><TR><TD>Cell</TD></TR></TABLE>>];
+  }`;
+
+  const adapted = adaptDotForDarkTheme(dot, "LR");
+  assert.doesNotMatch(adapted, /edgeURL\s*=/i);
+  assert.doesNotMatch(adapted, /headhref\s*=/i);
+  assert.doesNotMatch(adapted, /tailURL\s*=/i);
+  assert.doesNotMatch(adapted, /HREF\s*=\s*"javascript:alert\(4\)"/i);
+  assert.match(adapted, /label="Check URL=\\"http:\/\/benign\.example\\" and rankdir=TB"/);
+  assert.match(adapted, /rankdir=LR/);
+});
+
+test("parseDossierReport Step 2b scans past non-IOC JSON blocks in Appendix to find subsequent valid IOC JSON array", () => {
+  const markdown = `### 1. Executive Summary
+Overview.
+
+### 7. Appendix
+First, an auxiliary tool metadata block:
+\`\`\`json
+[
+  { "tool": "sandbox-v2", "duration_ms": 1200 }
+]
+\`\`\`
+
+Now the actual extracted IOCs:
+\`\`\`json
+[
+  { "type": "domain", "value": "c2-second-block.example", "notes": "Primary C2", "confidence": "HIGH" }
+]
+\`\`\``;
+
+  const parsed = parseDossierReport(markdown);
+  assert.equal(parsed.appendixIocs.length, 1);
+  assert.equal(parsed.appendixIocs[0].value, "c2-second-block.example");
+});
+
+

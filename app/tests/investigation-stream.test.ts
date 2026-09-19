@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   reconcileTerminalInvestigationEvent,
   terminalStatusFromInvestigationEvent,
-} from "./investigation-stream";
+} from "../src/lib/investigation-stream";
 
 test("a terminal SSE snapshot is authoritative and carries its saved timeline", () => {
   const subtasks = [{ agent: "triage", status: "completed" }];

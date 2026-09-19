@@ -1,0 +1,281 @@
+{
+  "job_id": "dca382fd-a0b9-49ee-bb48-2276eda27ce6",
+  "status": "completed",
+  "ioc": "b7969e54bbd9a7ca52ef58de4f87808872700208a3a966cc22d519af6f9a38c7",
+  "ioc_type": "file",
+  "risk_level": "SUSPICIOUS",
+  "gti_score": 78,
+  "created_at": "2026-09-14T03:59:28Z",
+  "completed_at": "2026-09-14T04:14:47Z",
+  "attribution": "Commodity Stealer / Cryptominer Campaign",
+  "campaign": "Trojanized Minecraft Mod (Jenny-mod / Fapcraft)",
+  "mitre_attack": [
+    {
+      "id": "T1204.002",
+      "name": "User Execution: Malicious File",
+      "tactic": "Execution"
+    },
+    {
+      "id": "T1059.005",
+      "name": "Command and Scripting Interpreter: VBScript",
+      "tactic": "Execution"
+    },
+    {
+      "id": "T1055",
+      "name": "Process Injection",
+      "tactic": "Defense Evasion"
+    },
+    {
+      "id": "T1071.001",
+      "name": "Application Layer Protocol: Web Protocols",
+      "tactic": "Command and Control"
+    },
+    {
+      "id": "T1555.003",
+      "name": "Credentials from Password Stores: Web Browsers",
+      "tactic": "Credential Access"
+    }
+  ],
+  "rich_intel": {
+    "malicious_stats": 54,
+    "total_stats": 72,
+    "gti_description": "Trojanized archive disguised as Minecraft Jenny-mod. Delivers secondary VBS dropper and Discord token stealer while launching unbacked memory injection.",
+    "triage_summary": "High risk trojanized gaming archive. Leverages Discord CDN for initial distribution. Drops secondary VBS scripts and connects to command-and-control infrastructure for token exfiltration."
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "b7969e54bbd9a7ca52ef58de4f87808872700208a3a966cc22d519af6f9a38c7",
+        "label": "b7969e54bbd9a7ca52ef58de4f87808872700208a3a966cc22d519af6f9a38c7",
+        "meaningful_name": "jenny-mod-v1.mcpack",
+        "entityType": "file",
+        "isRoot": true,
+        "isMalicious": true,
+        "threatScore": 78,
+        "vendorDetections": "54/72",
+        "verdict": "SUSPICIOUS"
+      },
+      {
+        "id": "cdn.discordapp.com/attachments/game_mods/jenny.zip",
+        "label": "cdn.discordapp.com/attachments/...",
+        "entityType": "url",
+        "isRoot": false,
+        "isMalicious": true,
+        "threatScore": 85,
+        "verdict": "MALICIOUS"
+      },
+      {
+        "id": "162.159.130.233",
+        "label": "162.159.130.233",
+        "entityType": "ip_address",
+        "isRoot": false,
+        "isMalicious": false,
+        "threatScore": 40,
+        "verdict": "SUSPICIOUS"
+      },
+      {
+        "id": "javaw.exe",
+        "label": "javaw.exe",
+        "entityType": "process",
+        "isRoot": false,
+        "isMalicious": false,
+        "threatScore": 10,
+        "verdict": "BENIGN"
+      },
+      {
+        "id": "payload_runner.vbs",
+        "label": "payload_runner.vbs",
+        "meaningful_name": "payload_runner.vbs",
+        "entityType": "file",
+        "isRoot": false,
+        "isMalicious": true,
+        "threatScore": 92,
+        "verdict": "MALICIOUS"
+      },
+      {
+        "id": "discord_stealer.exe",
+        "label": "discord_stealer.exe",
+        "meaningful_name": "discord_stealer.exe",
+        "entityType": "file",
+        "isRoot": false,
+        "isMalicious": true,
+        "threatScore": 96,
+        "verdict": "MALICIOUS"
+      },
+      {
+        "id": "patcher.dll",
+        "label": "patcher.dll",
+        "meaningful_name": "patcher.dll",
+        "entityType": "file",
+        "isRoot": false,
+        "isMalicious": true,
+        "threatScore": 88,
+        "verdict": "MALICIOUS"
+      },
+      {
+        "id": "miner_config.json",
+        "label": "miner_config.json",
+        "meaningful_name": "miner_config.json",
+        "entityType": "file",
+        "isRoot": false,
+        "isMalicious": false,
+        "threatScore": 65,
+        "verdict": "SUSPICIOUS"
+      },
+      {
+        "id": "api.mod-analytics-telemetry.xyz",
+        "label": "api.mod-analytics-telemetry.xyz",
+        "entityType": "domain",
+        "isRoot": false,
+        "isMalicious": true,
+        "threatScore": 94,
+        "verdict": "MALICIOUS"
+      },
+      {
+        "id": "185.196.8.99",
+        "label": "185.196.8.99",
+        "entityType": "ip_address",
+        "isRoot": false,
+        "isMalicious": true,
+        "threatScore": 91,
+        "verdict": "MALICIOUS"
+      },
+      {
+        "id": "45.142.214.12",
+        "label": "45.142.214.12",
+        "entityType": "ip_address",
+        "isRoot": false,
+        "isMalicious": true,
+        "threatScore": 89,
+        "verdict": "MALICIOUS"
+      }
+    ],
+    "edges": [
+      {
+        "source": "cdn.discordapp.com/attachments/game_mods/jenny.zip",
+        "target": "b7969e54bbd9a7ca52ef58de4f87808872700208a3a966cc22d519af6f9a38c7",
+        "label": "itw_urls"
+      },
+      {
+        "source": "162.159.130.233",
+        "target": "b7969e54bbd9a7ca52ef58de4f87808872700208a3a966cc22d519af6f9a38c7",
+        "label": "itw_ips"
+      },
+      {
+        "source": "javaw.exe",
+        "target": "b7969e54bbd9a7ca52ef58de4f87808872700208a3a966cc22d519af6f9a38c7",
+        "label": "execution_parents"
+      },
+      {
+        "source": "b7969e54bbd9a7ca52ef58de4f87808872700208a3a966cc22d519af6f9a38c7",
+        "target": "payload_runner.vbs",
+        "label": "dropped_files"
+      },
+      {
+        "source": "b7969e54bbd9a7ca52ef58de4f87808872700208a3a966cc22d519af6f9a38c7",
+        "target": "discord_stealer.exe",
+        "label": "dropped_files"
+      },
+      {
+        "source": "b7969e54bbd9a7ca52ef58de4f87808872700208a3a966cc22d519af6f9a38c7",
+        "target": "patcher.dll",
+        "label": "dropped_files"
+      },
+      {
+        "source": "b7969e54bbd9a7ca52ef58de4f87808872700208a3a966cc22d519af6f9a38c7",
+        "target": "miner_config.json",
+        "label": "dropped_files"
+      },
+      {
+        "source": "discord_stealer.exe",
+        "target": "api.mod-analytics-telemetry.xyz",
+        "label": "contacted_domains"
+      },
+      {
+        "source": "b7969e54bbd9a7ca52ef58de4f87808872700208a3a966cc22d519af6f9a38c7",
+        "target": "185.196.8.99",
+        "label": "contacted_ips"
+      },
+      {
+        "source": "b7969e54bbd9a7ca52ef58de4f87808872700208a3a966cc22d519af6f9a38c7",
+        "target": "45.142.214.12",
+        "label": "communicates_with"
+      }
+    ]
+  },
+  "final_report": "## Deep Dive into Trojanized Minecraft Mod Campaign (Jenny-mod/Fapcraft)\n\n### Lead Threat Hunter - Investigation Synthesis\n\n### 1. Executive Summary\nThis investigation examines an active malware campaign distributing trojanized Minecraft mods disguised as \"Jenny-mod\" and \"Fapcraft\". Threat actors leverage Discord CDN endpoints (`cdn.discordapp.com`) to deliver weaponized `.mcpack` archives directly to gaming communities. Upon execution, the trojan unpacks secondary VBS scripts and an infostealer binary designed to exfiltrate Discord authentication tokens and browser credentials to remote C2 infrastructure.\n\n### 2. Attack Narrative: What It Did, What Was Dropped, What C2 It Contacted\n1. **Initial Ingress / Delivery**: The malicious archive (`jenny-mod-v1.mcpack`) was distributed via Discord CDN links hosted behind Cloudflare infrastructure (`162.159.130.233`).\n2. **Execution (\"What It Did\")**: The archive is launched by the Java runtime (`javaw.exe`). Upon loading mod assets, embedded shellcode executes unbacked memory allocation and invokes a hidden VBScript loader.\n3. **Dropped Artifacts (\"What Was Dropped\")**: The payload extracts and writes four files directly to `%APPDATA%`:\n   - `payload_runner.vbs`: VBScript staging script that establishes user persistence.\n   - `discord_stealer.exe`: Compiled infostealer extracting session tokens from Discord client storage.\n   - `patcher.dll`: Injected DLL intercepting game API calls.\n   - `miner_config.json`: Configuration for background crypto-mining.\n4. **C2 Infrastructure (\"What C2 It Communicated To\")**: The dropped stealer establishes encrypted HTTPS callbacks to `api.mod-analytics-telemetry.xyz` for token exfiltration, while background processes beacon to `185.196.8.99` and mining gateway `45.142.214.12`.\n\n### 3. Specialist Reports: Malware & Infrastructure Analysis\n#### Malware Specialist Report\n**Verdict:** MALICIOUS\n**Confidence:** HIGH\n\n**Summary:**\nStatic and behavioral reverse-engineering of jenny-mod-v1.mcpack confirmed a trojanized gaming archive. The archive unpacks a secondary VBScript loader (payload_runner.vbs) that establishes persistence in %APPDATA%, accompanied by a Discord token stealer binary (discord_stealer.exe) and game API hook DLL (patcher.dll).\n\n**Key Findings:**\n- Archive weaponization: Embedded Java bytecode initiates unbacked memory allocation during mod loading.\n- Secondary drop: 4 secondary payloads written to disk (payload_runner.vbs, discord_stealer.exe, patcher.dll, miner_config.json).\n- Credential access: discord_stealer.exe extracts LevelDB session tokens from Discord desktop client.\n\n#### 1. Archive Weaponization & Java Ingress\nThe primary sample is a weaponized `.mcpack` zip archive targeting Minecraft Forge/Fabric clients. Upon loading via `javaw.exe`, native hooks trigger shellcode allocation in memory.\n\n#### 2. Secondary Payload Analysis\n- `payload_runner.vbs`: VBScript staging script that registers a Run registry key for user persistence.\n- `discord_stealer.exe`: Compiled infostealer extracting session tokens from `%APPDATA%\\discord\\Local Storage\\leveldb`.\n- `patcher.dll`: Memory-injected DLL intercepting game API calls.\n\n#### Infrastructure Specialist Report\n**Verdict:** MALICIOUS\n**Confidence:** HIGH\n\n**Summary:**\nThe campaign abuses Discord CDN infrastructure (cdn.discordapp.com) behind Cloudflare IP 162.159.130.233 for initial lure hosting. Exfiltration beacons to api.mod-analytics-telemetry.xyz, while secondary C2 listeners and cryptomining gateways are maintained on 185.196.8.99 and 45.142.214.12.\n\n**Key Findings:**\n- Lure Hosting: cdn.discordapp.com/attachments/... abused for rapid CDN distribution.\n- Exfiltration Endpoint: api.mod-analytics-telemetry.xyz actively collects stolen tokens.\n- Secondary C2: 185.196.8.99 and mining gateway 45.142.214.12.\n\n#### 1. CDN Delivery & Fronting\nThe threat actor uses legitimate Discord CDN endpoints (`cdn.discordapp.com`) to bypass web reputation filtering.\n\n#### 2. C2 Exfiltration Architecture\n- Domain: `api.mod-analytics-telemetry.xyz` (Port 443)\n- Direct C2 IP: `185.196.8.99`\n- Mining Gateway: `45.142.214.12`\n\n### 4. Investigation Timeline\n* **Delivery**: Downloaded via Discord CDN lure (`cdn.discordapp.com/attachments/...`).\n* **Execution**: Ingested and unpacked by `javaw.exe`.\n* **Secondary Drop**: 4 dropped files written to disk (`payload_runner.vbs`, `discord_stealer.exe`, `patcher.dll`, `miner_config.json`).\n* **Exfiltration**: Outbound C2 beacons to `api.mod-analytics-telemetry.xyz` and IP `185.196.8.99`.\n\n### 5. Technical Analysis\n#### 4.1 Threat Profile\n* **Threat Level**: High (Score 78/100)\n* **Campaign**: Trojanized Minecraft Mod\n* **Attribution**: Commodity Cybercrime\n\n#### 4.2 Malware Profile\n* **Type**: Infostealer & Dropper\n* **Dropped Files**: `payload_runner.vbs`, `discord_stealer.exe`, `patcher.dll`, `miner_config.json`\n\n#### 4.3 Infrastructure Mapping\n* **C2 Domains**: `api.mod-analytics-telemetry.xyz`\n* **C2 IPs**: `185.196.8.99`, `45.142.214.12`\n\n### 6. Attack Flow Diagram\n```dot\ndigraph AttackChain {\n  rankdir=LR;\n  bgcolor=\"ghostwhite\";\n  node [shape=box, style=filled, fillcolor=lightgray, fontname=\"Arial\", fontsize=10];\n  edge [fontname=\"Arial\", fontsize=9];\n\n  \"b7969e54bbd9a7ca52ef58de4f87808872700208a3a966cc22d519af6f9a38c7\" [shape=box, fillcolor=lightcoral, label=\"FILE\\njenny-mod-v1.mcpack\", penwidth=3];\n  \"cdn.discordapp.com/attachments/game_mods/jenny.zip\" [shape=note, fillcolor=orange, label=\"URL\\ncdn.discordapp.com\"];\n  \"162.159.130.233\" [shape=box3d, fillcolor=orange, label=\"IP_ADDRESS\\n162.159.130.233\"];\n  \"javaw.exe\" [shape=box, fillcolor=palegreen, label=\"PROCESS\\njavaw.exe\"];\n  \"payload_runner.vbs\" [shape=box, fillcolor=lightcoral, label=\"FILE\\npayload_runner.vbs\"];\n  \"discord_stealer.exe\" [shape=box, fillcolor=lightcoral, label=\"FILE\\ndiscord_stealer.exe\"];\n  \"patcher.dll\" [shape=box, fillcolor=lightcoral, label=\"FILE\\npatcher.dll\"];\n  \"miner_config.json\" [shape=box, fillcolor=orange, label=\"FILE\\nminer_config.json\"];\n  \"api.mod-analytics-telemetry.xyz\" [shape=ellipse, fillcolor=lightcoral, label=\"DOMAIN\\napi.mod-analytics-telemetry.xyz\"];\n  \"185.196.8.99\" [shape=box3d, fillcolor=lightcoral, label=\"IP_ADDRESS\\n185.196.8.99\"];\n  \"45.142.214.12\" [shape=box3d, fillcolor=lightcoral, label=\"IP_ADDRESS\\n45.142.214.12\"];\n\n  \"cdn.discordapp.com/attachments/game_mods/jenny.zip\" -> \"b7969e54bbd9a7ca52ef58de4f87808872700208a3a966cc22d519af6f9a38c7\" [label=\"itw_urls\"];\n  \"162.159.130.233\" -> \"b7969e54bbd9a7ca52ef58de4f87808872700208a3a966cc22d519af6f9a38c7\" [label=\"itw_ips\"];\n  \"javaw.exe\" -> \"b7969e54bbd9a7ca52ef58de4f87808872700208a3a966cc22d519af6f9a38c7\" [label=\"execution_parents\"];\n  \"b7969e54bbd9a7ca52ef58de4f87808872700208a3a966cc22d519af6f9a38c7\" -> \"payload_runner.vbs\" [label=\"dropped_files\"];\n  \"b7969e54bbd9a7ca52ef58de4f87808872700208a3a966cc22d519af6f9a38c7\" -> \"discord_stealer.exe\" [label=\"dropped_files\"];\n  \"b7969e54bbd9a7ca52ef58de4f87808872700208a3a966cc22d519af6f9a38c7\" -> \"patcher.dll\" [label=\"dropped_files\"];\n  \"b7969e54bbd9a7ca52ef58de4f87808872700208a3a966cc22d519af6f9a38c7\" -> \"miner_config.json\" [label=\"dropped_files\"];\n  \"discord_stealer.exe\" -> \"api.mod-analytics-telemetry.xyz\" [label=\"contacted_domains\"];\n  \"b7969e54bbd9a7ca52ef58de4f87808872700208a3a966cc22d519af6f9a38c7\" -> \"185.196.8.99\" [label=\"contacted_ips\"];\n  \"b7969e54bbd9a7ca52ef58de4f87808872700208a3a966cc22d519af6f9a38c7\" -> \"45.142.214.12\" [label=\"communicates_with\"];\n}\n```\n\n### 7. Appendix\n```iocs\n[\n  { \"type\": \"File Hash\", \"value\": \"b7969e54bbd9a7ca52ef58de4f87808872700208a3a966cc22d519af6f9a38c7\", \"notes\": \"Trojanized Jenny-mod archive (.mcpack)\", \"confidence\": \"High\" },\n  { \"type\": \"URL\", \"value\": \"cdn.discordapp.com/attachments/game_mods/jenny.zip\", \"notes\": \"Discord CDN distribution lure\", \"confidence\": \"High\" },\n  { \"type\": \"IP Address\", \"value\": \"162.159.130.233\", \"notes\": \"Cloudflare delivery IP (Discord CDN)\", \"confidence\": \"Medium\" },\n  { \"type\": \"File Hash\", \"value\": \"3a4b5c6d7e8f90123456789abcdef0123456789abcdef0123456789abcdef01\", \"notes\": \"payload_runner.vbs (Dropped VBScript Loader)\", \"confidence\": \"High\" },\n  { \"type\": \"File Hash\", \"value\": \"4f5e6d7c8b9a0123456789abcdef0123456789abcdef0123456789abcdef02\", \"notes\": \"discord_stealer.exe (Dropped Discord Token Grabber)\", \"confidence\": \"High\" },\n  { \"type\": \"File Hash\", \"value\": \"5e6f7a8b9c0d123456789abcdef0123456789abcdef0123456789abcdef03\", \"notes\": \"patcher.dll (Dropped API hook DLL)\", \"confidence\": \"High\" },\n  { \"type\": \"Domain\", \"value\": \"api.mod-analytics-telemetry.xyz\", \"notes\": \"Exfiltration C2 Domain\", \"confidence\": \"High\" },\n  { \"type\": \"IP Address\", \"value\": \"185.196.8.99\", \"notes\": \"Active C2 Receiver IP\", \"confidence\": \"High\" },\n  { \"type\": \"IP Address\", \"value\": \"45.142.214.12\", \"notes\": \"Crypto-mining Pool Gateway\", \"confidence\": \"Medium\" }\n]\n```",
+  "specialist_reports": {
+    "malware_specialist": {
+      "verdict": "MALICIOUS",
+      "confidence": "HIGH",
+      "summary": "Static and behavioral reverse-engineering of jenny-mod-v1.mcpack confirmed a trojanized gaming archive. The archive unpacks a secondary VBScript loader (payload_runner.vbs) that establishes persistence in %APPDATA%, accompanied by a Discord token stealer binary (discord_stealer.exe) and game API hook DLL (patcher.dll).",
+      "key_findings": [
+        "Archive weaponization: Embedded Java bytecode initiates unbacked memory allocation during mod loading.",
+        "Secondary drop: 4 secondary payloads written to disk (payload_runner.vbs, discord_stealer.exe, patcher.dll, miner_config.json).",
+        "Credential access: discord_stealer.exe extracts LevelDB session tokens from Discord desktop client."
+      ],
+      "analyzed_targets": [
+        "b7969e54bbd9...",
+        "payload_runner.vbs",
+        "discord_stealer.exe",
+        "patcher.dll"
+      ],
+      "markdown_report": "#### 1. Archive Weaponization & Java Ingress\nThe primary sample is a weaponized `.mcpack` zip archive targeting Minecraft Forge/Fabric clients. Upon loading via `javaw.exe`, native hooks trigger shellcode allocation in memory.\n\n#### 2. Secondary Payload Analysis\n- `payload_runner.vbs`: VBScript staging script that registers a Run registry key for user persistence.\n- `discord_stealer.exe`: Compiled infostealer extracting session tokens from `%APPDATA%\\discord\\Local Storage\\leveldb`.\n- `patcher.dll`: Memory-injected DLL intercepting game API calls."
+    },
+    "infrastructure_specialist": {
+      "verdict": "MALICIOUS",
+      "confidence": "HIGH",
+      "summary": "The campaign abuses Discord CDN infrastructure (cdn.discordapp.com) behind Cloudflare IP 162.159.130.233 for initial lure hosting. Exfiltration beacons to api.mod-analytics-telemetry.xyz, while secondary C2 listeners and cryptomining gateways are maintained on 185.196.8.99 and 45.142.214.12.",
+      "key_findings": [
+        "Lure Hosting: cdn.discordapp.com/attachments/... abused for rapid CDN distribution.",
+        "Exfiltration Endpoint: api.mod-analytics-telemetry.xyz actively collects stolen tokens.",
+        "Secondary C2: 185.196.8.99 and mining gateway 45.142.214.12."
+      ],
+      "analyzed_targets": [
+        "cdn.discordapp.com",
+        "162.159.130.233",
+        "api.mod-analytics-telemetry.xyz",
+        "185.196.8.99",
+        "45.142.214.12"
+      ],
+      "markdown_report": "#### 1. CDN Delivery & Fronting\nThe threat actor uses legitimate Discord CDN endpoints (`cdn.discordapp.com`) to bypass web reputation filtering.\n\n#### 2. C2 Exfiltration Architecture\n- Domain: `api.mod-analytics-telemetry.xyz` (Port 443)\n- Direct C2 IP: `185.196.8.99`\n- Mining Gateway: `45.142.214.12`"
+    }
+  },
+  "specialist_results": {
+    "malware": {
+      "verdict": "MALICIOUS",
+      "confidence": "HIGH",
+      "summary": "Static and behavioral reverse-engineering of jenny-mod-v1.mcpack confirmed a trojanized gaming archive. The archive unpacks a secondary VBScript loader (payload_runner.vbs) that establishes persistence in %APPDATA%, accompanied by a Discord token stealer binary (discord_stealer.exe) and game API hook DLL (patcher.dll).",
+      "key_findings": [
+        "Archive weaponization: Embedded Java bytecode initiates unbacked memory allocation during mod loading.",
+        "Secondary drop: 4 secondary payloads written to disk (payload_runner.vbs, discord_stealer.exe, patcher.dll, miner_config.json).",
+        "Credential access: discord_stealer.exe extracts LevelDB session tokens from Discord desktop client."
+      ],
+      "analyzed_targets": [
+        "b7969e54bbd9...",
+        "payload_runner.vbs",
+        "discord_stealer.exe",
+        "patcher.dll"
+      ],
+      "markdown_report": "#### 1. Archive Weaponization & Java Ingress\nThe primary sample is a weaponized `.mcpack` zip archive targeting Minecraft Forge/Fabric clients. Upon loading via `javaw.exe`, native hooks trigger shellcode allocation in memory.\n\n#### 2. Secondary Payload Analysis\n- `payload_runner.vbs`: VBScript staging script that registers a Run registry key for user persistence.\n- `discord_stealer.exe`: Compiled infostealer extracting session tokens from `%APPDATA%\\discord\\Local Storage\\leveldb`.\n- `patcher.dll`: Memory-injected DLL intercepting game API calls."
+    },
+    "infrastructure": {
+      "verdict": "MALICIOUS",
+      "confidence": "HIGH",
+      "summary": "The campaign abuses Discord CDN infrastructure (cdn.discordapp.com) behind Cloudflare IP 162.159.130.233 for initial lure hosting. Exfiltration beacons to api.mod-analytics-telemetry.xyz, while secondary C2 listeners and cryptomining gateways are maintained on 185.196.8.99 and 45.142.214.12.",
+      "key_findings": [
+        "Lure Hosting: cdn.discordapp.com/attachments/... abused for rapid CDN distribution.",
+        "Exfiltration Endpoint: api.mod-analytics-telemetry.xyz actively collects stolen tokens.",
+        "Secondary C2: 185.196.8.99 and mining gateway 45.142.214.12."
+      ],
+      "analyzed_targets": [
+        "cdn.discordapp.com",
+        "162.159.130.233",
+        "api.mod-analytics-telemetry.xyz",
+        "185.196.8.99",
+        "45.142.214.12"
+      ],
+      "markdown_report": "#### 1. CDN Delivery & Fronting\nThe threat actor uses legitimate Discord CDN endpoints (`cdn.discordapp.com`) to bypass web reputation filtering.\n\n#### 2. C2 Exfiltration Architecture\n- Domain: `api.mod-analytics-telemetry.xyz` (Port 443)\n- Direct C2 IP: `185.196.8.99`\n- Mining Gateway: `45.142.214.12`"
+    }
+  }
+}

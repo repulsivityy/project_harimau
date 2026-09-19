@@ -61,4 +61,5 @@ test_*
 node_modules/
 .next/
 out/
+*.tsbuildinfo
 app/package-lock.json

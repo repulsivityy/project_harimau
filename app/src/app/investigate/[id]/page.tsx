@@ -1,253 +1,121 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState, useRef, ChangeEvent } from "react";
+import { useEffect, useState, useRef, useMemo, useCallback, ChangeEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Background, BackgroundVariant, Controls, MiniMap, ReactFlow, useNodesState, useEdgesState, Handle, Position, MarkerType } from "@xyflow/react";
-import dagre from "dagre";
-
+import {
+  Background,
+  BackgroundVariant,
+  Controls,
+  MiniMap,
+  ReactFlow,
+  useNodesState,
+  useEdgesState,
+  Handle,
+  Position,
+  type ReactFlowInstance,
+  type Node,
+  type Edge,
+} from "@xyflow/react";
 import * as d3 from "d3";
-import { graphviz } from "d3-graphviz";
 import {
   isTerminalInvestigationStatus,
   reconcileTerminalInvestigationEvent,
   type InvestigationStreamData,
   type TerminalInvestigationStatus,
 } from "@/lib/investigation-stream";
+import {
+  deriveSwimLanes,
+  normalizeFallbackGraphData,
+  parseDossierReport,
+} from "@/lib/dossier-utils";
+import type { DossierJob } from "@/lib/dossier-types";
+import { DossierMasthead } from "@/components/investigation/DossierMasthead";
+import { SpecialistReportsGrid } from "@/components/investigation/SpecialistReportsGrid";
+import { DossierCompanionRail } from "@/components/investigation/DossierCompanionRail";
+import { AttackFlowSection } from "@/components/investigation/AttackFlowSection";
+import { AppendixIocTable } from "@/components/investigation/AppendixIocTable";
 import "@xyflow/react/dist/style.css";
 
-
-// Robust Graphviz Renderer using d3-graphviz
-const GraphvizRenderer = ({ dot }: { dot: string }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [renderError, setRenderError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (containerRef.current && dot) {
-      try {
-        // Clean up previous rendering
-        d3.select(containerRef.current).selectAll("*").remove();
-        
-        graphviz(containerRef.current)
-          .options({
-            fit: true,
-            zoom: true,
-          })
-          .renderDot(dot);
-        setRenderError(null);
-      } catch (err) {
-        console.error("Graphviz rendering failed:", err);
-        setRenderError("Attack flow diagram could not be rendered.");
-      }
-    }
-  }, [dot]);
-
-  if (renderError) {
-    return (
-      <div className="w-full h-full min-h-[300px] flex flex-col items-center justify-center bg-surface-container-lowest gap-2">
-        <span className="material-symbols-outlined text-2xl text-primary/40">error_outline</span>
-        <span className="text-outline/50 italic text-sm">{renderError}</span>
-      </div>
-    );
-  }
-
-  return <div ref={containerRef} className="w-full h-full min-h-[300px] flex items-center justify-center bg-surface-container-lowest" />;
-};
-
-const IocTableRenderer = ({ jsonString }: { jsonString: string }) => {
-  try {
-    const data = JSON.parse(jsonString);
-    if (!Array.isArray(data) || data.length === 0) return null;
-    
-    return (
-      <div className="overflow-x-auto my-6 border border-outline-variant/30 rounded bg-surface-container-lowest shadow-inner relative group">
-         <div className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity bg-surface-container-highest/80 px-2 py-1 rounded text-[10px] font-label text-primary border border-primary/20">IOC_DATA_TABLE</div>
-        <table className="w-full text-left border-collapse text-xs">
-          <thead className="bg-surface-container-high text-secondary">
-            <tr>
-              <th className="p-3 font-semibold tracking-wide border-b border-outline-variant/30 whitespace-nowrap">TYPE</th>
-              <th className="p-3 font-semibold tracking-wide border-b border-outline-variant/30 whitespace-nowrap">VALUE</th>
-              <th className="p-3 font-semibold tracking-wide border-b border-outline-variant/30 whitespace-nowrap">NOTES</th>
-              <th className="p-3 font-semibold tracking-wide border-b border-outline-variant/30 whitespace-nowrap">CONFIDENCE</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((row, i) => (
-              <tr key={i} className="hover:bg-surface-container-highest/50 transition-colors">
-                <td className="p-3 border-b border-surface-container text-outline font-mono text-[10px] uppercase">{row.type}</td>
-                <td className="p-3 border-b border-surface-container text-primary font-mono">{row.value}</td>
-                <td className="p-3 border-b border-surface-container text-outline/80">{row.notes}</td>
-                <td className="p-3 border-b border-surface-container">
-                  <span className={`px-2 py-0.5 rounded text-[10px] uppercase tracking-widest ${
-                    row.confidence?.toLowerCase() === 'critical' ? 'bg-error/20 text-error border border-error/30' :
-                    row.confidence?.toLowerCase() === 'high' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' :
-                    row.confidence?.toLowerCase() === 'medium' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
-                    'bg-surface-container-high text-outline border border-outline/30'
-                  }`}>
-                    {row.confidence}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  } catch (err) {
-    return (
-      <div className="bg-surface-container-low p-4 font-mono text-xs text-error border border-error/30 rounded">
-        [SYSTEM_ERROR] Failed to parse IOC data block.
-      </div>
-    );
-  }
-};
-
-// Custom Markdown Renderer for high readability - Adjusted for new design
-const MarkdownRenderer = ({ content }: { content: string }) => (
-  <ReactMarkdown
-    className="font-body text-sm leading-relaxed text-outline space-y-4"
-    remarkPlugins={[remarkGfm]}
-    components={{
-      h1: ({ node, ...props }) => <h1 className="text-2xl font-headline font-black text-primary mt-8 mb-4 uppercase tracking-tighter glow-text-primary" {...props} />,
-      h2: ({ node, ...props }) => <h2 className="text-xl font-headline font-bold text-secondary mt-8 mb-4 border-b border-secondary/20 pb-2 uppercase tracking-wide" {...props} />,
-      h3: ({ node, ...props }) => <h3 className="text-lg font-headline font-bold text-foreground mt-6 mb-3 uppercase" {...props} />,
-      p: ({ node, ...props }) => <p className="mb-4" {...props} />,
-      ul: ({ node, ...props }) => <ul className="list-disc pl-6 mb-4 space-y-2 marker:text-primary" {...props} />,
-      ol: ({ node, ...props }) => <ol className="list-decimal pl-6 mb-4 space-y-2 marker:text-secondary" {...props} />,
-      table: ({ node, ...props }) => <div className="overflow-x-auto mb-6 border border-outline-variant/30"><table className="w-full text-left border-collapse text-xs" {...props} /></div>,
-      thead: ({ node, ...props }) => <thead className="bg-surface-container-high text-secondary" {...props} />,
-      th: ({ node, ...props }) => <th className="p-3 font-semibold tracking-wide border-b border-outline-variant/30 whitespace-nowrap" {...props} />,
-      td: ({ node, ...props }) => <td className="p-3 border-b border-surface-container text-outline" {...props} />,
-      tr: ({ node, ...props }) => <tr className="hover:bg-surface-container-highest/50 transition-colors" {...props} />,
-      strong: ({ node, ...props }) => <strong className="font-bold text-foreground" {...props} />,
-      a: ({ node, ...props }) => <a className="text-secondary hover:text-primary underline decoration-secondary/30 underline-offset-2 transition-colors" {...props} />,
-      blockquote: ({ node, ...props }) => <blockquote className="border-l-4 border-primary bg-surface-container-low py-3 px-5 mb-4 italic text-outline" {...props} />,
-      code(props) {
-        const { children, className, node, ...rest } = props;
-        const match = /language-(\w+)/.exec(className || '');
-        
-        if (match && match[1] === 'dot') {
-          const dotString = String(children).replace(/\n$/, '');
-          return (
-            <div className="w-full overflow-hidden bg-surface-container-lowest border border-outline-variant/30 my-6 rounded-md shadow-inner group relative">
-              <div className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity bg-surface-container-highest/80 px-2 py-1 rounded text-[10px] font-label text-primary border border-primary/20">ATTACK_FLOW_VISUALIZATION</div>
-              <GraphvizRenderer dot={dotString} />
+// Markdown renderer for prose sections in Threat Dossier
+const ThreatDossierMarkdown = ({ content }: { content: string }) => {
+  if (!content || !content.trim()) return null;
+  return (
+    <div className="prose prose-invert max-w-none text-slate-300 text-sm leading-relaxed space-y-4">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          h1: ({ ...props }) => (
+            <h1 className="text-2xl font-bold text-white mt-6 mb-3 tracking-tight" {...props} />
+          ),
+          h2: ({ ...props }) => (
+            <h2 className="text-xl font-bold text-teal-300 mt-6 mb-3 border-b border-slate-800 pb-2" {...props} />
+          ),
+          h3: ({ ...props }) => (
+            <h3 className="text-base font-bold text-slate-100 mt-5 mb-2" {...props} />
+          ),
+          p: ({ ...props }) => <p className="mb-3 leading-relaxed text-slate-300" {...props} />,
+          ul: ({ ...props }) => (
+            <ul className="list-disc pl-5 mb-4 space-y-1.5 marker:text-teal-400" {...props} />
+          ),
+          ol: ({ ...props }) => (
+            <ol className="list-decimal pl-5 mb-4 space-y-1.5 marker:text-teal-400" {...props} />
+          ),
+          table: ({ ...props }) => (
+            <div className="overflow-x-auto my-4 rounded-xl border border-slate-800 bg-slate-900/60">
+              <table className="w-full text-left border-collapse text-xs" {...props} />
             </div>
-          );
-        }
-
-        if (match && match[1] === 'iocs') {
-          return <IocTableRenderer jsonString={String(children)} />;
-        }
-
-        const isInline = !match && !className;
-        return isInline ? (
-          <code className="bg-surface-container-highest text-primary px-1.5 py-0.5 text-xs font-mono" {...rest}>
-            {children}
-          </code>
-        ) : (
-          <div className="relative mb-4 group">
-            <pre className="bg-surface-container-lowest p-4 border border-outline-variant/30 overflow-x-auto text-xs font-mono text-secondary/80">
-              <code className={className} {...rest}>
+          ),
+          thead: ({ ...props }) => (
+            <thead className="bg-slate-950/80 text-slate-400 font-mono uppercase text-[10px]" {...props} />
+          ),
+          th: ({ ...props }) => (
+            <th className="py-2.5 px-4 font-semibold border-b border-slate-800" {...props} />
+          ),
+          td: ({ ...props }) => (
+            <td className="py-2.5 px-4 border-b border-slate-800/60 text-slate-300" {...props} />
+          ),
+          strong: ({ ...props }) => <strong className="font-semibold text-white" {...props} />,
+          code: ({ className, children, ...rest }) => {
+            const isInline = !className;
+            return isInline ? (
+              <code
+                className="bg-slate-900 text-teal-300 px-1.5 py-0.5 rounded text-xs font-mono border border-slate-800"
+                {...rest}
+              >
                 {children}
               </code>
-            </pre>
-          </div>
-        );
-      }
-    }}
-  >
-    {content}
-  </ReactMarkdown>
-);
-
-// Typewriter Component
-const Typewriter = ({ text, speed = 1 }: { text: string; speed?: number }) => {
-  const [displayedText, setDisplayedText] = useState("");
-  const [index, setIndex] = useState(0);
-
-  useEffect(() => {
-    if (index < text.length) {
-      const timeout = setTimeout(() => {
-        const chunk = text.slice(index, index + 25);
-        setDisplayedText((prev) => prev + chunk);
-        setIndex((prev) => prev + 25);
-      }, speed);
-      return () => clearTimeout(timeout);
-    }
-  }, [index, text, speed]);
-
-  return <MarkdownRenderer content={displayedText} />;
+            ) : (
+              <pre className="bg-slate-950 p-4 rounded-xl border border-slate-800 overflow-x-auto text-xs font-mono text-slate-300 my-3">
+                <code className={className} {...rest}>
+                  {children}
+                </code>
+              </pre>
+            );
+          },
+          blockquote: ({ ...props }) => (
+            <blockquote
+              className="border-l-4 border-teal-500/60 bg-slate-900/50 py-2.5 px-4 my-3 rounded-r-lg italic text-slate-300"
+              {...props}
+            />
+          ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
 };
 
 const IP_REGEX = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/;
 const HASH_REGEX = /^[a-fA-F0-9]{32,64}$/;
 
-const CustomNode = ({ data, style }: any) => {
-  let icon = "hub";
-  const label = data.label || "";
-  const title = data.title || "";
-
-  if (IP_REGEX.test(label)) icon = "router";
-  else if (label.startsWith("http")) icon = "link";
-  else if (HASH_REGEX.test(label)) icon = "fingerprint";
-  else if (label.includes(".")) icon = "language";
-
-  if (title.includes("Specialist") || label.includes("specialist")) icon = "manage_search";
-  if (data.isRoot) icon = "my_location";
-
-  const isMalicious = data.isMalicious;
-  const isRoot = data.isRoot;
-  const nodeSize = style?.width || 48;
-  const iconSize = Math.max(14, nodeSize * 0.4);
-
-  const color = isRoot ? "var(--secondary)" : isMalicious ? "var(--primary)" : "var(--outline)";
-  
-  return (
-    <div className="relative group flex flex-col items-center">
-      <Handle type="target" position={Position.Top} className="!opacity-0" style={{ left: "50%", top: "50%" }} />
-      <Handle type="source" position={Position.Bottom} className="!opacity-0" style={{ left: "50%", top: "50%" }} />
-
-      {/* Alert Badge (Wiz style) */}
-      {isMalicious && (
-        <div className="absolute -top-2 -right-2 bg-error text-white p-0.5 rounded-full z-10 flex items-center justify-center" style={{ borderRadius: '50% !important', width: '16px', height: '16px' }}>
-          <span className="material-symbols-outlined text-[10px]">warning</span>
-        </div>
-      )}
-
-      <div
-        className={`transition-all duration-300 flex items-center justify-center`}
-        style={{
-          width: nodeSize,
-          height: nodeSize,
-          background: "var(--surface-container-high)",
-          border: `2px solid ${color}`,
-          boxShadow: `0 0 15px ${color}33`,
-          borderRadius: '50% !important', // Override global sharp edges
-        }}
-      >
-        <span className="material-symbols-outlined" style={{ fontSize: iconSize, color: color }}>
-          {icon}
-        </span>
-      </div>
-
-      {/* Label Below */}
-      <div className="mt-2 text-[10px] font-label uppercase tracking-widest text-outline whitespace-nowrap overflow-hidden text-ellipsis max-w-[160px] text-center">
-        {label}
-      </div>
-    </div>
-  );
-};
-
-const nodeTypes = { custom: CustomNode };
-
 interface BackendNode {
   id: string;
   label: string;
-  color: string;
+  color?: string;
   entityType: string;
   size: number;
   title?: string;
@@ -270,17 +138,103 @@ interface GraphData {
   edges: BackendEdge[];
 }
 
-// Smart label: show human-readable name based on entity type
+interface CustomNodeData extends Record<string, unknown> {
+  label?: string;
+  title?: string;
+  isRoot?: boolean;
+  isMalicious?: boolean;
+  threatScore?: number;
+  rawNode?: BackendNode;
+}
+
+interface CustomNodeProps {
+  data: CustomNodeData;
+  style?: { width?: number; height?: number };
+}
+
+interface SimNode extends d3.SimulationNodeDatum {
+  id: string;
+  x: number;
+  y: number;
+  radius: number;
+  fx?: number;
+  fy?: number;
+}
+
+interface TransparencyEntry {
+  timestamp?: string;
+  tool?: string;
+  agent?: string;
+}
+
+const CustomNode = ({ data, style }: CustomNodeProps) => {
+  let icon = "hub";
+  const label = data.label || "";
+  const title = data.title || "";
+
+  if (IP_REGEX.test(label)) icon = "router";
+  else if (label.startsWith("http")) icon = "link";
+  else if (HASH_REGEX.test(label)) icon = "fingerprint";
+  else if (label.includes(".")) icon = "language";
+
+  if (title.includes("Specialist") || label.includes("specialist")) icon = "manage_search";
+  if (data.isRoot) icon = "my_location";
+
+  const isMalicious = data.isMalicious;
+  const isRoot = data.isRoot;
+  const nodeSize = style?.width || 48;
+  const iconSize = Math.max(14, nodeSize * 0.4);
+
+  const color = isRoot ? "#00f7ff" : isMalicious ? "#f43f5e" : "#94a3b8";
+
+  return (
+    <div className="relative group flex flex-col items-center">
+      <Handle type="target" position={Position.Top} className="!opacity-0" style={{ left: "50%", top: "50%" }} />
+      <Handle type="source" position={Position.Bottom} className="!opacity-0" style={{ left: "50%", top: "50%" }} />
+
+      {isMalicious && (
+        <div
+          className="absolute -top-2 -right-2 bg-rose-500 text-white p-0.5 rounded-full z-10 flex items-center justify-center"
+          style={{ borderRadius: "50%", width: "16px", height: "16px" }}
+        >
+          <span className="material-symbols-outlined text-[10px]">warning</span>
+        </div>
+      )}
+
+      <div
+        className="transition-all duration-300 flex items-center justify-center rounded-full"
+        style={{
+          width: nodeSize,
+          height: nodeSize,
+          background: "#0f172a",
+          border: `2px solid ${color}`,
+          boxShadow: `0 0 15px ${color}33`,
+        }}
+      >
+        <span className="material-symbols-outlined" style={{ fontSize: iconSize, color }}>
+          {icon}
+        </span>
+      </div>
+
+      <div className="mt-2 text-[10px] font-mono uppercase tracking-wider text-slate-300 whitespace-nowrap overflow-hidden text-ellipsis max-w-[160px] text-center">
+        {label}
+      </div>
+    </div>
+  );
+};
+
+const nodeTypes = { custom: CustomNode };
+
 function getSmartLabel(node: BackendNode): string {
-  const { label, entityType, id } = node;
-  if (node.isRoot) return label; // Root keeps its formatted label
+  const label = node.label || node.id || "";
+  const id = node.id || label;
+  const entityType = node.entityType || "entity";
+  if (node.isRoot) return label;
 
   switch (entityType) {
     case "file": {
-      // If label contains a filename in parens like "hash\n(filename.exe)", extract it
       const parenMatch = label.match(/\(([^)]+)\)/);
       if (parenMatch) return parenMatch[1];
-      // Otherwise show truncated hash
       return id.length > 16 ? `${id.slice(0, 8)}...${id.slice(-6)}` : id;
     }
     case "url": {
@@ -294,7 +248,7 @@ function getSmartLabel(node: BackendNode): string {
     }
     case "domain":
     case "ip_address":
-      return label; // Usually short enough
+      return label;
     default:
       return label.length > 30 ? label.slice(0, 28) + "..." : label;
   }
@@ -305,995 +259,1350 @@ export default function InvestigatePage() {
   const id = params.id as string;
   const router = useRouter();
 
-  const [expandedTile, setExpandedTile] = useState<number | null>(null);
-  const [nodes, setNodes, onNodesChange] = useNodesState<any>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<any>([]);
-  const [loading, setLoading] = useState(true);
-  const [job, setJob] = useState<any>(null);
+  const [activeView, setActiveView] = useState<"dossier" | "canvas">("dossier");
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node<CustomNodeData>>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const [job, setJob] = useState<DossierJob | null>(null);
   const [jobStatus, setJobStatus] = useState<string>("running");
   const [progress, setProgress] = useState<number>(0);
   const [statusMessage, setStatusMessage] = useState<string>("Initializing secure channel...");
   const [activityLog, setActivityLog] = useState<string[]>([]);
-  const [recentJobs, setRecentJobs] = useState<any[]>([]);
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  const [modalContent, setModalContent] = useState<{ title: string; content: string } | null>(null);
-  const simulationRef = useRef<any>(null);
-  // A durable terminal snapshot/event must not be overwritten by stale live
-  // events or a REST response that raced with persistence.
+  const [recentJobs, setRecentJobs] = useState<DossierJob[]>([]);
+  const [showAgentDrawer, setShowAgentDrawer] = useState(false);
+  const [copiedToast, setCopiedToast] = useState<string | null>(null);
+  const [jumpNotice, setJumpNotice] = useState<string | null>(null);
+  const [pendingJumpNodeId, setPendingJumpNodeId] = useState<string | null>(null);
+
+  const reactFlowRef = useRef<ReactFlowInstance<Node<CustomNodeData>, Edge> | null>(null);
+  const simulationRef = useRef<d3.Simulation<SimNode, undefined> | null>(null);
   const terminalStatusRef = useRef<TerminalInvestigationStatus | null>(null);
   const terminalSnapshotRef = useRef<{ subtasks?: unknown[]; transparencyLog?: unknown[] } | null>(null);
 
-  // Graph filtering
   const [graphFilters, setGraphFilters] = useState({
     reportOnly: true,
     maliciousOnly: false,
-    types: { file: true, domain: true, ip_address: true, url: true } as Record<string, boolean>,
+    types: { file: true, domain: true, ip_address: true, url: true, process: true, entity: true } as Record<string, boolean>,
   });
   const rawGraphRef = useRef<GraphData | null>(null);
-
-  // Node detail panel
+  const [rawGraphData, setRawGraphData] = useState<GraphData | null>(null);
   const [selectedNode, setSelectedNode] = useState<BackendNode | null>(null);
+
+  const lastJobSignatureRef = useRef<string>("");
+  const lastGraphSignatureRef = useRef<string>("");
+  const lastLogSignatureRef = useRef<string>("");
+  const lastPendingJumpRef = useRef<string | null>(null);
+  const jumpFilterAttemptsRef = useRef<number>(0);
+  const jumpFiltersRelaxedNoticeRef = useRef<boolean>(false);
+  const pendingJumpNodeIdRef = useRef<string | null>(null);
+
+  // Switching investigations (e.g. via the Case Switcher) keeps this page
+  // mounted with a new `id` — nothing resets automatically, so the previous
+  // investigation's job/graph/canvas state would otherwise leak into the new
+  // one until fresh data happens to overwrite it. Reset React state
+  // synchronously during render (refs are reset in the `[id]` effect below to
+  // satisfy React 19's `react-hooks/refs` render-purity constraint).
+  const [prevId, setPrevId] = useState(id);
+  if (id !== prevId) {
+    setPrevId(id);
+    setJob(null);
+    setJobStatus("running");
+    setProgress(0);
+    setStatusMessage("Initializing secure channel...");
+    setActivityLog([]);
+    setRawGraphData(null);
+    setNodes([]);
+    setEdges([]);
+    setSelectedNode(null);
+    setActiveView("dossier");
+    setPendingJumpNodeId(null);
+  }
+
+  // <ReactFlow> only mounts in the "canvas" view (see the activeView ternary
+  // below); switching away unmounts it without React Flow itself clearing
+  // reactFlowRef.current, so the ref would otherwise keep pointing at a
+  // disposed instance for any code that later checks `if (reactFlowRef.current)`.
+  useEffect(() => {
+    if (activeView !== "canvas") {
+      reactFlowRef.current = null;
+    }
+  }, [activeView]);
+
+  const finalReport = job?.final_report || "";
+  const jobIoc = job?.ioc || "";
+  const jobGtiScore = job?.gti_score;
+  const jobRiskLevel = job?.risk_level;
+
+  // job.graph/investigation_graph get a new object identity on every poll
+  // (fresh JSON.parse each time), even when unchanged, so depending on them
+  // directly would defeat jobSig's content-gating of setJob. Derive a stable
+  // primitive signature instead — cheap to recompute, only changes identity
+  // when the fallback graph's shape actually changes.
+  const jobGraphSig = useMemo(() => {
+    const g = (job?.graph || job?.investigation_graph) as
+      | { nodes?: unknown[]; edges?: unknown[]; links?: unknown[] }
+      | undefined;
+    const edgeLen = g?.edges?.length ?? g?.links?.length ?? 0;
+    return g ? `${g.nodes?.length ?? 0}:${edgeLen}` : "";
+  }, [job?.graph, job?.investigation_graph]);
+
+  // Same fallback chain as parseDossierReport's rawGraphData argument below —
+  // when the /graph endpoint hasn't returned data yet (or is failing), fall
+  // back to whatever graph is embedded on the job record itself (`job.graph` or
+  // raw NetworkX `job.investigation_graph` serialized via `nx.node_link_data`),
+  // normalized so every node has `label`, `entityType`, `isRoot`, `isMalicious`,
+  // and `inReport`.
+  const effectiveGraphData = useMemo<GraphData | null>(() => {
+    if (rawGraphData && Array.isArray(rawGraphData.nodes) && rawGraphData.nodes.length > 0) {
+      return normalizeFallbackGraphData(rawGraphData, jobIoc, jobGtiScore, jobRiskLevel);
+    }
+    const fallback = (job?.graph || job?.investigation_graph) as
+      | { nodes?: unknown[]; edges?: unknown[]; links?: unknown[] }
+      | undefined;
+    if (fallback) {
+      return normalizeFallbackGraphData(fallback, jobIoc, jobGtiScore, jobRiskLevel);
+    }
+    return rawGraphData;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawGraphData, jobGraphSig, jobIoc, jobGtiScore, jobRiskLevel]);
+
+  const effectiveGraphRef = useRef<GraphData | null>(null);
+  useEffect(() => {
+    effectiveGraphRef.current = effectiveGraphData;
+  }, [effectiveGraphData]);
+
+  // Parse Dossier Report & Swim Lanes from job.final_report
+  const parsedDossier = useMemo(() => {
+    return parseDossierReport(
+      finalReport,
+      job || undefined,
+      effectiveGraphData
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finalReport, jobIoc, jobGtiScore, jobRiskLevel, effectiveGraphData]);
+
+  const swimLanes = useMemo(() => {
+    return deriveSwimLanes(
+      parsedDossier.parsedDotGraph,
+      jobIoc,
+      job || undefined
+    );
+  }, [parsedDossier.parsedDotGraph, jobIoc, job]);
+
+  const graphEntityCount = useMemo(() => {
+    const rawCount = effectiveGraphData?.nodes?.length || 0;
+    const dotCount = parsedDossier.parsedDotGraph.nodes.length;
+    return Math.max(rawCount, dotCount);
+  }, [effectiveGraphData?.nodes?.length, parsedDossier.parsedDotGraph.nodes.length]);
+
+  const handleCopyIoc = useCallback((value: string) => {
+    if (!value) return;
+    navigator.clipboard.writeText(value).catch(() => {});
+    setCopiedToast(value);
+    setTimeout(() => {
+      setCopiedToast((prev) => (prev === value ? null : prev));
+    }, 2000);
+  }, []);
+
+  const handleJumpToNode = useCallback((nodeId: string) => {
+    if (!nodeId) return;
+    setActiveView("canvas");
+    setPendingJumpNodeId(nodeId);
+  }, []);
+
+  const showJumpNotice = useCallback((message: string) => {
+    setJumpNotice(message);
+    setTimeout(() => {
+      setJumpNotice((prev) => (prev === message ? null : prev));
+    }, 3500);
+  }, []);
+
+  // Build / rebuild ReactFlow graph nodes whenever rawGraphRef, parsedDotGraph, or filters change
+  const rebuildSpatialGraph = useCallback(
+    (backendGraph: GraphData | null) => {
+      const dotNodes = parsedDossier.parsedDotGraph.nodes;
+      const dotEdges = parsedDossier.parsedDotGraph.edges;
+
+      const mergedNodesMap = new Map<string, BackendNode>();
+
+      if (backendGraph?.nodes) {
+        backendGraph.nodes.forEach((n) => {
+          mergedNodesMap.set(n.id, n);
+        });
+      }
+
+      dotNodes.forEach((dn) => {
+        const existing = mergedNodesMap.get(dn.id);
+        if (!existing) {
+          mergedNodesMap.set(dn.id, {
+            id: dn.id,
+            label: dn.label || dn.id,
+            entityType: dn.entityType || "entity",
+            size: dn.isRoot ? 30 : 22,
+            isRoot: dn.isRoot,
+            isMalicious: dn.isMalicious,
+            inReport: true,
+            threatScore: dn.threatScore ?? undefined,
+            verdict: dn.verdict,
+          });
+        } else {
+          // Ensure any node explicitly present in the report's DOT diagram is
+          // marked `inReport: true` and has non-empty label/type fields.
+          mergedNodesMap.set(dn.id, {
+            ...existing,
+            label: existing.label || dn.label || dn.id,
+            entityType: existing.entityType || dn.entityType || "entity",
+            isRoot: Boolean(existing.isRoot || dn.isRoot),
+            isMalicious: Boolean(existing.isMalicious ?? dn.isMalicious),
+            inReport: true,
+            threatScore: existing.threatScore ?? dn.threatScore ?? undefined,
+            verdict: existing.verdict || dn.verdict,
+          });
+        }
+      });
+
+      const allNodes = Array.from(mergedNodesMap.values());
+      if (allNodes.length === 0) {
+        // A genuinely empty merged graph must still clear the canvas —
+        // otherwise the previous investigation's (or previous filter
+        // state's) nodes/edges stay rendered indefinitely.
+        if (simulationRef.current) {
+          simulationRef.current.stop();
+          simulationRef.current = null;
+        }
+        setNodes([]);
+        setEdges([]);
+        return;
+      }
+
+      const allEdges: BackendEdge[] = [...(backendGraph?.edges || [])];
+      dotEdges.forEach((de) => {
+        const exists = allEdges.some((e) => e.source === de.source && e.target === de.target);
+        if (!exists) {
+          allEdges.push({ source: de.source, target: de.target, label: de.label });
+        }
+      });
+
+      const visibleNodes = allNodes.filter((n) => {
+        if (n.isRoot) return true;
+        if (graphFilters.reportOnly && !n.inReport) return false;
+        if (graphFilters.maliciousOnly && !n.isMalicious) return false;
+        const typeAllowed = graphFilters.types[n.entityType] ?? true;
+        if (!typeAllowed) return false;
+        return true;
+      });
+
+      const visibleIds = new Set(visibleNodes.map((n) => n.id));
+      const visibleEdges = allEdges.filter(
+        (e) => visibleIds.has(e.source) && visibleIds.has(e.target)
+      );
+
+      if (simulationRef.current) {
+        simulationRef.current.stop();
+        simulationRef.current = null;
+      }
+
+      const simNodes: SimNode[] = visibleNodes.map((n, idx) => {
+        const isRoot = n.isRoot === true;
+        const angle = (idx / Math.max(1, visibleNodes.length)) * 2 * Math.PI;
+        return {
+          id: n.id,
+          x: isRoot ? 0 : Math.cos(angle) * 220,
+          y: isRoot ? 0 : Math.sin(angle) * 220,
+          radius: n.size || 24,
+          fx: isRoot ? 0 : undefined,
+          fy: isRoot ? 0 : undefined,
+        };
+      });
+
+      const simEdgeData = visibleEdges.map((e) => ({ source: e.source, target: e.target }));
+      const simNodeMap = new Map<string, SimNode>(simNodes.map((n) => [n.id, n]));
+
+      const simulation = d3
+        .forceSimulation<SimNode>(simNodes)
+        .force("link", d3.forceLink<SimNode, d3.SimulationLinkDatum<SimNode>>(simEdgeData).id((d) => d.id).distance(180).strength(0.15))
+        .force("charge", d3.forceManyBody().strength(-700).distanceMax(600))
+        .force("collide", d3.forceCollide<SimNode>().radius((d) => d.radius + 20).strength(0.9))
+        .force("x", d3.forceX(0).strength(0.05))
+        .force("y", d3.forceY(0).strength(0.05));
+
+      simulation.stop();
+      for (let i = 0; i < 120; i++) simulation.tick();
+
+      setNodes(
+        visibleNodes.map((n) => {
+          const sim = simNodeMap.get(n.id) || { x: 0, y: 0 };
+          const size = n.size || 24;
+          return {
+            id: n.id,
+            type: "custom",
+            position: { x: sim.x, y: sim.y },
+            data: {
+              label: getSmartLabel(n),
+              title: n.title,
+              isRoot: n.isRoot,
+              isMalicious: n.isMalicious,
+              threatScore: n.threatScore ?? undefined,
+              rawNode: n,
+            },
+            style: {
+              background: "transparent",
+              border: "none",
+              padding: 0,
+              width: size * 2,
+              height: size * 2,
+              overflow: "visible",
+            },
+          };
+        })
+      );
+
+      setEdges(
+        visibleEdges.map((e, index) => ({
+          id: `e-${index}-${e.source}-${e.target}`,
+          source: e.source,
+          target: e.target,
+          label: e.label,
+          animated: true,
+          style: { stroke: "#38bdf8", strokeWidth: 1.5, opacity: 0.65 },
+          labelStyle: { fill: "#94a3b8", fontSize: 10, fontFamily: "monospace" },
+        }))
+      );
+    },
+    [parsedDossier.parsedDotGraph, graphFilters, setNodes, setEdges]
+  );
+
+  // Mirror the latest `rebuildSpatialGraph` into a ref so the long-lived
+  // SSE/polling effect can invoke it without taking a dependency on its
+  // (intentionally unstable) identity.
+  const rebuildRef = useRef(rebuildSpatialGraph);
+  useEffect(() => {
+    rebuildRef.current = rebuildSpatialGraph;
+  }, [rebuildSpatialGraph]);
+
+  // Execute pending node focus when switching to canvas
+  useEffect(() => {
+    if (activeView !== "canvas" || !pendingJumpNodeId) {
+      lastPendingJumpRef.current = null;
+      jumpFilterAttemptsRef.current = 0;
+      jumpFiltersRelaxedNoticeRef.current = false;
+      return;
+    }
+
+    if (pendingJumpNodeId !== lastPendingJumpRef.current) {
+      lastPendingJumpRef.current = pendingJumpNodeId;
+      jumpFilterAttemptsRef.current = 0;
+      jumpFiltersRelaxedNoticeRef.current = false;
+    }
+
+    const targetLower = pendingJumpNodeId.toLowerCase();
+    const targetRfNode = nodes.find(
+      (n) => n.id === pendingJumpNodeId || n.id.toLowerCase() === targetLower
+    );
+
+    if (targetRfNode) {
+      const raw =
+        targetRfNode.data?.rawNode ||
+        effectiveGraphRef.current?.nodes.find(
+          (rn) => rn.id === targetRfNode.id || rn.id.toLowerCase() === targetLower
+        );
+      if (raw) setSelectedNode(raw);
+
+      setTimeout(() => {
+        if (reactFlowRef.current) {
+          reactFlowRef.current.setCenter(
+            targetRfNode.position.x,
+            targetRfNode.position.y,
+            { zoom: 1.35, duration: 500 }
+          );
+        }
+      }, 100);
+      setPendingJumpNodeId(null);
+      lastPendingJumpRef.current = null;
+      jumpFilterAttemptsRef.current = 0;
+      return;
+    }
+
+    // Target node was not found in visible `nodes`. Check full unfiltered node sets.
+    const rawMatch = effectiveGraphRef.current?.nodes?.find(
+      (rn) => rn.id === pendingJumpNodeId || rn.id.toLowerCase() === targetLower
+    );
+    const dotMatch = !rawMatch
+      ? parsedDossier.parsedDotGraph.nodes.find(
+          (dn) => dn.id === pendingJumpNodeId || dn.id.toLowerCase() === targetLower
+        )
+      : null;
+
+    const fullNode = rawMatch || dotMatch;
+
+    if (fullNode) {
+      const entityType = fullNode.entityType || "entity";
+      const isFilteredOut =
+        !fullNode.isRoot &&
+        ((graphFilters.reportOnly && !("inReport" in fullNode && fullNode.inReport)) ||
+          (graphFilters.maliciousOnly && !fullNode.isMalicious) ||
+          graphFilters.types[entityType] === false);
+
+      if (isFilteredOut) {
+        if (!jumpFiltersRelaxedNoticeRef.current) {
+          jumpFiltersRelaxedNoticeRef.current = true;
+          showJumpNotice(`Adjusted graph filters to reveal "${pendingJumpNodeId}"`);
+        }
+        setGraphFilters((prev) => ({
+          ...prev,
+          reportOnly: false,
+          maliciousOnly: false,
+          types: {
+            ...prev.types,
+            [entityType]: true,
+          },
+        }));
+        // Keep pendingJumpNodeId set until graph rebuilds with relaxed filters
+        return;
+      }
+
+      // If filters are already relaxed, give rebuildSpatialGraph up to 3 render passes to populate `nodes`
+      jumpFilterAttemptsRef.current += 1;
+      if (jumpFilterAttemptsRef.current > 3) {
+        const raw: BackendNode =
+          "size" in fullNode
+            ? (fullNode as BackendNode)
+            : {
+                id: fullNode.id,
+                label: fullNode.label || fullNode.id,
+                entityType,
+                size: fullNode.isRoot ? 30 : 22,
+                isRoot: fullNode.isRoot,
+                isMalicious: fullNode.isMalicious,
+                threatScore: fullNode.threatScore ?? undefined,
+                verdict: fullNode.verdict,
+              };
+        setSelectedNode(raw);
+        showJumpNotice(`"${pendingJumpNodeId}" isn't rendered on the canvas — showing details in the inspector only.`);
+        setPendingJumpNodeId(null);
+        lastPendingJumpRef.current = null;
+        jumpFilterAttemptsRef.current = 0;
+      }
+      return;
+    }
+
+    // If the node truly does not exist in either effectiveGraphRef.current or parsedDotGraph.nodes,
+    // synthesize a temporary selected node for the inspector.
+    setSelectedNode({
+      id: pendingJumpNodeId,
+      label: pendingJumpNodeId,
+      entityType: "entity",
+      size: 24,
+      threatScore: undefined,
+    });
+    showJumpNotice(`"${pendingJumpNodeId}" was not found in this investigation's graph.`);
+    setPendingJumpNodeId(null);
+    lastPendingJumpRef.current = null;
+    jumpFilterAttemptsRef.current = 0;
+  }, [
+    activeView,
+    pendingJumpNodeId,
+    nodes,
+    graphFilters,
+    parsedDossier.parsedDotGraph,
+    showJumpNotice,
+  ]);
+
+  // Mirror pendingJumpNodeId into a ref so the watchdog below can check the
+  // latest value from inside a plain setTimeout without doing side effects
+  // inside a setState updater (updaters run during React's render phase and
+  // are double-invoked under StrictMode).
+  useEffect(() => {
+    pendingJumpNodeIdRef.current = pendingJumpNodeId;
+  }, [pendingJumpNodeId]);
+
+  // Mirror parsedDossier.parsedDotGraph into a ref so the watchdog's timer
+  // doesn't restart every time the dossier recomputes (e.g. while specialist
+  // markdown is still streaming in) — a restart on every poll could starve
+  // the watchdog for the entire duration of a live investigation.
+  const parsedDotGraphRef = useRef(parsedDossier.parsedDotGraph);
+  useEffect(() => {
+    parsedDotGraphRef.current = parsedDossier.parsedDotGraph;
+  }, [parsedDossier.parsedDotGraph]);
+
+  // Watchdog: guarantee a jump request always resolves even if rebuildSpatialGraph
+  // never repopulates `nodes` (e.g. an empty merged graph keeps the effect above
+  // from re-firing enough times to hit its own attempt-count escape hatch).
+  useEffect(() => {
+    if (activeView !== "canvas" || !pendingJumpNodeId) return;
+    const targetId = pendingJumpNodeId;
+    const timer = setTimeout(() => {
+      if (pendingJumpNodeIdRef.current !== targetId) return;
+
+      const targetLower = targetId.toLowerCase();
+      const fallback =
+        effectiveGraphRef.current?.nodes?.find(
+          (n) => n.id === targetId || n.id.toLowerCase() === targetLower
+        ) ||
+        parsedDotGraphRef.current.nodes.find(
+          (n) => n.id === targetId || n.id.toLowerCase() === targetLower
+        );
+      setSelectedNode(
+        fallback
+          ? "size" in fallback
+            ? (fallback as BackendNode)
+            : {
+                id: fallback.id,
+                label: fallback.label || fallback.id,
+                entityType: fallback.entityType || "entity",
+                size: fallback.isRoot ? 30 : 22,
+                isRoot: fallback.isRoot,
+                isMalicious: fallback.isMalicious,
+                threatScore: fallback.threatScore ?? undefined,
+                verdict: fallback.verdict,
+              }
+          : { id: targetId, label: targetId, entityType: "entity", size: 24, threatScore: undefined }
+      );
+      showJumpNotice(`Couldn't focus "${targetId}" on the canvas — showing details in the inspector only.`);
+      lastPendingJumpRef.current = null;
+      jumpFilterAttemptsRef.current = 0;
+      jumpFiltersRelaxedNoticeRef.current = false;
+      setPendingJumpNodeId(null);
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [activeView, pendingJumpNodeId, showJumpNotice]);
+
+  // Re-render the spatial graph whenever the parsed DOT graph, raw graph data, or filters change.
+  useEffect(() => {
+    rebuildSpatialGraph(effectiveGraphData);
+  }, [rebuildSpatialGraph, effectiveGraphData]);
 
   useEffect(() => {
     if (!id) return;
 
-    fetch("/api/investigations")
-      .then((r) => r.json())
-      .then((jobs) => setRecentJobs(Array.isArray(jobs) ? jobs : []))
-      .catch(() => setRecentJobs([]));
+    let isCancelled = false;
+    const abortController = new AbortController();
 
-    let pollInterval: ReturnType<typeof setInterval> | null = null;
-    let reconciliationInterval: ReturnType<typeof setInterval> | null = null;
-    let eventSource: EventSource | null = null;
+    rawGraphRef.current = null;
+    effectiveGraphRef.current = null;
     terminalStatusRef.current = null;
     terminalSnapshotRef.current = null;
+    lastJobSignatureRef.current = "";
+    lastGraphSignatureRef.current = "";
+    lastLogSignatureRef.current = "";
+    lastPendingJumpRef.current = null;
+    jumpFilterAttemptsRef.current = 0;
+    jumpFiltersRelaxedNoticeRef.current = false;
+    pendingJumpNodeIdRef.current = null;
 
-    const formatTransparencyLog = (entries: unknown[]) => entries
-      .slice(-20)
-      .reverse()
-      .map((entry: any) => {
-        const time = entry?.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
-        const icon = entry?.tool ? "tool" : "reasoning";
-        return `[${time}] ${icon} ${entry?.agent || "system"}: ${entry?.tool ? `EXECUTING_${entry.tool}` : "ANALYZING_DATA"}`;
+    fetch("/api/investigations", { signal: abortController.signal })
+      .then((r) => r.json())
+      .then((jobs) => {
+        if (!isCancelled) setRecentJobs(Array.isArray(jobs) ? jobs : []);
+      })
+      .catch(() => {
+        if (!isCancelled) setRecentJobs([]);
       });
+
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+    let eventSource: EventSource | null = null;
+
+    const formatTransparencyLog = (entries: unknown[]) =>
+      entries
+        .slice(-25)
+        .reverse()
+        .map((rawEntry) => {
+          const entry = rawEntry as TransparencyEntry;
+          const time = entry?.timestamp
+            ? new Date(entry.timestamp).toLocaleTimeString()
+            : new Date().toLocaleTimeString();
+          const icon = entry?.tool ? "TOOL" : "THOUGHT";
+          return `[${time}] ${icon} ${entry?.agent || "system"}: ${
+            entry?.tool ? `EXECUTING_${entry.tool}` : "ANALYZING_DATA"
+          }`;
+        });
 
     const applyTerminalUpdate = (
       status: TerminalInvestigationStatus,
       data: InvestigationStreamData,
-      eventType: string,
+      eventType: string
     ) => {
-      const update = reconcileTerminalInvestigationEvent(eventType, data);
+      if (isCancelled) return;
+      const normalizedStatus = status.toLowerCase() as TerminalInvestigationStatus;
+      const update =
+        reconcileTerminalInvestigationEvent(eventType, data) ||
+        reconcileTerminalInvestigationEvent("investigation_snapshot", {
+          ...data,
+          status: normalizedStatus,
+        });
       if (!update) return;
 
-      terminalStatusRef.current = status;
+      const resolvedStatus = update.status;
+      terminalStatusRef.current = resolvedStatus;
       terminalSnapshotRef.current = {
         subtasks: update.subtasks,
         transparencyLog: update.transparencyLog,
       };
-      setJobStatus(status);
+      setJobStatus(resolvedStatus);
       setProgress(update.progress);
       setStatusMessage(update.message);
-      setJob((previous: any) => ({
-        ...(previous ?? {}),
-        status,
-        ...(update.subtasks ? { subtasks: update.subtasks } : {}),
-        ...(update.transparencyLog ? { transparency_log: update.transparencyLog } : {}),
-      }));
+      setJob((previous) =>
+        previous
+          ? {
+              ...previous,
+              status: resolvedStatus,
+              ...(update.subtasks ? { subtasks: update.subtasks as DossierJob["subtasks"] } : {}),
+            }
+          : previous
+      );
       if (update.transparencyLog) setActivityLog(formatTransparencyLog(update.transparencyLog));
       if (pollInterval) clearInterval(pollInterval);
-      if (reconciliationInterval) clearInterval(reconciliationInterval);
       eventSource?.close();
     };
 
     const refetch = async (): Promise<string> => {
+      if (isCancelled) return terminalStatusRef.current ?? "running";
       try {
         const [graphRes, jobRes] = await Promise.all([
-          fetch(`/api/investigations/${id}/graph`),
-          fetch(`/api/investigations/${id}`),
+          fetch(`/api/investigations/${id}/graph`, { signal: abortController.signal }),
+          fetch(`/api/investigations/${id}`, { signal: abortController.signal }),
         ]);
 
+        if (isCancelled) return terminalStatusRef.current ?? "running";
         if (!jobRes.ok) throw new Error("Failed to fetch job details");
 
-        const jobData = await jobRes.json();
-        const fetchedStatus = jobData.status ?? "running";
-        // REST is also an authoritative terminal source (for example after
-        // reconnecting to a different Cloud Run instance). Latch it before a
-        // slower older response can restore the loading UI.
-        const terminalFromRest = !terminalStatusRef.current && isTerminalInvestigationStatus(fetchedStatus);
+        const jobData: DossierJob = await jobRes.json();
+        if (isCancelled) return terminalStatusRef.current ?? "running";
+
+        // Normalized once here so every downstream comparison (including the
+        // render's case-sensitive `jobStatus === "failed"` checks) stays
+        // correct even if the backend ever returns non-lowercase status.
+        const fetchedStatus = (jobData.status ?? "running").toLowerCase();
+        const terminalFromRest =
+          !terminalStatusRef.current && isTerminalInvestigationStatus(fetchedStatus);
         const effectiveStatus = terminalStatusRef.current ?? fetchedStatus;
-        setJob(jobData);
+
+        const hasTerminalReconciliation = Boolean(
+          terminalStatusRef.current && !isTerminalInvestigationStatus(fetchedStatus)
+        );
+        const resolvedJob: DossierJob = hasTerminalReconciliation
+          ? {
+              ...jobData,
+              status: terminalStatusRef.current!,
+              ...(terminalSnapshotRef.current?.subtasks
+                ? { subtasks: terminalSnapshotRef.current.subtasks as DossierJob["subtasks"] }
+                : {}),
+              ...(terminalSnapshotRef.current?.transparencyLog
+                ? { transparency_log: terminalSnapshotRef.current.transparencyLog }
+                : {}),
+            }
+          : jobData;
+
+        const sr =
+          resolvedJob.specialist_reports ||
+          resolvedJob.specialist_results ||
+          resolvedJob.metadata?.specialist_results ||
+          {};
+        // Resolve each specialist as one whole object (matching
+        // SpecialistReportsGrid's `sr.malware_specialist || sr.malware`
+        // convention) rather than per-field, so a signature never blends
+        // fields from two different report objects.
+        const malwareReport = sr.malware_specialist || sr.malware;
+        const infraReport = sr.infrastructure_specialist || sr.infrastructure;
+        const specialistContentSig = [malwareReport, infraReport].map((report) =>
+          report
+            ? [
+                report.verdict,
+                (report.markdown_report || "").length,
+                (report.summary || "").length,
+              ]
+            : null
+        );
+
+        const jobSig = JSON.stringify({
+          status: effectiveStatus,
+          reportLen: resolvedJob.final_report?.length ?? 0,
+          reportHash:
+            (resolvedJob.final_report?.slice(0, 120) ?? "") +
+            (resolvedJob.final_report?.slice(-120) ?? ""),
+          subtaskStatuses: (resolvedJob.subtasks || []).map(
+            (t) => `${t.agent ?? ""}:${t.status ?? ""}:${t.timestamp ?? ""}:${(t.task ?? "").length}`
+          ),
+          gti: resolvedJob.gti_score,
+          risk: resolvedJob.risk_level,
+          srKeys: Object.keys(sr),
+          specialistContentSig,
+        });
+
+        if (jobSig !== lastJobSignatureRef.current || hasTerminalReconciliation) {
+          lastJobSignatureRef.current = jobSig;
+          setJob(resolvedJob);
+        }
         setJobStatus(effectiveStatus);
-        if (terminalFromRest) applyTerminalUpdate(fetchedStatus, jobData, "investigation_snapshot");
-        if (terminalStatusRef.current && !isTerminalInvestigationStatus(fetchedStatus)) {
-          // A stale REST response cannot erase a terminal snapshot's timeline.
-          const snapshot = terminalSnapshotRef.current;
-          setJob({
-            ...jobData,
-            status: terminalStatusRef.current,
-            ...(snapshot?.subtasks ? { subtasks: snapshot.subtasks } : {}),
-            ...(snapshot?.transparencyLog ? { transparency_log: snapshot.transparencyLog } : {}),
-          });
+
+        if (terminalFromRest) {
+          applyTerminalUpdate(
+            fetchedStatus as TerminalInvestigationStatus,
+            jobData as unknown as InvestigationStreamData,
+            "investigation_snapshot"
+          );
         }
-        const durableTransparencyLog = jobData?.transparency_log ?? jobData?.metadata?.transparency_log;
+
+        const durableTransparencyLog =
+          resolvedJob?.transparency_log ?? resolvedJob?.metadata?.transparency_log;
         if (Array.isArray(durableTransparencyLog) && durableTransparencyLog.length > 0) {
-          setActivityLog(formatTransparencyLog(durableTransparencyLog));
-        }
-        if (!Array.isArray(durableTransparencyLog) && Array.isArray(jobData?.metadata?.transparency_log) && jobData.metadata.transparency_log.length > 0) {
-          const loadedLogs = jobData.metadata.transparency_log
-            .slice(-20)
-            .reverse()
-            .map((entry: any) => {
-              const time = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
-              const icon = entry.tool ? "🔧" : "💭";
-              return `[${time}] ${icon} ${entry.agent || "system"}: ${entry.tool ? `EXECUTING_${entry.tool}` : "ANALYZING_DATA"}`;
-            });
-          setActivityLog(loadedLogs);
+          const lastEntry = durableTransparencyLog[durableTransparencyLog.length - 1] as
+            | TransparencyEntry
+            | undefined;
+          const logSig = `${durableTransparencyLog.length}:${lastEntry?.timestamp ?? ""}`;
+          if (logSig !== lastLogSignatureRef.current) {
+            lastLogSignatureRef.current = logSig;
+            setActivityLog(formatTransparencyLog(durableTransparencyLog));
+          }
         }
 
         if (graphRes.ok) {
           const graphData: GraphData = await graphRes.json();
-          rawGraphRef.current = graphData;
-
-          if (graphData.nodes?.length > 0) {
-            if (simulationRef.current) {
-              simulationRef.current.stop();
-              simulationRef.current = null;
-            }
-
-            // Apply filters
-            const visibleNodes = graphData.nodes.filter((n) => {
-              if (n.isRoot) return true; // Root always visible
-              if (graphFilters.reportOnly && !n.inReport) return false;
-              if (graphFilters.maliciousOnly && !n.isMalicious) return false;
-              if (!graphFilters.types[n.entityType]) return false;
-              return true;
-            });
-            const visibleIds = new Set(visibleNodes.map((n) => n.id));
-            const visibleEdges = graphData.edges.filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target));
-
-            // Build simulation nodes OUTSIDE setNodes (3.5 fix)
-            const existingPositions = new Map(nodes.map((n: any) => [n.id, n.position]));
-            const simNodes: any[] = visibleNodes.map((n) => {
-              const pos = existingPositions.get(n.id);
-              const isRoot = n.isRoot === true;
-              return {
-                id: n.id,
-                x: pos?.x ?? (Math.random() - 0.5) * 500,
-                y: pos?.y ?? (Math.random() - 0.5) * 500,
-                radius: n.size,
-                fx: isRoot ? 0 : undefined,
-                fy: isRoot ? 0 : undefined,
-              };
-            });
-            const simEdgeData = visibleEdges.map((e) => ({ source: e.source, target: e.target }));
-            const simNodeMap = new Map<string, any>(simNodes.map((n) => [n.id, n]));
-
-            // Create simulation OUTSIDE state updater
-            const simulation = d3.forceSimulation(simNodes)
-              .force("link", d3.forceLink(simEdgeData).id((d: any) => d.id).distance(180).strength(0.1))
-              .force("charge", d3.forceManyBody().strength(-800).distanceMax(600))
-              .force("collide", d3.forceCollide().radius((d: any) => d.radius + 20).strength(0.9))
-              .force("x", d3.forceX(0).strength(0.05))
-              .force("y", d3.forceY(0).strength(0.05))
-              .alphaDecay(0.02)
-              .velocityDecay(0.4);
-
-            // Pre-warm simulation
-            simulation.stop();
-            for (let i = 0; i < 120; i++) simulation.tick();
-
-            // Set initial node positions (pure state update, no side-effects)
-            setNodes(visibleNodes.map((n) => {
-              const sim = simNodeMap.get(n.id)!;
-              return {
-                id: n.id,
-                type: "custom",
-                position: { x: sim.x, y: sim.y },
-                data: { label: getSmartLabel(n), title: n.title, isRoot: n.isRoot, isMalicious: n.isMalicious, accent: n.color },
-                style: {
-                  background: "transparent",
-                  border: "none",
-                  padding: 0,
-                  width: n.size * 2,
-                  height: n.size * 2,
-                  overflow: "visible",
-                },
-              };
-            }));
-
-            // Restart with tick handler (outside setNodes)
-            simulationRef.current = simulation;
-            simulation.restart();
-            simulation.on("tick", () => {
-              setNodes((nds) =>
-                nds.map((node) => {
-                  const sim = simNodeMap.get(node.id);
-                  if (!sim) return node;
-                  return { ...node, position: { x: sim.x ?? 0, y: sim.y ?? 0 } };
-                })
-              );
-            });
-
-            const calculatedEdges = visibleEdges.map((edge, index) => ({
-              id: `e-${index}`,
-              source: edge.source,
-              target: edge.target,
-              label: edge.label,
-              type: "straight",
-              style: { stroke: "rgba(0, 251, 251, 0.2)", strokeWidth: 1 },
-              labelStyle: { fill: "rgba(255, 124, 245, 0.6)", fontSize: "8px", fontFamily: "var(--font-space-grotesk)", textTransform: "uppercase" },
-              labelBgStyle: { fill: "var(--surface-container-lowest)", fillOpacity: 0.8 },
-              labelBgPadding: [2, 4] as [number, number],
-              markerEnd: { type: MarkerType.ArrowClosed, width: 8, height: 8, color: "rgba(0, 251, 251, 0.4)" },
-            }));
-            setEdges(calculatedEdges);
+          if (isCancelled) return effectiveStatus;
+          const graphSig = `${graphData.nodes?.length ?? 0}:${graphData.edges?.length ?? 0}:${graphData.nodes?.map((n) => n.id).join(",") ?? ""}`;
+          if (graphSig !== lastGraphSignatureRef.current) {
+            lastGraphSignatureRef.current = graphSig;
+            rawGraphRef.current = graphData;
+            setRawGraphData(graphData);
           }
         }
         return effectiveStatus;
-      } catch (err) {
-        console.error("refetch error:", err);
-        // An in-flight request may fail after the SSE path has already
-        // latched a terminal status. Never let that resurrect the loading UI.
+      } catch (e) {
+        if (isCancelled) return "running";
+        console.error(e);
         return terminalStatusRef.current ?? "running";
-      } finally {
-        setLoading(false);
       }
     };
 
-    const reconcileDurableStatus = async () => {
-      if (terminalStatusRef.current) return;
+    refetch();
 
+    eventSource = new EventSource(`/api/investigations/${id}/stream`);
+
+    eventSource.onmessage = (event) => {
+      if (isCancelled) return;
       try {
-        const response = await fetch(`/api/investigations/${id}`);
-        if (!response.ok) return;
+        const payload = JSON.parse(event.data);
+        const eventType = payload.event || "message";
+        const data = payload.data || {};
 
-        const jobData = await response.json();
-        if (!isTerminalInvestigationStatus(jobData.status)) return;
+        if (data.progress !== undefined) setProgress(data.progress);
+        if (data.message) setStatusMessage(data.message);
 
-        // This request is the cross-instance backstop: SSE subscribers are
-        // process-local, while the persisted job record is shared by Cloud Run
-        // instances. Treat the REST response as a terminal snapshot.
-        setJob(jobData);
-        applyTerminalUpdate(jobData.status, jobData, "investigation_snapshot");
-      } catch (error) {
-        console.warn("durable investigation reconciliation failed:", error);
+        if (eventType === "transparency_event" && data.entry) {
+          const entry = data.entry;
+          const time = entry.timestamp
+            ? new Date(entry.timestamp).toLocaleTimeString()
+            : new Date().toLocaleTimeString();
+          const line = `[${time}] ${entry.tool ? "TOOL" : "THOUGHT"} ${entry.agent || "system"}: ${
+            entry.tool ? `EXECUTING_${entry.tool}` : "ANALYZING_DATA"
+          }`;
+          setActivityLog((prev) => [line, ...prev.slice(0, 24)]);
+        }
+
+        const terminalStatus: TerminalInvestigationStatus | null = isTerminalInvestigationStatus(
+          data.status
+        )
+          ? (String(data.status).toLowerCase() as TerminalInvestigationStatus)
+          : eventType === "investigation_completed"
+            ? "completed"
+            : eventType === "investigation_failed"
+              ? "failed"
+              : eventType === "investigation_cancelled"
+                ? "cancelled"
+                : null;
+
+        if (terminalStatus) {
+          applyTerminalUpdate(terminalStatus, data, eventType);
+          refetch();
+        }
+      } catch {
+        // Ignore unparseable stream frames
       }
     };
 
-    const startPolling = () => {
-      if (terminalStatusRef.current || pollInterval) return;
-      if (reconciliationInterval) clearInterval(reconciliationInterval);
-      setStatusMessage("Live stream disconnected. Polling backend for updates...");
-      pollInterval = setInterval(async () => {
-        const status = await refetch();
-        if (terminalStatusRef.current) return;
-        if (isTerminalInvestigationStatus(status)) {
-          if (pollInterval) clearInterval(pollInterval);
-          setProgress(100);
-          setStatusMessage(status === "completed" ? "Investigation finalized." : status === "cancelled" ? "Investigation cancelled." : "System error occurred.");
-        } else {
-          setStatusMessage("🤖 Investigating network & threat graph...");
-        }
-      }, 5_000);
-    };
-
-    refetch().then((status) => {
-      if (isTerminalInvestigationStatus(status)) {
-        setProgress(100);
-        setStatusMessage(status === "completed" ? "Investigation finalized." : status === "cancelled" ? "Investigation cancelled." : "System error occurred.");
-        return;
+    pollInterval = setInterval(async () => {
+      if (isCancelled) return;
+      const currentStatus = await refetch();
+      if (isTerminalInvestigationStatus(currentStatus)) {
+        if (pollInterval) clearInterval(pollInterval);
       }
-
-      eventSource = new EventSource(`/api/investigations/${id}/stream`);
-      reconciliationInterval = setInterval(() => {
-        void reconcileDurableStatus();
-      }, 5_000);
-
-      eventSource.onmessage = async (e: MessageEvent) => {
-        try {
-          const event = JSON.parse(e.data);
-          const eventType: string = event.event_type ?? "";
-          const data: InvestigationStreamData = event.data ?? {};
-          const msg = typeof data.message === "string" ? data.message : "";
-          const agent = typeof data.agent === "string" ? data.agent : "";
-          const pct = typeof data.progress === "number" ? data.progress : 0;
-
-          const terminalUpdate = reconcileTerminalInvestigationEvent(eventType, data);
-          if (terminalUpdate) {
-            applyTerminalUpdate(terminalUpdate.status, data, eventType);
-            // REST supplies full report/graph detail after the snapshot. It
-            // cannot supersede the terminal status captured above.
-            void refetch();
-            return;
-          }
-          if (terminalStatusRef.current) return;
-
-          if (pct > 0) setProgress(Math.min(pct, 100));
-
-          if (eventType === "tool_invocation") {
-            setActivityLog((prev) => [`[${new Date().toLocaleTimeString()}] 🔧 ${agent}: EXECUTING_${data.tool}`, ...prev].slice(0, 20));
-          } else if (eventType === "agent_reasoning") {
-            setActivityLog((prev) => [`[${new Date().toLocaleTimeString()}] 💭 ${agent}: ANALYZING_DATA`, ...prev].slice(0, 20));
-          } else if (eventType.includes("_started")) {
-            setStatusMessage(`🤖 ${msg || agent}`);
-          } else if (eventType.includes("_completed")) {
-            setStatusMessage(`✅ ${msg || agent}`);
-            if (agent) setActivityLog((prev) => [`[${new Date().toLocaleTimeString()}] ✅ ${agent}: SYNOPSIS_READY`, ...prev].slice(0, 20));
-          } else {
-            if (msg) setStatusMessage(msg);
-          }
-        } catch (parseErr) {
-          console.warn("SSE parse error:", parseErr);
-        }
-      };
-
-      eventSource.onerror = () => {
-        eventSource?.close();
-        if (!terminalStatusRef.current) startPolling();
-      };
-    });
+    }, 4000);
 
     return () => {
-      eventSource?.close();
+      isCancelled = true;
+      abortController.abort();
       if (pollInterval) clearInterval(pollInterval);
-      if (reconciliationInterval) clearInterval(reconciliationInterval);
-      simulationRef.current?.stop();
+      eventSource?.close();
     };
+    // NOTE: intentionally keyed on `id` only. Including `rebuildSpatialGraph`
+    // here would re-create the EventSource and polling interval on every job
+    // poll and every graph-filter toggle (its identity changes with
+    // `parsedDossier.parsedDotGraph` and `graphFilters`), which self-feeds into
+    // an unbounded refetch loop. The graph is re-rendered separately by the
+    // dedicated `rebuildSpatialGraph` effect above.
   }, [id]);
 
-  // Re-apply filters when graphFilters change (frontend-only re-filter)
-  useEffect(() => {
-    const graphData = rawGraphRef.current;
-    if (!graphData || graphData.nodes.length === 0) return;
-
-    if (simulationRef.current) {
-      simulationRef.current.stop();
-      simulationRef.current = null;
-    }
-
-    const visibleNodes = graphData.nodes.filter((n) => {
-      if (n.isRoot) return true;
-      if (graphFilters.reportOnly && !n.inReport) return false;
-      if (graphFilters.maliciousOnly && !n.isMalicious) return false;
-      if (!graphFilters.types[n.entityType]) return false;
-      return true;
-    });
-    const visibleIds = new Set(visibleNodes.map((n) => n.id));
-    const visibleEdges = graphData.edges.filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target));
-
-    const simNodes: any[] = visibleNodes.map((n) => ({
-      id: n.id,
-      x: (Math.random() - 0.5) * 500,
-      y: (Math.random() - 0.5) * 500,
-      radius: n.size,
-      fx: n.isRoot ? 0 : undefined,
-      fy: n.isRoot ? 0 : undefined,
-    }));
-    const simEdgeData = visibleEdges.map((e) => ({ source: e.source, target: e.target }));
-    const simNodeMap = new Map<string, any>(simNodes.map((n) => [n.id, n]));
-
-    const simulation = d3.forceSimulation(simNodes)
-      .force("link", d3.forceLink(simEdgeData).id((d: any) => d.id).distance(180).strength(0.1))
-      .force("charge", d3.forceManyBody().strength(-800).distanceMax(600))
-      .force("collide", d3.forceCollide().radius((d: any) => d.radius + 20).strength(0.9))
-      .force("x", d3.forceX(0).strength(0.05))
-      .force("y", d3.forceY(0).strength(0.05))
-      .alphaDecay(0.02)
-      .velocityDecay(0.4);
-
-    simulation.stop();
-    for (let i = 0; i < 120; i++) simulation.tick();
-
-    setNodes(visibleNodes.map((n) => {
-      const sim = simNodeMap.get(n.id)!;
-      return {
-        id: n.id,
-        type: "custom",
-        position: { x: sim.x, y: sim.y },
-        data: { label: getSmartLabel(n), title: n.title, isRoot: n.isRoot, isMalicious: n.isMalicious, accent: n.color },
-        style: { background: "transparent", border: "none", padding: 0, width: n.size * 2, height: n.size * 2, overflow: "visible" },
-      };
-    }));
-
-    simulationRef.current = simulation;
-    simulation.restart();
-    simulation.on("tick", () => {
-      setNodes((nds) =>
-        nds.map((node) => {
-          const sim = simNodeMap.get(node.id);
-          if (!sim) return node;
-          return { ...node, position: { x: sim.x ?? 0, y: sim.y ?? 0 } };
-        })
-      );
-    });
-
-    const calculatedEdges = visibleEdges.map((edge, index) => ({
-      id: `e-${index}`,
-      source: edge.source,
-      target: edge.target,
-      label: edge.label,
-      type: "straight",
-      style: { stroke: "rgba(0, 251, 251, 0.2)", strokeWidth: 1 },
-      labelStyle: { fill: "rgba(255, 124, 245, 0.6)", fontSize: "8px", fontFamily: "var(--font-space-grotesk)", textTransform: "uppercase" },
-      labelBgStyle: { fill: "var(--surface-container-lowest)", fillOpacity: 0.8 },
-      labelBgPadding: [2, 4] as [number, number],
-      markerEnd: { type: MarkerType.ArrowClosed, width: 8, height: 8, color: "rgba(0, 251, 251, 0.4)" },
-    }));
-    setEdges(calculatedEdges);
-  }, [graphFilters]);
-
-  const tiles = [
-    {
-      id: 1,
-      title: "Tactical_Triage",
-      icon: "radar",
-      size: "col-span-12 lg:col-span-5",
-      isTriage: true,
-      content: job ? {
-            verdict: job.risk_level || "UNKNOWN",
-            score: job.gti_score !== null && job.gti_score !== undefined ? job.gti_score : "Unknown",
-            malicious: job.rich_intel?.malicious_stats || 0,
-            total: job.rich_intel?.total_stats || 0,
-            summary: job.rich_intel?.triage_summary || ""
-          } : null,
-    },
-    {
-      id: 2,
-      title: "Intelligence_Graph",
-      icon: "hub",
-      size: "col-span-12 lg:col-span-7 row-span-2",
-      isGraph: true,
-    },
-    {
-      id: 3,
-      title: "Specialist_Dossiers",
-      icon: "reorder",
-      size: "col-span-12 lg:col-span-5",
-      isReports: true,
-    },
-    {
-      id: 4,
-      title: "Final_Intelligence_Synthesis",
-      icon: "description",
-      size: "col-span-12 lg:col-span-12 h-auto",
-      isFinalReport: true,
-    },
-    {
-      id: 5,
-      title: "Mission_Timeline",
-      icon: "history",
-      size: "col-span-12 lg:col-span-6",
-      isTimeline: true,
-    },
-    {
-      id: 6,
-      title: "Agent_Transparency",
-      icon: "terminal",
-      size: "col-span-12 lg:col-span-6",
-      isTransparency: true,
-    },
-  ];
-
   return (
-    <div className="bg-[#0e0e10] text-on-surface font-body overflow-hidden h-screen flex flex-col selection:bg-primary selection:text-on-primary">
-      {/* TopNavBar */}
-      <header className="fixed top-0 w-full z-50 bg-[#0e0e10]/80 backdrop-blur-xl border-b border-slate-800/50 shadow-2xl shadow-cyan-900/10 flex justify-between items-center px-6 h-16">
-        <div className="flex items-center gap-8">
-          <span className="text-xl font-bold tracking-widest text-[#00f7ff] font-headline uppercase">HARIMAU</span>
-          <nav className="hidden md:flex gap-6 font-headline text-sm uppercase tracking-widest">
-            <Link href="/" className="text-slate-400 hover:text-white transition-colors">HUNT</Link>
-            <Link href="#" className="text-[#00f7ff] border-b-2 border-[#00f7ff] pb-1">INVESTIGATIONS</Link>
-            <Link href="#" className="text-slate-400 hover:text-white transition-colors">INTEL</Link>
-          </nav>
+    <div className="dossier-surface bg-slate-950 text-slate-200 font-sans min-h-screen flex flex-col selection:bg-teal-500 selection:text-slate-950">
+      {/* Sticky Top Header Bar */}
+      <header className="sticky top-0 w-full z-50 bg-slate-950/90 backdrop-blur-xl border-b border-slate-800/80 px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-4 min-w-0">
+          <Link href="/" className="flex items-center gap-2 shrink-0">
+            <span className="w-2.5 h-2.5 rounded-full bg-teal-400 shadow-[0_0_8px_#2dd4bf]" />
+            <span className="font-bold tracking-wider text-sm text-white uppercase font-mono">
+              HARIMAU
+            </span>
+          </Link>
+
+          <div className="h-4 w-px bg-slate-800 hidden sm:block" />
+
+          <div className="hidden sm:flex items-center gap-2 min-w-0">
+            <span className="text-[11px] font-mono text-slate-400 truncate max-w-[220px]">
+              {job?.ioc || id}
+            </span>
+            {job?.risk_level && (
+              <span
+                className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
+                  job.risk_level.toUpperCase().includes("MALICIOUS")
+                    ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                    : job.risk_level.toUpperCase().includes("SUSPICIOUS")
+                      ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                      : "bg-teal-500/20 text-teal-300 border-teal-500/40"
+                }`}
+              >
+                {job.risk_level.toUpperCase()}{" "}
+                {job.gti_score !== null && job.gti_score !== undefined
+                  ? `${job.gti_score}/100`
+                  : ""}
+              </span>
+            )}
+          </div>
         </div>
-        <div className="flex-grow flex items-center px-8 gap-4 overflow-hidden">
-          <div className="text-[10px] font-label text-outline uppercase tracking-widest whitespace-nowrap">MISSION_ID:</div>
-          <div className="text-[10px] font-mono text-secondary truncate max-w-[200px]">{id}</div>
-          <div className="hidden md:block text-[10px] font-label text-outline uppercase tracking-widest ml-4">IOC:</div>
-          <div className="hidden md:block text-[10px] font-mono text-primary font-black">{job?.ioc}</div>
+
+        {/* Center Workbench Switcher Tabs: Threat Dossier vs Spatial Canvas */}
+        <div className="flex items-center bg-slate-900/90 p-1 rounded-xl border border-slate-800">
+          <button
+            onClick={() => setActiveView("dossier")}
+            className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+              activeView === "dossier"
+                ? "bg-teal-500/20 text-teal-300 border border-teal-500/40 shadow-sm"
+                : "text-slate-400 hover:text-white"
+            }`}
+          >
+            <span>📑 Threat Dossier</span>
+          </button>
+          <button
+            onClick={() => setActiveView("canvas")}
+            className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+              activeView === "canvas"
+                ? "bg-teal-500/20 text-teal-300 border border-teal-500/40 shadow-sm"
+                : "text-slate-400 hover:text-white"
+            }`}
+          >
+            <span>🕸️ Spatial Topology Canvas</span>
+            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-teal-300">
+              {graphEntityCount}
+            </span>
+          </button>
         </div>
-        <div className="flex items-center gap-4">
-          {/* History Dropdown kept for functionality */}
-          <div className="hidden lg:block relative">
+
+        {/* Right Controls: Case Switcher & Agent Log Drawer */}
+        <div className="flex items-center gap-2.5">
+          {recentJobs.length > 0 && (
             <select
-              className="bg-surface-container border-b-2 border-secondary text-secondary text-[10px] px-3 py-1 font-label uppercase outline-none cursor-pointer appearance-none pr-6"
+              className="hidden xl:block bg-slate-900 border border-slate-800 text-slate-300 text-xs rounded-lg px-2.5 py-1.5 font-mono outline-none cursor-pointer"
               value={id}
               onChange={(e: ChangeEvent<HTMLSelectElement>) => {
-                if (e.target.value && e.target.value !== id)
+                if (e.target.value && e.target.value !== id) {
                   router.push(`/investigate/${e.target.value}`);
+                }
               }}
             >
-              <option value={id}>
-                {recentJobs.length > 0 ? "RECORDS_HISTORY..." : "LOADING_RECORDS..."}
-              </option>
-              {recentJobs.map((j: any) => (
+              <option value={id}>Switch Case ({id.slice(0, 8)}...)</option>
+              {recentJobs.map((j) => (
                 <option key={j.job_id} value={j.job_id}>
-                  {j.ioc} // {j.status}
+                  {j.ioc} ({j.status})
                 </option>
               ))}
             </select>
-            <span className="absolute right-2 top-1.5 text-secondary material-symbols-outlined text-[12px] pointer-events-none">
-              arrow_drop_down
-            </span>
-          </div>
-          <button className="text-slate-400 hover:text-[#00f7ff] transition-colors">
-            <span className="material-symbols-outlined">settings_input_component</span>
+          )}
+
+          <button
+            onClick={() => setShowAgentDrawer((prev) => !prev)}
+            className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs font-mono flex items-center gap-1.5 transition-colors"
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="hidden md:inline">Agent Log</span>
           </button>
-          <div className="w-8 h-8 border border-outline-variant bg-surface-container-high">
-            <div className="w-full h-full bg-secondary/20"></div>
-          </div>
         </div>
       </header>
 
-      <div className="flex flex-1 pt-16 pb-8 overflow-hidden">
-        {/* SideNavBar */}
-        <aside className={`fixed left-0 top-16 h-full ${isCollapsed ? 'w-16' : 'w-64'} border-r border-slate-800 bg-[#16161a] flex flex-col py-4 z-40 transition-all duration-300`}>
-          <button onClick={() => setIsCollapsed(!isCollapsed)} className="absolute top-4 right-2 text-slate-500 hover:text-[#00f7ff] z-50">
-            <span className="material-symbols-outlined text-sm">
-              {isCollapsed ? 'chevron_right' : 'chevron_left'}
-            </span>
-          </button>
-          <div className="px-4 mb-8">
+      {/* Copied Toast Notification */}
+      {copiedToast && (
+        <div className="fixed bottom-5 right-5 z-50 bg-slate-900 border border-teal-500/50 text-teal-300 px-4 py-2.5 rounded-xl shadow-2xl text-xs font-mono flex items-center gap-2">
+          <span>✔ Copied indicator to clipboard:</span>
+          <strong className="text-white truncate max-w-[240px]">{copiedToast}</strong>
+        </div>
+      )}
+
+      {/* Jump-to-Canvas Notice */}
+      {jumpNotice && (
+        <div
+          className={`fixed right-5 z-50 bg-slate-900 border border-amber-500/50 text-amber-300 px-4 py-2.5 rounded-xl shadow-2xl text-xs font-mono flex items-center gap-2 max-w-sm ${
+            copiedToast ? "bottom-16" : "bottom-5"
+          }`}
+        >
+          <span>{jumpNotice}</span>
+        </div>
+      )}
+
+      {/* Main Content Area */}
+      {jobStatus === "running" && !job?.final_report ? (
+        <main className="flex-1 flex flex-col items-center justify-center p-6 max-w-2xl mx-auto w-full space-y-8">
+          <div className="w-full space-y-2">
+            <div className="flex justify-between font-mono text-xs uppercase tracking-wider">
+              <span className="text-teal-400">Harimau Multi-Agent Swarm Active</span>
+              <span className="text-white font-bold">{progress}%</span>
+            </div>
+            <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+              <div
+                className="h-full bg-teal-400 transition-all duration-500"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="w-full rounded-2xl bg-slate-900/80 border border-slate-800 p-6 space-y-4 shadow-xl">
             <div className="flex items-center gap-3">
-              <div className="w-2 h-2 rounded-full bg-[#00f7ff] animate-pulse flex-shrink-0"></div>
-              {!isCollapsed && (
-                <div>
-                  <p className="font-headline text-sm uppercase font-semibold text-[#00f7ff]">HARIMAU</p>
-                  <p className="text-[10px] text-slate-500 uppercase tracking-widest">Active Session</p>
+              <span className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-ping" />
+              <p className="font-mono text-sm font-semibold text-white">{statusMessage}</p>
+            </div>
+
+            <div className="space-y-1.5 max-h-56 overflow-y-auto font-mono text-xs text-slate-400 border-t border-slate-800/80 pt-3">
+              {activityLog.map((log, idx) => (
+                <div key={idx} className="truncate">
+                  {log}
                 </div>
+              ))}
+              {activityLog.length === 0 && (
+                <div className="text-slate-500 italic">Waiting for agent telemetry stream...</div>
               )}
             </div>
           </div>
-          <nav className="flex-1 space-y-1">
-            <a className="flex items-center gap-4 px-4 py-3 bg-cyan-500/10 text-[#00f7ff] border-r-2 border-[#00f7ff] font-headline text-sm uppercase font-semibold" href="#">
-              <span className="material-symbols-outlined">folder_open</span>
-              {!isCollapsed && <span>Investigation Cases</span>}
-            </a>
-            <a className="flex items-center gap-4 px-4 py-3 text-slate-500 hover:bg-white/5 hover:text-slate-300 font-headline text-sm uppercase font-semibold transition-all" href="#">
-              <span className="material-symbols-outlined">history_edu</span>
-              {!isCollapsed && <span>Archived Reports</span>}
-            </a>
-          </nav>
-          <div className="mt-auto border-t border-slate-800 pt-4 space-y-1 mb-20">
-            <div className="flex items-center gap-4 px-4 py-2 text-slate-600 font-headline text-[10px] uppercase">
-              <span className="material-symbols-outlined text-sm">sensors</span>
-              {!isCollapsed && <span>Agent Status: Optimal</span>}
+        </main>
+      ) : jobStatus === "failed" || jobStatus === "cancelled" ? (
+        <main className="flex-1 flex items-center justify-center p-6">
+          <div className="w-full max-w-2xl rounded-2xl border border-rose-500/40 bg-slate-900/90 p-8 space-y-6 shadow-2xl">
+            <div className="space-y-1">
+              <span className="text-xs font-mono uppercase tracking-widest text-rose-400">
+                Terminal Investigation State
+              </span>
+              <h2 className="text-2xl font-bold text-white">
+                {jobStatus === "cancelled" ? "Investigation Cancelled" : "Investigation Failed"}
+              </h2>
             </div>
-            <div className="flex items-center gap-4 px-4 py-2 text-slate-600 font-headline text-[10px] uppercase">
-              <span className="material-symbols-outlined text-sm">lan</span>
-              {!isCollapsed && <span>Network Health: Secure</span>}
-            </div>
+            <p className="rounded-xl border border-rose-500/30 bg-rose-950/20 p-4 font-mono text-xs text-rose-200">
+              {job?.metadata?.error || statusMessage}
+            </p>
+            <Link
+              href="/"
+              className="inline-flex items-center gap-2 rounded-xl bg-teal-500/20 border border-teal-500/40 px-4 py-2 text-xs font-semibold text-teal-200 hover:bg-teal-500/30 transition-colors"
+            >
+              Start New Investigation
+            </Link>
           </div>
-        </aside>
+        </main>
+      ) : activeView === "dossier" ? (
+        /* ================================================================= */
+        /* VIEW 1: THREAT DOSSIER WORKBENCH (~75% Fluid Viewport Layout)     */
+        /* ================================================================= */
+        <div className="w-full sm:w-[92%] md:w-[88%] lg:w-[82%] xl:w-[75%] mx-auto min-w-0 px-4 sm:px-6 xl:px-8 py-10 flex gap-8 xl:gap-10 transition-[width] duration-150">
+          {/* Left/Center Column: Publication Article Body (Fluid Width, No max-w-1020px constraint) */}
+          <article className="flex-1 min-w-0 space-y-8 pb-24 font-sans text-slate-300 text-sm leading-relaxed">
+            {job && (
+              <DossierMasthead job={job} graphEntityCount={graphEntityCount} />
+            )}
 
-        {/* Main Dashboard Canvas */}
-        <main className={`${isCollapsed ? 'ml-16' : 'ml-64'} flex-1 p-6 grid grid-cols-12 gap-4 overflow-y-auto h-full custom-scrollbar transition-all duration-300`}>
-          
-          {jobStatus === "running" ? (
-            /* Tactical Loading State inside main canvas */
-            <div className="col-span-12 flex flex-col items-center justify-center h-[70vh] gap-12 max-w-2xl mx-auto">
-              <div className="w-full space-y-2">
-                <div className="flex justify-between font-label text-[10px] uppercase tracking-widest">
-                  <span className="text-secondary">Decrypting_Neural_Link</span>
-                  <span className="text-primary">{progress}%</span>
-                </div>
-                <div className="w-full h-1 bg-surface-container-highest relative overflow-hidden">
-                  <div className="absolute inset-0 bg-primary/20 animate-pulse"></div>
-                  <div className="h-full bg-primary transition-all duration-500 shadow-[0_0_10px_var(--primary)]" style={{ width: `${progress}%` }}></div>
-                </div>
-              </div>
+            {/* Optional Preamble before Section 1 */}
+            {parsedDossier.preamble && (
+              <ThreatDossierMarkdown content={parsedDossier.preamble} />
+            )}
 
-              <div className="bg-surface-container-low border border-outline-variant/30 p-8 w-full relative overflow-hidden glass-panel">
-                 <div className="absolute top-0 right-0 p-2 font-mono text-[8px] text-outline/30">SYS_LOG_V2.5</div>
-                 <div className="flex items-start gap-4 mb-6">
-                   <div className="w-2 h-12 bg-secondary animate-pulse"></div>
-                   <p className="font-headline text-xl font-black uppercase text-foreground tracking-tighter italic">{statusMessage}</p>
-                 </div>
-                 
-                 <div className="space-y-2 max-h-48 overflow-y-auto scrollbar-hide">
-                  {activityLog.map((log, i) => {
-                    const parts = log.split(']');
-                    const time = parts[0] + ']';
-                    const rest = parts.slice(1).join(']');
-                    return (
-                      <div key={i} className="font-mono text-[10px] text-outline/60 flex gap-3">
-                        <span className="text-secondary/40">{time}</span>
-                        <span>{rest}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          ) : jobStatus === "failed" || jobStatus === "cancelled" ? (
-            <section className="col-span-12 flex min-h-[70vh] items-center justify-center">
-              <div className="w-full max-w-3xl border border-primary/40 bg-surface-container-low p-8 shadow-[0_0_48px_rgba(255,75,75,0.08)]">
-                <div className="mb-6 flex items-start gap-4">
-                  <span className="material-symbols-outlined text-4xl text-primary">
-                    {jobStatus === "cancelled" ? "cancel" : "error"}
-                  </span>
-                  <div>
-                    <p className="font-label text-xs uppercase tracking-[0.3em] text-primary">Terminal Investigation State</p>
-                    <h2 className="mt-2 font-headline text-3xl font-black uppercase tracking-tight text-foreground">
-                      {jobStatus === "cancelled" ? "Investigation Cancelled" : "Investigation Failed"}
-                    </h2>
-                  </div>
-                </div>
-                <p className="border-l-2 border-primary bg-primary/5 px-4 py-3 font-mono text-sm text-outline">
-                  {job?.metadata?.error || statusMessage}
-                </p>
-                <div className="mt-8 border-t border-slate-800 pt-5">
-                  <h3 className="font-label text-xs uppercase tracking-widest text-outline-variant">Recorded Timeline</h3>
-                  <div className="mt-4 space-y-3">
-                    {job?.subtasks?.map((task: any, index: number) => (
-                      <div key={`${task.agent || "task"}-${index}`} className="border-l border-slate-700 pl-4">
-                        <p className="font-mono text-[10px] text-secondary">{task.timestamp || "Recorded"}</p>
-                        <p className="font-headline text-sm uppercase text-foreground">{task.agent || "System"}</p>
-                        <p className="text-xs text-slate-500">{task.task || task.status || "No detail recorded."}</p>
-                      </div>
-                    ))}
-                    {(!job?.subtasks || job.subtasks.length === 0) && (
-                      <p className="text-xs italic text-outline/50">No agent tasks completed before this terminal state.</p>
-                    )}
-                  </div>
-                </div>
-                <Link href="/" className="mt-8 inline-flex border border-secondary px-4 py-2 font-label text-xs uppercase tracking-widest text-secondary transition-colors hover:bg-secondary/10">
-                  Start New Investigation
-                </Link>
-              </div>
-            </section>
-          ) : (
-            <>
-              {/* Triage Assessment Panel */}
-                <section className="col-span-12 lg:col-span-4 bg-[#16161a] border border-slate-800 p-6 flex flex-col justify-between relative overflow-hidden group">
-                <div className="absolute top-0 right-0 w-32 h-32 bg-secondary/5 blur-3xl -mr-16 -mt-16 rounded-full group-hover:bg-secondary/10 transition-all pointer-events-none"></div>
-                <div>
-                  <div className="flex justify-between items-start">
-                    <h3 className="font-label text-outline-variant uppercase mb-2 text-xs tracking-widest">Triage Verdict</h3>
-                    <button onClick={() => setModalContent({ 
-                      title: "Triage Verdict", 
-                      content: `### GTI Verdict\n**${job?.risk_level || "UNKNOWN"}**\n\n### GTI Score\n**${job?.gti_score !== null && job?.gti_score !== undefined ? job.gti_score + "/100" : "Unknown"}**\n\n### VT Detections\n**${job?.rich_intel?.malicious_stats !== undefined ? `${job.rich_intel.malicious_stats}/${job.rich_intel.total_stats}` : "N/A"}**\n\n${job?.rich_intel?.gti_description ? `### GTI Assessment\n${job.rich_intel.gti_description}\n\n` : ''}### GTI Analysis\n${job?.rich_intel?.triage_summary || "No summary available."}` 
-                    })} className="text-slate-500 hover:text-[#00f7ff] cursor-pointer">
-                      <span className="material-symbols-outlined text-sm">fullscreen</span>
-                    </button>
-                  </div>
-                  <div className="flex items-end gap-3 mb-4">
-                    <span className={`text-3xl font-headline font-black tracking-tighter uppercase ${job?.risk_level === 'MALICIOUS' ? 'text-primary' : 'text-secondary'}`}>{job?.risk_level || "UNKNOWN"}</span>
-                    <span className="bg-secondary/10 text-secondary border border-secondary/20 px-2 py-0.5 text-[10px] mb-2">CRITICAL</span>
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-surface-container-low p-2 border border-slate-800/50 flex flex-col">
-                      <span className="text-[10px] text-slate-500 uppercase">GTI Score</span>
-                      <span className="font-mono text-[#00f7ff] font-bold">{job?.gti_score !== null && job?.gti_score !== undefined ? job.gti_score + "/100" : "Unknown"}</span>
-                    </div>
-                    <div className="bg-surface-container-low p-2 border border-slate-800/50 flex flex-col">
-                      <span className="text-[10px] text-slate-500 uppercase">VT Detections</span>
-                      <span className="font-mono text-secondary font-bold">
-                        {job?.rich_intel?.malicious_stats !== undefined ? `${job.rich_intel.malicious_stats}/${job.rich_intel.total_stats}` : "N/A"}
-                      </span>
-                    </div>
-                  </div>
-                  {job?.rich_intel?.gti_description && (
-                    <div className="bg-surface-container-low p-2 border border-slate-800/50 flex flex-col">
-                      <span className="text-[10px] text-slate-500 uppercase mb-1">GTI Assessment</span>
-                      <p className="text-xs text-outline/90 font-body leading-relaxed">{job.rich_intel.gti_description}</p>
-                    </div>
+            {/* Strict 1-7 Dossier Sections */}
+            {parsedDossier.sections.map((sec) => {
+              const hasComponent = sec.number === 3 || sec.number === 6 || sec.number === 7;
+              const hasSubtasksTimeline =
+                sec.number === 4 && Array.isArray(job?.subtasks) && job.subtasks.length > 0;
+              const isEmptyProse = !sec.markdownBody && !hasComponent && !hasSubtasksTimeline;
+
+              return (
+                <section key={sec.id} id={sec.id} className="scroll-mt-20 space-y-4">
+                  <h3 className="text-xl font-bold text-white tracking-tight border-b border-slate-800/80 pb-2">
+                    {sec.title}
+                  </h3>
+
+                  {/* Section 3: Autonomous Specialist Reports Grid */}
+                  {sec.number === 3 && job && (
+                    <SpecialistReportsGrid
+                      job={job}
+                      onJumpToNode={handleJumpToNode}
+                      onCopyIoc={handleCopyIoc}
+                    />
                   )}
-                  <div className="bg-surface-container-low p-2 border border-slate-800/50 flex flex-col">
-                    <span className="text-[10px] text-slate-500 uppercase mb-1">GTI Analysis</span>
-                    <p className="text-xs text-outline/80 font-body leading-relaxed italic">"{job?.rich_intel?.triage_summary || "No summary available."}"</p>
-                  </div>
-                </div>
-              </section>
 
-              {/* Specialist Reports Hub */}
-              <section className="col-span-12 lg:col-span-8 flex gap-4">
-                {job?.specialist_results ? Object.entries(job.specialist_results).map(([agent, result]: [string, any]) => (
-                  <div key={agent} className="flex-1 bg-[#16161a] border border-slate-800 p-4 hover:border-[#00f7ff]/30 transition-all flex flex-col">
-                    <div className="flex justify-between items-start mb-4">
-                      <div className="flex items-center gap-2">
-                        <span className="material-symbols-outlined text-secondary">bug_report</span>
-                        <h4 className="font-headline text-sm font-semibold uppercase">{agent.replace('_', ' ')}</h4>
-                      </div>
-                      <button onClick={() => setModalContent({ title: agent.replace('_', ' '), content: result.markdown_report || result.summary || "No report available." })} className="text-slate-500 hover:text-[#00f7ff] cursor-pointer">
-                        <span className="material-symbols-outlined text-sm">fullscreen</span>
-                      </button>
-                    </div>
-                    <div className="flex-1 font-mono text-xs text-slate-400 leading-relaxed bg-[#0e0e10] p-3 border border-slate-800 overflow-y-auto max-h-[150px] custom-scrollbar">
-                      <p className="text-secondary/80 mb-2">// Verdict: {result.verdict}</p>
-                      <p className="line-clamp-4">{result.summary || (result.markdown_report ? result.markdown_report.slice(0, 250) + '...' : "View detailed briefing...")}</p>
-                    </div>
-                  </div>
-                )) : (
-                  <div className="flex-1 bg-[#16161a] border border-slate-800 p-4 flex items-center justify-center text-outline/40 italic uppercase tracking-widest text-xs">
-                    Awaiting Specialist Inputs...
-                  </div>
-                )}
-              </section>
+                  {/* Section Markdown Narrative Body */}
+                  {sec.markdownBody && (
+                    <ThreatDossierMarkdown content={sec.markdownBody} />
+                  )}
 
-              {/* Network Graph Visualizer */}
-              <section className="col-span-12 lg:col-span-9 bg-[#16161a] border border-slate-800 relative min-h-[400px] overflow-hidden">
-                <div className="absolute inset-0 opacity-20 pointer-events-none" style={{ backgroundImage: "radial-gradient(#1e293b 1px, transparent 1px)", backgroundSize: "24px 24px" }}></div>
-                <div className="absolute top-4 left-4 right-4 z-10 flex justify-between items-start">
-                  <div>
-                    <h3 className="font-label text-outline-variant uppercase text-xs tracking-widest">Link Analysis Graph</h3>
-                    <p className="text-[10px] text-slate-500">RELATIONSHIP MAPPING [v4.2]</p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {/* Filter Controls */}
-                    <div className="flex items-center gap-2 bg-[#0e0e10]/80 backdrop-blur-sm border border-slate-800 px-3 py-1.5 text-[10px] font-label uppercase tracking-widest">
-                      <label className="flex items-center gap-1 cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={graphFilters.reportOnly}
-                          onChange={(e) => setGraphFilters((f) => ({ ...f, reportOnly: e.target.checked }))}
-                          className="accent-[#00f7ff] w-3 h-3"
-                        />
-                        <span className="text-outline hover:text-foreground transition-colors">Relevant</span>
-                      </label>
-                      <span className="text-slate-700">|</span>
-                      <label className="flex items-center gap-1 cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={graphFilters.maliciousOnly}
-                          onChange={(e) => setGraphFilters((f) => ({ ...f, maliciousOnly: e.target.checked }))}
-                          className="accent-[#FF4B4B] w-3 h-3"
-                        />
-                        <span className="text-outline hover:text-foreground transition-colors">Malicious</span>
-                      </label>
-                      <span className="text-slate-700">|</span>
-                      {Object.entries({ file: "🔒", domain: "🌐", ip_address: "📡", url: "🔗" }).map(([type, icon]) => (
-                        <label key={type} className="flex items-center gap-0.5 cursor-pointer select-none">
-                          <input
-                            type="checkbox"
-                            checked={graphFilters.types[type] ?? true}
-                            onChange={(e) => setGraphFilters((f) => ({
-                              ...f,
-                              types: { ...f.types, [type]: e.target.checked },
-                            }))}
-                            className="accent-[#00f7ff] w-3 h-3"
-                          />
-                          <span title={type.replace("_", " ")}>{icon}</span>
-                        </label>
+                  {/* Section 4 Structured Timeline Fallback / Supplement from job.subtasks */}
+                  {sec.number === 4 && hasSubtasksTimeline && !sec.markdownBody && (
+                    <div className="space-y-2.5 my-4">
+                      {job?.subtasks?.map((task, idx) => (
+                        <div
+                          key={idx}
+                          className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800/90 flex items-start justify-between gap-4"
+                        >
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded bg-teal-950 text-teal-300 border border-teal-800/60">
+                                {task.agent || "AGENT"}
+                              </span>
+                              {task.timestamp && (
+                                <span className="text-[11px] font-mono text-slate-500">
+                                  {new Date(task.timestamp).toLocaleTimeString()}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-200 leading-relaxed">{task.task}</p>
+                          </div>
+                          <span className="text-[10px] font-mono uppercase text-slate-400 shrink-0">
+                            {task.status || "COMPLETED"}
+                          </span>
+                        </div>
                       ))}
                     </div>
-                    <button onClick={() => setModalContent({ title: "Link Analysis Graph", content: "" })} className="text-slate-500 hover:text-[#00f7ff] cursor-pointer">
-                      <span className="material-symbols-outlined text-sm">fullscreen</span>
-                    </button>
-                  </div>
-                </div>
-                <div className="w-full h-full pt-16">
-                  {loading ? (
-                    <div className="absolute inset-0 flex items-center justify-center font-label text-[10px] text-outline uppercase tracking-widest">Awaiting_Neural_Map...</div>
-                  ) : (
-                    <ReactFlow
-                      edges={edges}
-                      fitView
-                      nodes={nodes}
-                      nodesConnectable={false}
-                      nodeOrigin={[0.5, 0.5]}
-                      nodeTypes={nodeTypes}
-                      onEdgesChange={onEdgesChange}
-                      onNodesChange={onNodesChange}
-                      onNodeClick={(_event, node) => {
-                        const raw = rawGraphRef.current?.nodes.find((n) => n.id === node.id);
-                        if (raw) setSelectedNode(raw);
-                      }}
-                    >
-                      <Background color="var(--outline-variant)" gap={20} size={0.5} variant={BackgroundVariant.Lines} />
-                      <Controls className="!bg-surface-container-highest !border-outline-variant !shadow-none !rounded-none" />
-                      <MiniMap 
-                        className="!bg-surface-container-lowest !border-outline-variant !rounded-none" 
-                        maskColor="rgba(0,0,0,0.8)" 
-                        nodeColor={(n: any) => n.data?.isMalicious ? "var(--primary)" : n.data?.isRoot ? "var(--secondary)" : "var(--outline)"} 
-                      />
-                    </ReactFlow>
                   )}
-                </div>
 
-                {/* Node Detail Panel (slide-in) */}
-                {selectedNode && (
-                  <div className="absolute top-0 right-0 h-full w-[320px] bg-[#16161a]/95 backdrop-blur-md border-l border-slate-800 z-20 flex flex-col animate-slide-in-right">
-                    <div className="p-4 border-b border-slate-800 flex justify-between items-center">
-                      <h4 className="font-headline text-sm font-bold uppercase text-[#00f7ff] truncate">
-                        {selectedNode.entityType?.replace("_", " ") || "Entity"} Details
-                      </h4>
-                      <button onClick={() => setSelectedNode(null)} className="text-slate-500 hover:text-[#00f7ff]">
-                        <span className="material-symbols-outlined text-sm">close</span>
-                      </button>
-                    </div>
-                    <div className="flex-1 p-4 overflow-y-auto custom-scrollbar space-y-4">
-                      {/* Entity ID */}
-                      <div>
-                        <span className="text-[10px] text-slate-500 uppercase block mb-1">Entity ID</span>
-                        <div className="flex items-center gap-2">
-                          <code className="text-xs text-secondary font-mono break-all flex-1 bg-[#0e0e10] p-2 border border-slate-800">
-                            {selectedNode.id}
-                          </code>
-                          <button
-                            onClick={() => navigator.clipboard.writeText(selectedNode.id)}
-                            className="text-slate-500 hover:text-[#00f7ff] flex-shrink-0"
-                            title="Copy to clipboard"
-                          >
-                            <span className="material-symbols-outlined text-sm">content_copy</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Verdict & Score */}
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="bg-[#0e0e10] p-2 border border-slate-800">
-                          <span className="text-[10px] text-slate-500 uppercase block">Verdict</span>
-                          <span className={`font-mono text-sm font-bold ${
-                            selectedNode.verdict?.toLowerCase().includes("malicious") ? "text-primary" :
-                            selectedNode.verdict?.toLowerCase().includes("suspicious") ? "text-amber-400" :
-                            "text-secondary"
-                          }`}>
-                            {selectedNode.verdict || "N/A"}
-                          </span>
-                        </div>
-                        <div className="bg-[#0e0e10] p-2 border border-slate-800">
-                          <span className="text-[10px] text-slate-500 uppercase block">Threat Score</span>
-                          <span className={`font-mono text-sm font-bold ${
-                            (selectedNode.threatScore ?? 0) >= 70 ? "text-primary" :
-                            (selectedNode.threatScore ?? 0) >= 40 ? "text-amber-400" :
-                            "text-secondary"
-                          }`}>
-                            {selectedNode.threatScore ?? "N/A"}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Vendor Detections */}
-                      {selectedNode.vendorDetections && (
-                        <div className="bg-[#0e0e10] p-2 border border-slate-800">
-                          <span className="text-[10px] text-slate-500 uppercase block">Vendor Detections</span>
-                          <span className="font-mono text-sm text-primary font-bold">{selectedNode.vendorDetections}</span>
-                        </div>
-                      )}
-
-                      {/* Tooltip Details */}
-                      {selectedNode.title && (
-                        <div>
-                          <span className="text-[10px] text-slate-500 uppercase block mb-1">Analysis Details</span>
-                          <div className="bg-[#0e0e10] p-3 border border-slate-800 text-xs text-outline/80 font-mono whitespace-pre-wrap leading-relaxed">
-                            {selectedNode.title}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Flags */}
-                      <div className="flex flex-wrap gap-2">
-                        {selectedNode.isMalicious && (
-                          <span className="bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 text-[10px] font-label uppercase">Malicious</span>
-                        )}
-                        {selectedNode.isRoot && (
-                          <span className="bg-secondary/10 text-secondary border border-secondary/20 px-2 py-0.5 text-[10px] font-label uppercase">Root IOC</span>
-                        )}
-                        {selectedNode.inReport && (
-                          <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-label uppercase">In Report</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </section>
-
-              {/* Agent Activity Log */}
-              <section className="col-span-12 lg:col-span-3 bg-[#0e0e10] border border-slate-800 overflow-hidden flex flex-col max-h-[400px]">
-                <div className="p-3 border-b border-slate-800 bg-[#16161a] flex items-center justify-between">
-                  <h3 className="font-label text-outline-variant uppercase text-xs tracking-widest">Agent Activity</h3>
-                  <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
-                </div>
-                <div className="flex-1 p-3 overflow-y-auto space-y-3 font-mono text-[11px] custom-scrollbar">
-                    {activityLog.map((log, idx) => {
-                      const parts = log.split(']');
-                      const time = parts[0] + ']';
-                      const rest = parts.slice(1).join(']');
-                      return (
-                        <div key={idx} className="flex gap-2 border-b border-outline-variant/10 pb-2">
-                          <span className="text-secondary/40">{time}</span>
-                          <span className="text-slate-500">{rest}</span>
-                        </div>
-                      );
-                    })}
-                  {activityLog.length === 0 && (
-                    <div className="text-outline/30 italic">No activity recorded yet.</div>
+                  {/* Empty Prose Section Fallback (prevents bare headings while preserving ToC anchors) */}
+                  {isEmptyProse && (
+                    <p className="text-xs font-mono text-slate-500 italic py-2">
+                      No additional narrative synthesized for this section.
+                    </p>
                   )}
-                </div>
-              </section>
 
-              {/* Final Intelligence Report */}
-              <section className="col-span-12 lg:col-span-8 bg-[#16161a] border border-slate-800 flex flex-col">
-                <div className="flex justify-between items-start p-6 border-b border-slate-800">
-                  <div>
-                    <h2 className="font-headline text-xl text-[#00f7ff] mb-2 uppercase">Final Intelligence Executive Summary</h2>
-                    <p className="text-outline-variant text-xs italic">Case ID: {id} | Assigned: Multi-Agent Core</p>
-                  </div>
-                  <button onClick={() => setModalContent({ title: "Final Intelligence Executive Summary", content: job?.final_report })} className="text-slate-500 hover:text-[#00f7ff] cursor-pointer">
-                    <span className="material-symbols-outlined text-sm">fullscreen</span>
-                  </button>
-                </div>
-                <div className="p-6 overflow-y-auto max-h-[300px] custom-scrollbar">
-                  <h4 className="text-[#00f7ff] uppercase tracking-wider text-xs font-bold mb-4 font-headline">Findings</h4>
-                  <div className="text-on-surface text-sm leading-relaxed">
-                    <Typewriter text={job?.final_report || "Report generation in progress..."} speed={2} />
-                  </div>
-                </div>
-              </section>
-
-              {/* Investigation Timeline */}
-              <section className="col-span-12 lg:col-span-4 bg-[#16161a] border border-slate-800 p-6">
-                <h3 className="font-label text-outline-variant uppercase text-xs tracking-widest mb-6">Investigation Timeline</h3>
-                <div className="relative space-y-6 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-[1px] before:bg-slate-800 custom-scrollbar max-h-[300px] overflow-y-auto pl-2">
-                  {job?.subtasks?.map((task: any, idx: number) => (
-                    <div key={idx} className="relative pl-8">
-                      <div className={`absolute left-0 top-1 w-4 h-4 bg-slate-800 border border-slate-600 rounded-full z-10 flex items-center justify-center`}>
-                        <div className={`w-1.5 h-1.5 rounded-full ${task.status === 'completed' ? 'bg-secondary' : 'bg-outline'}`}></div>
-                      </div>
-                      <p className="text-xs font-mono text-[#00f7ff]">{task.timestamp || "T+0s"}</p>
-                      <p className="text-sm font-semibold font-headline uppercase">{task.agent}</p>
-                      <p className="text-xs text-slate-500">{task.task}</p>
-                    </div>
-                  ))}
-                  {(!job?.subtasks || job.subtasks.length === 0) && (
-                    <div className="text-outline/30 italic text-xs pl-6">No tasks recorded.</div>
+                  {/* Section 6: Interactive Attack Flow Workbench & Dynamic Swim Lanes */}
+                  {sec.number === 6 && job && (
+                    <AttackFlowSection
+                      job={job}
+                      rawDotCode={parsedDossier.rawDotCode}
+                      parsedGraph={parsedDossier.parsedDotGraph}
+                      swimLanes={swimLanes}
+                      onJumpToNode={handleJumpToNode}
+                      onCopyIoc={handleCopyIoc}
+                      onExploreInCanvas={() => setActiveView("canvas")}
+                    />
                   )}
-                </div>
-              </section>
-            </>
+
+                  {/* Section 7: Consolidated Indicators of Compromise Table */}
+                  {sec.number === 7 && (
+                    <AppendixIocTable
+                      iocs={parsedDossier.appendixIocs}
+                      onJumpToNode={handleJumpToNode}
+                      onCopyIoc={handleCopyIoc}
+                    />
+                  )}
+                </section>
+              );
+            })}
+          </article>
+
+          {/* Right Column: Sticky Companion Rail */}
+          {job && (
+            <DossierCompanionRail
+              job={job}
+              onOpenCanvasTab={() => setActiveView("canvas")}
+              onToggleAgentLog={() => setShowAgentDrawer((prev) => !prev)}
+              onJumpToNode={handleJumpToNode}
+              onCopyIoc={handleCopyIoc}
+            />
           )}
-        </main>
+        </div>
+      ) : (
+        /* ================================================================= */
+        /* VIEW 2: SPATIAL TOPOLOGY CANVAS WORKBENCH (@xyflow/react)         */
+        /* ================================================================= */
+        <div className="relative flex-1 w-full h-[calc(100vh-3.5rem)] overflow-hidden bg-slate-950">
+          {/* Top-Left Floating Dossier Brief HUD */}
+          <div className="absolute top-4 left-6 z-20 w-80 rounded-2xl bg-slate-900/90 backdrop-blur-md border border-slate-800 p-4 shadow-2xl space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-teal-400" />
+                <h3 className="font-bold text-xs text-white uppercase tracking-wider font-mono">
+                  Threat Dossier Brief
+                </h3>
+              </div>
+              <button
+                onClick={() => setActiveView("dossier")}
+                className="px-2.5 py-1 rounded-lg bg-teal-500/20 hover:bg-teal-500/30 border border-teal-500/40 text-teal-200 text-xs font-semibold transition-all"
+              >
+                Threat Dossier ➔
+              </button>
+            </div>
+            <p className="text-xs text-slate-400 line-clamp-3">
+              {job?.rich_intel?.triage_summary ||
+                job?.rich_intel?.gti_description ||
+                "Click any entity node on the spatial canvas to inspect telemetry attributes and relationships."}
+            </p>
+          </div>
 
-        {/* Modal */}
-        {modalContent && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-6">
-            <div className="bg-[#16161a] border border-slate-800 w-[90vw] h-[85vh] flex flex-col glass-panel">
-              <div className="p-6 border-b border-slate-800 flex justify-between items-center">
-                <h3 className="font-headline text-xl font-bold uppercase text-[#00f7ff]">{modalContent.title}</h3>
-                <button onClick={() => setModalContent(null)} className="text-slate-500 hover:text-[#00f7ff]">
-                  <span className="material-symbols-outlined">close</span>
+          {/* Top-Right Filter Pills HUD */}
+          <div className="absolute top-4 right-6 z-20 flex flex-wrap items-center gap-3 bg-slate-900/90 backdrop-blur-md border border-slate-800 px-3.5 py-2 rounded-xl text-xs shadow-2xl">
+            <label className="flex items-center gap-1.5 cursor-pointer text-slate-300 select-none">
+              <input
+                type="checkbox"
+                checked={graphFilters.reportOnly}
+                onChange={(e) =>
+                  setGraphFilters((f) => ({ ...f, reportOnly: e.target.checked }))
+                }
+                className="accent-teal-400 rounded cursor-pointer"
+              />
+              <span className="text-[11px] font-medium">Relevant</span>
+            </label>
+
+            <label className="flex items-center gap-1.5 cursor-pointer text-slate-300 select-none">
+              <input
+                type="checkbox"
+                checked={graphFilters.maliciousOnly}
+                onChange={(e) =>
+                  setGraphFilters((f) => ({ ...f, maliciousOnly: e.target.checked }))
+                }
+                className="accent-rose-500 rounded cursor-pointer"
+              />
+              <span className="text-[11px] font-medium">Malicious Only</span>
+            </label>
+
+            <div className="h-3.5 w-px bg-slate-800 hidden sm:block" />
+
+            {(["file", "domain", "ip_address", "url"] as const).map((entityType) => (
+              <label
+                key={entityType}
+                className="flex items-center gap-1 cursor-pointer text-slate-300 select-none"
+              >
+                <input
+                  type="checkbox"
+                  checked={graphFilters.types[entityType] ?? true}
+                  onChange={(e) =>
+                    setGraphFilters((f) => ({
+                      ...f,
+                      types: { ...f.types, [entityType]: e.target.checked },
+                    }))
+                  }
+                  className="accent-teal-400 rounded cursor-pointer"
+                />
+                <span className="text-[10px] font-mono uppercase">
+                  {entityType === "ip_address" ? "IP" : entityType}
+                </span>
+              </label>
+            ))}
+          </div>
+
+          {/* ReactFlow Canvas */}
+          <div className="w-full h-full">
+            <ReactFlow
+              onInit={(instance) => {
+                reactFlowRef.current = instance;
+              }}
+              nodes={nodes}
+              edges={edges}
+              nodeTypes={nodeTypes}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              fitView
+              onNodeClick={(_event, node) => {
+                const raw =
+                  node.data?.rawNode ||
+                  effectiveGraphRef.current?.nodes.find((n) => n.id === node.id);
+                if (raw) setSelectedNode(raw);
+              }}
+            >
+              <Background
+                color="#1e293b"
+                gap={24}
+                size={1}
+                variant={BackgroundVariant.Dots}
+              />
+              <Controls className="!bg-slate-900 !border-slate-800 !text-slate-300" />
+              <MiniMap
+                className="!bg-slate-900 !border-slate-800"
+                maskColor="rgba(2, 6, 23, 0.75)"
+                nodeColor={(n: Node<CustomNodeData>) =>
+                  n.data?.isMalicious ? "#f43f5e" : n.data?.isRoot ? "#00f7ff" : "#64748b"
+                }
+              />
+            </ReactFlow>
+          </div>
+
+          {/* Slide-In Right Node Inspector */}
+          {selectedNode && (
+            <div className="absolute top-4 right-6 bottom-6 w-80 rounded-2xl bg-slate-900/95 backdrop-blur-xl border border-slate-800 z-30 flex flex-col shadow-2xl overflow-hidden animate-slide-in-right">
+              <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+                <span className="text-xs font-mono uppercase text-teal-400 font-bold">
+                  {selectedNode.entityType || "Entity"} Inspector
+                </span>
+                <button
+                  onClick={() => setSelectedNode(null)}
+                  className="text-slate-400 hover:text-white text-xs font-mono px-2 py-0.5 rounded hover:bg-slate-800"
+                >
+                  ✕
                 </button>
               </div>
-              <div className="p-6 overflow-y-auto custom-scrollbar text-on-surface text-sm leading-relaxed flex-1">
-                {modalContent.title === 'Link Analysis Graph' ? (
-                  <div className="w-full h-[70vh]">
-                    <ReactFlow
-                      edges={edges}
-                      fitView
-                      nodes={nodes}
-                      nodesConnectable={false}
-                      nodeTypes={nodeTypes}
-                      onEdgesChange={onEdgesChange}
-                      onNodesChange={onNodesChange}
-                    >
-                      <Background color="var(--outline-variant)" gap={20} size={0.5} variant={BackgroundVariant.Lines} />
-                      <Controls className="!bg-surface-container-highest !border-outline-variant !shadow-none !rounded-none" />
-                      <MiniMap 
-                        className="!bg-surface-container-lowest !border-outline-variant !rounded-none" 
-                        maskColor="rgba(0,0,0,0.8)" 
-                        nodeColor={(n: any) => n.data?.isMalicious ? "var(--primary)" : n.data?.isRoot ? "var(--secondary)" : "var(--outline)"} 
-                      />
-                    </ReactFlow>
+
+              <div className="flex-1 p-4 overflow-y-auto space-y-4 text-xs">
+                {/* Status Badges */}
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedNode.isRoot && (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+                      Root IOC
+                    </span>
+                  )}
+                  {selectedNode.isMalicious && (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                      Malicious
+                    </span>
+                  )}
+                  {selectedNode.inReport && (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase bg-teal-500/20 text-teal-300 border border-teal-500/40">
+                      In Report
+                    </span>
+                  )}
+                </div>
+
+                <div>
+                  <span className="text-[10px] font-mono text-slate-400 uppercase block mb-1">
+                    Indicator Value
+                  </span>
+                  <div className="font-mono text-white break-all bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                    {selectedNode.id}
                   </div>
-                ) : (
-                  <MarkdownRenderer content={modalContent.content} />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                    <span className="text-[10px] font-mono text-slate-400 uppercase block">
+                      Verdict
+                    </span>
+                    <span className="font-mono font-bold text-slate-200">
+                      {selectedNode.verdict || (selectedNode.isMalicious ? "MALICIOUS" : "ANALYZED")}
+                    </span>
+                  </div>
+                  <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                    <span className="text-[10px] font-mono text-slate-400 uppercase block">
+                      Threat Score
+                    </span>
+                    <span className="font-mono font-bold text-teal-300">
+                      {selectedNode.threatScore !== null && selectedNode.threatScore !== undefined
+                        ? `${selectedNode.threatScore}/100`
+                        : "N/A"}
+                    </span>
+                  </div>
+                </div>
+
+                {selectedNode.vendorDetections && (
+                  <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                    <span className="text-[10px] font-mono text-slate-400 uppercase block mb-1">
+                      Vendor Detections
+                    </span>
+                    <span className="font-mono font-bold text-rose-400">
+                      {selectedNode.vendorDetections}
+                    </span>
+                  </div>
+                )}
+
+                {selectedNode.title && (
+                  <div>
+                    <span className="text-[10px] font-mono text-slate-400 uppercase block mb-1">
+                      Analysis Details
+                    </span>
+                    <pre className="font-mono text-[11px] text-slate-300 whitespace-pre-wrap bg-slate-950 p-3 rounded-lg border border-slate-800 overflow-x-auto max-h-48">
+                      {selectedNode.title}
+                    </pre>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-3 border-t border-slate-800 bg-slate-950/80 flex gap-2">
+                <button
+                  onClick={() => handleCopyIoc(selectedNode.id)}
+                  className="flex-1 py-1.5 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition-colors"
+                >
+                  Copy IOC
+                </button>
+                <button
+                  onClick={() => setActiveView("dossier")}
+                  className="flex-1 py-1.5 px-3 rounded-lg bg-teal-500/20 hover:bg-teal-500/30 border border-teal-500/40 text-teal-200 font-semibold text-xs transition-colors"
+                >
+                  View in Threat Dossier
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Agent Orchestration Drawer Modal */}
+      {showAgentDrawer && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex justify-end">
+          <div className="w-full max-w-md bg-slate-900 border-l border-slate-800 h-full flex flex-col shadow-2xl">
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-teal-400" />
+                <h3 className="font-bold text-sm text-white font-mono uppercase">
+                  Agent Orchestration & Telemetry Log
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowAgentDrawer(false)}
+                className="text-slate-400 hover:text-white text-xs font-mono px-2 py-1 rounded hover:bg-slate-800"
+              >
+                Close ✕
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 font-mono text-xs">
+              {job?.subtasks && job.subtasks.length > 0 && (
+                <div className="space-y-2 pb-4 border-b border-slate-800">
+                  <span className="text-[10px] uppercase text-teal-400 font-semibold block">
+                    Completed Subtasks
+                  </span>
+                  {job.subtasks.map((task, i) => (
+                    <div key={i} className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
+                      <div className="flex justify-between text-[10px] text-slate-400">
+                        <span className="text-teal-300 font-bold uppercase">{task.agent}</span>
+                        <span>{task.status}</span>
+                      </div>
+                      <p className="text-slate-300 text-xs">{task.task}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <span className="text-[10px] uppercase text-slate-400 font-semibold block">
+                  Live Stream Activity
+                </span>
+                {activityLog.map((log, i) => (
+                  <div key={i} className="p-2 rounded bg-slate-950/60 border border-slate-800/60 text-slate-300 text-[11px]">
+                    {log}
+                  </div>
+                ))}
+                {activityLog.length === 0 && (
+                  <p className="text-slate-500 italic">No activity events recorded.</p>
                 )}
               </div>
             </div>
           </div>
-        )}
-      </div>
-
-      {/* Footer Meta */}
-      <footer className="fixed bottom-0 left-64 right-0 h-8 border-t border-slate-800 bg-[#0e0e10] flex justify-between items-center px-4 font-mono text-[10px] tracking-tighter text-[#00f7ff] z-50">
-        <div>v2.5.1-stable | <span className="text-slate-600 ml-2">System Status: Normal</span></div>
-        <div className="flex gap-4">
-          <span className="hover:text-white cursor-default transition-colors">Active Agents: 5</span>
         </div>
-      </footer>
+      )}
     </div>
   );
 }

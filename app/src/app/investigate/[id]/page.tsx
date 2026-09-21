@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState, useRef, useMemo, useCallback, ChangeEvent } from "react";
@@ -1046,8 +1047,16 @@ export default function InvestigatePage() {
       {/* Sticky Top Header Bar */}
       <header className="sticky top-0 w-full z-50 bg-slate-950/90 backdrop-blur-xl border-b border-slate-800/80 px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
         <div className="flex items-center gap-4 min-w-0">
-          <Link href="/" className="flex items-center gap-2 shrink-0">
-            <span className="w-2.5 h-2.5 rounded-full bg-teal-400 shadow-[0_0_8px_#2dd4bf]" />
+          <Link href="/" className="flex items-center gap-2.5 shrink-0">
+            <div className="w-7 h-7 rounded-lg bg-slate-900 border border-teal-500/40 flex items-center justify-center overflow-hidden shadow-md shadow-teal-500/15">
+              <Image
+                src="/tiger_logo.png"
+                alt="Harimau Tiger"
+                width={22}
+                height={22}
+                className="object-contain"
+              />
+            </div>
             <span className="font-bold tracking-wider text-sm text-white uppercase font-mono">
               HARIMAU
             </span>

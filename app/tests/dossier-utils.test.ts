@@ -436,6 +436,7 @@ test("normalizeFallbackGraphData converts raw NetworkX node_link_data into valid
     "MALICIOUS"
   );
 
+  assert.ok(normalized);
   assert.equal(normalized.nodes.length, 2);
   assert.equal(normalized.edges.length, 1);
 

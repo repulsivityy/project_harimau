@@ -1,6 +1,6 @@
 steps:
   # 1. Simple Syntax and Indentation Check
-  - name: 'python:3.11-slim'
+  - name: 'python:3.14-slim'
     entrypoint: 'bash'
     args:
       - '-c'

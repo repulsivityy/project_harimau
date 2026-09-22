@@ -284,7 +284,6 @@ export default function InvestigatePage() {
     maliciousOnly: false,
     types: { file: true, domain: true, ip_address: true, url: true, process: true, entity: true } as Record<string, boolean>,
   });
-  const rawGraphRef = useRef<GraphData | null>(null);
   const [rawGraphData, setRawGraphData] = useState<GraphData | null>(null);
   const [selectedNode, setSelectedNode] = useState<BackendNode | null>(null);
 
@@ -417,7 +416,7 @@ export default function InvestigatePage() {
     }, 3500);
   }, []);
 
-  // Build / rebuild ReactFlow graph nodes whenever rawGraphRef, parsedDotGraph, or filters change
+  // Build / rebuild ReactFlow graph nodes whenever the backend graph, parsedDotGraph, or filters change
   const rebuildSpatialGraph = useCallback(
     (backendGraph: GraphData | null) => {
       const dotNodes = parsedDossier.parsedDotGraph.nodes;
@@ -778,7 +777,6 @@ export default function InvestigatePage() {
     let isCancelled = false;
     const abortController = new AbortController();
 
-    rawGraphRef.current = null;
     effectiveGraphRef.current = null;
     terminalStatusRef.current = null;
     terminalSnapshotRef.current = null;
@@ -962,7 +960,6 @@ export default function InvestigatePage() {
           const graphSig = `${graphData.nodes?.length ?? 0}:${graphData.edges?.length ?? 0}:${graphData.nodes?.map((n) => n.id).join(",") ?? ""}`;
           if (graphSig !== lastGraphSignatureRef.current) {
             lastGraphSignatureRef.current = graphSig;
-            rawGraphRef.current = graphData;
             setRawGraphData(graphData);
           }
         }

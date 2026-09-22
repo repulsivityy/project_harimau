@@ -615,15 +615,6 @@ graph TD
 **Global State:**
 - `checkpointer`: Holds the initialized `AsyncPostgresSaver` instance or `None`.
 
-## `backend/utils/config.py`
-**Imports:**
-- `os`
-- `typing`
-- `yaml`
-
-**Top-level Functions:**
-- `load_agents_config()`: Helper to load agent hyperparameters.
-
 ## `backend/utils/dot_builder.py`
 **Imports:**
 - `re`

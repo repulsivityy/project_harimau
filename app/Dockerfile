@@ -1,13 +1,15 @@
-# Base node image
-FROM node:20-alpine AS base
+# Base node image (22.x = Active LTS; Node 20 reached end-of-life in April 2026)
+FROM node:22-alpine AS base
 
 # Install dependencies only when needed
 FROM base AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
-# We assume context is the repository root
-COPY app/package.json ./
-RUN npm install
+# We assume context is the repository root.
+# The lockfile is copied alongside package.json so `npm ci` can install the
+# exact, integrity-verified dependency tree instead of re-resolving it.
+COPY app/package.json app/package-lock.json ./
+RUN npm ci
 
 # Rebuild the source code only when needed
 FROM base AS builder

@@ -1241,13 +1241,11 @@ async def get_investigation_history(job_id: str):
         logger.error("get_history_error", error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-##########
-# added for debugging purposes. to consider removing once prod ready. 
-##########
-"""
-Add this to backend/main.py to diagnose the graph issue.
-This endpoint tests each step of the pipeline independently.
-"""
+# ============================================
+# Operator Diagnostics
+# Not reachable via the public Next.js proxy (blocked by BLOCKED_PATH_PREFIXES);
+# callable directly with a valid x-harimau-api-key.
+# ============================================
 
 @app.get("/api/diagnostic/pipeline/{ioc}")
 async def diagnostic_pipeline(ioc: str):

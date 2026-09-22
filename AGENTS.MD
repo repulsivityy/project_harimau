@@ -25,6 +25,7 @@ Cloud-native AI threat hunting platform using **LangGraph** for orchestration, *
 - **Transport**: `stdio` + Direct `aiohttp` (Parallel Super-Bundle) for zero-latency.
 - **Source**: Official MCP servers (Google Threat Intelligence) + Optimized Direct Fast-Path.
 - **Note**: Google Web Risk is **not** an MCP — called directly via API as a `@tool` in the Infrastructure agent.
+- **⚠️ Version Pin**: `mcp==1.29.0` is pinned deliberately — it is the last release shipping `mcp.server.fastmcp`, which both `backend/mcp/gti/server.py` and `backend/mcp/shodan/server.py` import. **Do not bump to 2.x** without a migration: 2.x replaces `FastMCP` with a new `MCPServer` class and drops `stateless_http`. Tracked in `docs/implementation_plan.md` Pillar 7 Milestone 2.
 
 ### 3. A2A Integration *(Phase 6.3 — Planned)*
 - **Inbound**: Expose `/.well-known/agent.json` + `POST /a2a/tasks/send` for external agent triggers.
@@ -43,6 +44,8 @@ LangGraph with `MAX_DEPTH` recursion control and **Cloud SQL `AsyncPostgresSaver
 
 ### 6. Compute & Deployment
 - Google Cloud Run (Serverless), deployed via `deploy.sh` (selective: Backend / Frontend / All) or automated Cloud Build (`cloudbuild-backend.yaml`, `cloudbuild-frontend.yaml`). Both services require `HARIMAU_API_KEY` (`harimau-api-key` in Secret Manager) and fail closed on startup/runtime if absent.
+- **Runtimes**: Backend `python:3.14-slim`, Frontend `node:22-alpine` (Active LTS). Keep local dev interpreters aligned with these — dev/prod drift hides version-specific failures until deploy.
+- **Dependency Policy**: `app/package-lock.json` is **tracked in git** and the frontend image installs with `npm ci`, not `npm install`. The lockfile is the only thing pinning the transitive tree with integrity hashes, and `npm ci` requires it to be present in the Cloud Build context — do not re-add it to `.gitignore`.
 
 ---
 

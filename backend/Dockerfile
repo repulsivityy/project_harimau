@@ -1,4 +1,7 @@
-FROM python:3.11-slim
+# 3.14 matches the local development interpreter.
+# Verified: asyncpg and psycopg-binary ship cp314 wheels; mcp, vt-py,
+# networkx and shodan are pure-Python.
+FROM python:3.14-slim
 
 WORKDIR /app
 

@@ -4,6 +4,11 @@ langgraph==1.2.10
 google-cloud-secret-manager==2.30.0
 google-cloud-logging==3.16.1
 google-cloud-storage==3.13.0
+# DO NOT BUMP without a migration. 1.29.0 is the last release shipping
+# `mcp.server.fastmcp`, which backend/mcp/gti/server.py and
+# backend/mcp/shodan/server.py both import. 2.x replaces FastMCP with a new
+# MCPServer class and drops `stateless_http`. Tracked: docs/implementation_plan.md
+# Pillar 7 Milestone 2. Latest upstream as of 2026-09-22 is 2.2.0.
 mcp==1.29.0
 vt-py==0.22.0
 structlog==26.1.0

@@ -62,4 +62,6 @@ node_modules/
 .next/
 out/
 *.tsbuildinfo
-app/package-lock.json
+# NOTE: app/package-lock.json is intentionally TRACKED.
+# It pins the full transitive dependency tree with sha512 integrity hashes and
+# is required in the Cloud Build context for `npm ci` to run.

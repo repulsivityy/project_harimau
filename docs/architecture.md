@@ -389,7 +389,7 @@ triage's initial Super-Bundle fetch — have the attribute to recover from.
 
 #### GET /api/investigations/{job_id}/history
 **Get LangGraph checkpoint history across hunt iterations.**
-Extracts iterative reports for each completed loop from the PostgreSQL checkpointer. Used by `download_reports.py` to trace cumulative report progression.
+Extracts iterative reports for each completed loop from the PostgreSQL checkpointer. Operator/debugging endpoint — not consumed by the Next.js frontend, and not reachable through the public proxy without a valid `x-harimau-api-key`.
 
 #### POST /api/investigations/{job_id}/cancel
 **Cancel an active investigation.**

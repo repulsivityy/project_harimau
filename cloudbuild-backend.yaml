@@ -30,6 +30,8 @@ steps:
       - 'asia-southeast1'
       - '--add-cloudsql-instances'
       - '$PROJECT_ID:asia-southeast1:harimau-db'
+      - '--set-secrets'
+      - 'VT_APIKEY=harimau-gti-api-key:latest,GTI_API_KEY=harimau-gti-api-key:latest,WEBRISK_API_KEY=harimau-webrisk-api-key:latest,SHODAN_API_KEY=harimau-shodan-api-key:latest,HARIMAU_API_KEY=harimau-api-key:latest,DATABASE_URL=harimau-db-url:latest'
       - '--no-cpu-throttling'
       - '--timeout=600'
       - '--quiet'

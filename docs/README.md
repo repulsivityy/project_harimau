@@ -1,6 +1,6 @@
 # Documentation Index
 
-*Last updated: 2026-03-21*
+*Last updated: 2026-09-22*
 
 Welcome to the Project Harimau documentation. This index helps you navigate the technical documentation for our AI-powered threat intelligence analysis platform.
 
@@ -46,13 +46,14 @@ Welcome to the Project Harimau documentation. This index helps you navigate the 
 
 ---
 
-## Recent Updates (2026-08-03)
+## Recent Updates (2026-09-22)
 
 ### Core Architectural Enhancements
+- 🛡️ **Fail-Closed Server-to-Server API Authentication (`x-harimau-api-key`)**: Enforced constant-time `x-harimau-api-key` verification (`HARIMAU_API_KEY` stored in Secret Manager as `harimau-api-key`) between the Next.js API proxy and FastAPI backend, with fail-closed startup and runtime instance termination on both services if the secret is absent. Disabled public FastAPI `/docs`, `/redoc`, and `/openapi.json`, and hardened the Next.js proxy with strict header allowlisting, admin route blocking, HTTPS transport enforcement, and IP rate-limiting on `POST /api/investigate`.
+- ✨ **Harimau Threat Dossier Workbench & Spatial Topology Canvas**: Migrated the frontend (`app/`) to the 7-section Threat Dossier aesthetic (`DossierMasthead`, `SpecialistReportsGrid`, `DossierCompanionRail`, `AttackFlowSection`, `TacticalSwimLanes`, `DecoyInsightBanner`, `AppendixIocTable`) with a dedicated Spatial Topology Canvas view mode, redesigned landing page (`app/src/app/page.tsx`), and a 29-test unit/SSR suite in `app/tests/`.
 - ✨ **Deterministic Graphviz Skeleton**: Integrated `dot_builder.py` directly from NetworkX cache with structural validation to prevent diagram hallucinations.
 - ✨ **LangGraph ToolNode Subgraphs**: Migrated specialist agents to native `ToolNode` subgraphs with strict Pydantic `with_structured_output()`.
 - ✨ **Tool Containment & SSE Robustness**: Added `@tool_timeout(20.0)` guardrails and guarded SSE broadcast with monotonic progress clamping.
-- ✨ **Next.js 15+ App Router Dashboard**: Full interactive tactical UI with D3 Graphviz, ReactFlow knowledge graph, and real-time SSE streaming.
 - ✨ **Pinned Dependency Matrix**: Pinned all backend dependencies in `requirements.txt` to prevent breaking upstream releases.
 
 ---

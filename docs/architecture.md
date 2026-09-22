@@ -9,10 +9,10 @@ graph TD
     User([User]) <-->|HTTPS| Frontend[Next.js Frontend]
     
     subgraph "Google Cloud Run"
-        Frontend <-->|REST API| Backend[FastAPI Backend]
+        Frontend <-->|HTTPS + x-harimau-api-key| Backend[FastAPI Backend]
         
         subgraph "Backend Container"
-            BackendAPI[API Layer] <-->|Invokes| LG[LangGraph Orchestrator]
+            BackendAPI[API Layer + Auth Middleware] <-->|Invokes| LG[LangGraph Orchestrator]
             LG <-->|stdio| GTIMC[Embedded GTI MCP Server]
             LG <-->|stdio| ShodanMCP[Embedded Shodan MCP Server]
             LG <-->|aiohttp| DirectAPI[Direct GTI Fast-Path]
@@ -31,22 +31,26 @@ graph TD
 
 ### 2.1 Frontend (`/app`)
 * **Technology**: Next.js (React, TypeScript, Tailwind CSS v4).
-* **Role**: Pure presentation layer.
-* **Architecture**: App Router with server/client components.
-  - `src/app/page.tsx`: Main landing page with centered search box and investigation controls.
-  - `src/app/investigate/[id]/page.tsx`: Dynamic route for rendering a **Tiled Tactical Dashboard** (graph, timeline, specialist dossiers, and transparency log).
-  - `src/app/globals.css`: Global styles including Tailwind directives.
-* **Authentication**: Google IAP / IAM (via Cloud Run).
+* **Role**: Presentation layer and hardened server-to-server API gateway.
+* **Architecture**: App Router with server/client components and startup instrumentation.
+  - `src/instrumentation.ts`: Fail-closed startup validation hook (`register()`); logs a fatal error and terminates the Next.js instance (`process.exit(1)`) if `HARIMAU_API_KEY` is missing.
+  - `src/app/page.tsx`: Main landing page in the Harimau Threat Dossier obsidian aesthetic (`#07090E`) with predatory tiger emblem (`/tiger_logo.png`), IOC intake console, 5-level Forensic Intensity selector (`1–5` iterations), `HUNT` CTA, and Recent Threat Dossiers list.
+  - `src/app/investigate/[id]/page.tsx`: Dynamic route rendering the **Harimau Threat Dossier Workbench** (`DossierMasthead`, `SpecialistReportsGrid`, `DossierCompanionRail`, `AttackFlowSection`, `TacticalSwimLanes`, `DecoyInsightBanner`, `AppendixIocTable`) with a toggleable **Spatial Topology Canvas** (`@xyflow/react` + `d3-force`) and entity drawer.
+  - `src/lib/dossier-utils.ts`: Deterministic parser and normalizer extracting Executive Summary prose, MITRE ATT&CK swim lanes, decoy/infrastructure pivot insights, Graphviz DOT diagrams, and deduplicated Appendix IOC records with strict `http:`/`https:` external link sanitization.
+  - `tests/`: Unit and SSR test suite (`tests/dossier-utils.test.ts`, `tests/dossier-components.test.tsx`, `tests/fixtures/`) isolated outside `src/`.
+* **Authentication & Security**:
+  - **Server-to-Server Auth (`x-harimau-api-key`)**: `src/app/api/[...path]/route.ts` injects `x-harimau-api-key: process.env.HARIMAU_API_KEY` on all outbound requests to `BACKEND_URL`, uses a strict client header allowlist (`content-type`, `accept`, `cache-control`, `last-event-id`), blocks `/api/admin/*`, `/api/debug/*`, `/api/diagnostic/*`, and `/api/test/*` (`403 Forbidden`), enforces `https://` for non-localhost `BACKEND_URL` targets, and rate-limits `POST /api/investigate` (`10 requests / 5 minutes / IP`).
+  - **End-User Auth**: Google IAP / IAM (planned for Phase 6.3).
 * **Logic**:
   - Submits jobs to Backend (`POST /api/investigate`).
-  - Fetches data from Backend via catch-all API route proxy (`src/app/api/[...path]/route.ts`) — reads `BACKEND_URL` at request time from Cloud Run env var.
-  - Visualizes graph with **ReactFlow** and **d3-force** simulation.
+  - Fetches data from Backend via catch-all API route proxy (`src/app/api/[...path]/route.ts`) — reads `BACKEND_URL` and `HARIMAU_API_KEY` at request time from Cloud Run env/secrets.
+  - Visualizes attack flow with **d3-graphviz** (`AttackFlowSection`) and spatial topology with **ReactFlow** + **d3-force**.
 
 ### 2.2 Backend (`/backend`)
 * **Technology**: FastAPI + LangGraph.
-* **Role**: Investigation orchestration and state management.
+* **Role**: Investigation orchestration, state management, and fail-closed API boundary.
 * **Modules**:
-  - `main.py`: API Endpoints with enhanced graph visualization.
+  - `main.py`: FastAPI entry point with fail-closed `HARIMAU_API_KEY` startup check (`lifespan` calls `os._exit(1)` if missing), constant-time `verify_harimau_api_key` middleware (`secrets.compare_digest` on all routes except `/health` and `/`), disabled OpenAPI/Swagger endpoints (`docs_url=None`, `redoc_url=None`, `openapi_url=None`), and SSE/graph endpoints.
   - `graph/workflow.py`: LangGraph State Machine (Iterative Loop).
   - `graph/state.py`: AgentState definition (includes NetworkX graph).
   - `agents/`: Agent implementations (Triage, Malware, Infrastructure, Lead Hunter).

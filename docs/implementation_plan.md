@@ -179,9 +179,16 @@ This document tracks the iterative evolution of the Harimau platform, organized 
 *   [ ] **Cancel RAF on unmount**: Add `cancelAnimationFrame` to the `useEffect` cleanup alongside `simulation.stop()`.
 
 **UX Features** (post zero-ops fix):
-*   [ ] **Node Selection + Detail Panel**: `onNodeClick` handler that opens a side panel showing full entity attributes from the persisted graph (threat score, vendor detections, relationships, verdict).
-*   [ ] **fitView & Recenter Button**: Trigger `fitView` imperatively via `useReactFlow()` on graph load and via a visible "Recenter" button.
-*   [ ] **Control Panel & Legend**: Small overlay panel explaining node colours/icons; toggle to hide clean nodes.
+*   [x] **Node Selection + Detail Panel**: `onNodeClick` handler that opens an interactive entity drawer showing full entity attributes from the persisted graph (threat score, vendor detections, relationships, verdict).
+*   [x] **fitView & Recenter Button**: Trigger `fitView` imperatively via `useReactFlow()` on graph load and via a visible "Recenter" button.
+*   [x] **Control Panel & Legend**: Small overlay panel explaining node colours/icons; toggle to hide clean nodes.
+
+### Milestone 4: Threat Dossier Workbench & Server-to-Server API Hardening ✅
+*   [x] **7-Section Threat Dossier Workbench** (2026-09-22): Migrated `/investigate/[id]` to the Harimau Threat Dossier layout (`DossierMasthead`, `SpecialistReportsGrid`, `DossierCompanionRail`, `AttackFlowSection`, `TacticalSwimLanes`, `DecoyInsightBanner`, `AppendixIocTable`) with dual view modes (`Threat Dossier` and `Spatial Topology Canvas`).
+*   [x] **Redesigned Threat Dossier Landing Page** (2026-09-22): Updated `app/src/app/page.tsx` to match the Threat Dossier obsidian aesthetic (`#07090E` canvas, predatory tiger emblem `/tiger_logo.png`, 5-level Forensic Intensity selector, `HUNT` command CTA, and Recent Threat Dossiers list).
+*   [x] **Isolated Frontend Test Suite (`app/tests/`)** (2026-09-22): Added 29 unit and SSR tests (`dossier-utils.test.ts`, `dossier-components.test.tsx`, `fixtures/etherrat-dossier.ts`) outside `app/src/`.
+*   [x] **Fail-Closed Server-to-Server API Authentication (`x-harimau-api-key`)** (2026-09-22): Implemented shared `HARIMAU_API_KEY` (`harimau-api-key` in GCP Secret Manager) verified in constant time (`secrets.compare_digest`) by `backend/main.py` and injected by `app/src/app/api/[...path]/route.ts`. Both `harimau-backend` and `harimau-frontend` fail closed (`os._exit(1)` / `process.exit(1)`) and log a critical/fatal error at startup (`lifespan` / `instrumentation.ts`) and runtime if `HARIMAU_API_KEY` is missing.
+*   [x] **Anti-Recon & Proxy Hardening** (2026-09-22): Disabled FastAPI `/docs`, `/redoc`, and `/openapi.json`; replaced client header pass-through in `route.ts` with a strict allowlist; blocked `/api/admin/*`, `/api/debug/*`, `/api/diagnostic/*`, and `/api/test/*` (`403 Forbidden`); enforced `https://` for non-localhost `BACKEND_URL`; and added per-IP rate limiting (`10 requests / 5 min`) on `POST /api/investigate`.
 
 ---
 

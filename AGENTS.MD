@@ -17,8 +17,8 @@ Cloud-native AI threat hunting platform using **LangGraph** for orchestration, *
 ## Core Architecture
 
 ### 1. Micro-Modular Architecture
-- **Backend (`/backend`)**: FastAPI + LangGraph. Handles state, agents, and investigations.
-- **Frontend (`/app`)**: Next.js (React). Pure UI, communicates with backend via API proxy.
+- **Backend (`/backend`)**: FastAPI + LangGraph. Handles state, agents, and investigations. Protected by fail-closed server-to-server `x-harimau-api-key` verification (`HARIMAU_API_KEY`) with public `/docs`, `/redoc`, and `/openapi.json` disabled.
+- **Frontend (`/app`)**: Next.js (React). Harimau Threat Dossier workbench & Spatial Topology Canvas. Communicates with backend via hardened API proxy (`src/app/api/[...path]/route.ts`) that enforces fail-closed `HARIMAU_API_KEY` validation (`src/instrumentation.ts`), header allowlisting, admin path blocking, HTTPS transport verification, and IP rate-limiting on `POST /api/investigate`. Frontend unit/SSR tests and fixtures live in `app/tests/` (outside `app/src/`).
 
 ### 2. MCP Strategy
 - **Deployment**: Embedded within backend container (Monolith — single Cloud Run service).
@@ -39,10 +39,10 @@ LangGraph with `MAX_DEPTH` recursion control and **Cloud SQL `AsyncPostgresSaver
 **NetworkX MultiDiGraph** — in-memory, per-job, lives in LangGraph state for the full investigation duration.
 - Stores complete GTI entity attributes (150+ fields).
 - LLM receives filtered summaries (<10 fields). Specialists query full data from cache — no re-fetching.
-- **In progress (Pillar 5 M3)**: Persist completed graph to Cloud SQL JSONB column to survive job completion and enable richer visualization.
+- **Persisted (Pillar 5 M3)**: Completed graphs are serialized to the Cloud SQL `investigation_graph` JSONB column to survive job completion and power the Threat Dossier and Spatial Topology Canvas.
 
 ### 6. Compute & Deployment
-- Google Cloud Run (Serverless), deployed via `deploy.sh` (selective: Backend / Frontend / All).
+- Google Cloud Run (Serverless), deployed via `deploy.sh` (selective: Backend / Frontend / All) or automated Cloud Build (`cloudbuild-backend.yaml`, `cloudbuild-frontend.yaml`). Both services require `HARIMAU_API_KEY` (`harimau-api-key` in Secret Manager) and fail closed on startup/runtime if absent.
 
 ---
 
@@ -79,8 +79,10 @@ LangGraph with `MAX_DEPTH` recursion control and **Cloud SQL `AsyncPostgresSaver
 | LangGraph Checkpointing | ✅ Complete | `AsyncPostgresSaver` via Cloud Run unix socket |
 | SSE Real-time Streaming | ✅ Complete | Replaced polling for live agent activity |
 | Shodan Enrichment | ✅ Complete | JARM, SSL/TLS, service exposure in Infra agent |
-| Graph Persistence (Zero-Ops) | 🚧 In Progress | Persist NetworkX graph to Cloud SQL JSONB (Pillar 5 M3) |
-| Authentication | ⏳ Planned | Cloud IAP + Load Balancer (Phase 6.3) |
+| Graph Persistence (Zero-Ops) | ✅ Complete | Persist NetworkX graph to Cloud SQL JSONB (Pillar 5 M3) |
+| Threat Dossier Workbench & Spatial Canvas | ✅ Complete | 7-section Threat Dossier UI, Spatial Topology Canvas, `app/tests/` suite |
+| Server-to-Server API Authentication | ✅ Complete | Fail-closed `x-harimau-api-key` (`HARIMAU_API_KEY`) + proxy hardening |
+| Authentication (End-User) | ⏳ Planned | Cloud IAP + Load Balancer (Phase 6.3) |
 | A2A Integration | ⏳ Planned | Agent Card + inbound/outbound (Phase 6.3) |
 | `agents.yaml` Config | ⏳ Planned | Standardise model names/temperatures (Phase 7) |
 | Artifact Storage | ⏳ Planned | GCS bucket for reports + graph snapshots (Phase 7) |
@@ -89,5 +91,5 @@ LangGraph with `MAX_DEPTH` recursion control and **Cloud SQL `AsyncPostgresSaver
 ---
 
 ## Documentation
-Pillars, Milestones, and Tasks are tracked in `docs/implementation_plan_v2.md`.
+Pillars, Milestones, and Tasks are tracked in `docs/implementation_plan.md`.
 Framework rules for maintaining that document: see `docs/FRAMEWORK.md`.

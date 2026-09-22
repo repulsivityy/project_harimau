@@ -11,17 +11,23 @@ This section provides a detailed semantic graph of the codebase relationships, f
 ```mermaid
 graph TD
     subgraph Frontend [App / Next.js 15+ App Router]
-        page["src/app/page.tsx (Landing & Search)"]
-        investigate["src/app/investigate/[id]/page.tsx (Tactical Dashboard)"]
-        proxy["src/app/api/[...path]/route.ts (Runtime API Proxy)"]
+        inst["src/instrumentation.ts (Fail-Closed Startup Check)"]
+        page["src/app/page.tsx (Threat Dossier Landing & Intake)"]
+        investigate["src/app/investigate/[id]/page.tsx (Threat Dossier Workbench)"]
+        dossier_comp["src/components/investigation/* (7-Section Dossier Components)"]
+        dossier_utils["src/lib/dossier-utils.ts (Dossier Parser & Normalizer)"]
+        proxy["src/app/api/[...path]/route.ts (Hardened Runtime API Proxy)"]
         
+        investigate --> dossier_comp
+        investigate --> dossier_utils
+        dossier_comp --> dossier_utils
         page -->|POST /api/investigate| proxy
         page -->|GET /api/investigations| proxy
         investigate -->|GET /api/investigations/:id| proxy
         investigate -->|GET /api/investigations/:id/graph| proxy
         investigate -->|SSE /api/investigations/:id/stream| proxy
         
-        proxy -->|Runtime BACKEND_URL| b_main["backend/main.py"]
+        proxy -->|HTTPS + x-harimau-api-key| b_main["backend/main.py"]
     end
 
     subgraph Backend [FastAPI / LangGraph]
@@ -63,14 +69,15 @@ graph TD
 
 ### Detailed Node Descriptions
 
-*   **`src/app/page.tsx`**: Next.js client component. Tactical landing page with centered IOC search input, investigation depth slider (1–5 `max_iterations`), and past investigation table fetched from `/api/investigations`.
-*   **`src/app/investigate/[id]/page.tsx`**: Next.js dynamic route rendering the **Tiled Tactical Dashboard**:
-    - **Attack-Flow Diagram**: Graphviz renderer using `d3-graphviz` with fallback error containment.
-    - **Knowledge Graph**: Interactive graph via `@xyflow/react` and `d3-force` simulation with node styling by entity type.
-    - **Specialist Dossiers**: Side-by-side markdown reports for Malware and Infrastructure agents.
-    - **Agent Transparency**: Live EventSource listener streaming real-time thoughts and tool execution logs from `/api/investigations/{id}/stream`.
-*   **`src/app/api/[...path]/route.ts`**: App Router catch-all proxy route. Evaluates `BACKEND_URL` dynamically at request time (Cloud Run runtime env var), forwarding all `/api/*` traffic to the FastAPI backend.
-*   **`backend/main.py`**: FastAPI entry point. Handles HTTP requests, database lifecycle (Cloud SQL connection pool via `asyncpg`), checkpointer setup (`AsyncPostgresSaver`), background task dispatch (`_run_investigation_background`), and SSE streaming endpoints.
+*   **`src/instrumentation.ts`**: Next.js startup hook (`register()`). Verifies `process.env.HARIMAU_API_KEY` is configured at container startup; logs a fatal error and terminates the instance (`process.exit(1)`) if missing.
+*   **`src/app/page.tsx`**: Next.js client component. Threat Dossier landing page with predatory tiger emblem (`/tiger_logo.png`), IOC intake console, 5-level Forensic Intensity selector (`1–5` `max_iterations`), `HUNT` command button, and Recent Threat Dossiers list fetched from `/api/investigations`.
+*   **`src/app/investigate/[id]/page.tsx`**: Next.js dynamic route rendering the **Harimau Threat Dossier Workbench** and **Spatial Topology Canvas**:
+    - **7-Section Threat Dossier (`src/components/investigation/*`)**: `DossierMasthead`, `SpecialistReportsGrid`, `DossierCompanionRail`, `AttackFlowSection` (`d3-graphviz`), `TacticalSwimLanes` (MITRE ATT&CK matrix), `DecoyInsightBanner`, and `AppendixIocTable`.
+    - **Spatial Topology Canvas**: Interactive graph via `@xyflow/react` and `d3-force` simulation with node styling by entity type and interactive entity drawer.
+    - **Live Agent Stream**: EventSource listener streaming real-time reasoning traces and tool execution logs from `/api/investigations/{id}/stream`.
+*   **`src/lib/dossier-utils.ts`**: Deterministic parser and normalizer that extracts Executive Summary prose, MITRE ATT&CK swim lanes, decoy/infrastructure pivot banners, DOT diagram blocks, and deduplicated Appendix IOC entries with strict `http:`/`https:` external URL guards.
+*   **`src/app/api/[...path]/route.ts`**: Hardened App Router catch-all proxy route. Enforces fail-closed `HARIMAU_API_KEY` presence (`process.exit(1)` if missing), injects `x-harimau-api-key` server-to-server, applies a strict client request header allowlist, blocks `/api/admin/*`, `/api/debug/*`, `/api/diagnostic/*`, and `/api/test/*` (`403 Forbidden`), enforces `https://` for non-localhost `BACKEND_URL` targets, and rate-limits `POST /api/investigate` (`10 requests / 5 minutes / IP`).
+*   **`backend/main.py`**: FastAPI entry point. Enforces fail-closed `HARIMAU_API_KEY` verification at startup (`lifespan` calls `os._exit(1)` if missing) and per-request via `verify_harimau_api_key` middleware (`secrets.compare_digest` on all routes except `/health` and `/`), disables `/docs`, `/redoc`, and `/openapi.json`, and handles Cloud SQL persistence (`asyncpg`), checkpointer setup (`AsyncPostgresSaver`), background task dispatch (`_run_investigation_background`), and SSE streaming endpoints.
 *   **`backend/graph/workflow.py`**: Defines the LangGraph investigation workflow: `triage` -> `gate` -> `malware_specialist` & `infrastructure_specialist` (parallel fan-out) -> `lead_hunter` -> (loop or `END`).
 *   **`backend/graph/state.py`**: Defines `AgentState` with deep reducers: `merge_metadata` (recursive rich-intel merging), `merge_graphs` (NetworkX MultiDiGraph merging — both sides' node ids are normalised with their `entity_type`, since canonical form can depend on it), `union_lists` (case-insensitive dedup), and `last_value`. Its target lifecycle distinguishes `scheduled_entities` (accepted specialist dispatches), `target_outcomes` (latest per-target evidence/failure record), and `processed_entities` (only targets proven by specialist output); `tasked_entities` remains a legacy scheduling alias for persisted checkpoints.
 *   **`backend/agents/triage.py`**: Triage Agent. Performs initial breadth-first relationship queries via direct GTI API fast-path, evaluates risk levels, filters high-signal entities, and deterministically generates subtasks.
@@ -86,7 +93,7 @@ graph TD
 
 ### Key Relationships (Edges)
 
-*   **Frontend -> Backend**: Next.js client fetches from `/api/*`, which `src/app/api/[...path]/route.ts` proxies at runtime to `backend/main.py`.
+*   **Frontend -> Backend**: Next.js client fetches from `/api/*`, which `src/app/api/[...path]/route.ts` proxies over HTTPS with `x-harimau-api-key` to `backend/main.py`.
 *   **SSE Streaming**: `/api/investigations/{id}/stream` registers the subscriber before sending an authoritative persisted `investigation_snapshot`, then streams live events. It periodically reconciles durable job state for cross-instance terminal completion; completed, failed, and cancelled states are terminal.
 *   **Orchestration**: `workflow.py` orchestrates state transitions between `triage`, `gate`, specialists, and `lead_hunter`.
 *   **Data Sharing**: Specialists commit raw findings directly to `graph_cache.py` and `metadata["rich_intel"]`, preserving full data for downstream synthesis while passing compact summaries to LLMs.
@@ -94,33 +101,39 @@ graph TD
 
 ## Frontend (`/app`)
 
+### `app/src/instrumentation.ts`
+**Role:** Next.js startup validation hook (`register()`). Terminates the server process (`process.exit(1)`) if `HARIMAU_API_KEY` is missing.
+
 ### `app/src/app/page.tsx`
-**Role:** Main landing page and IOC search interface.
+**Role:** Threat Dossier landing page and IOC search interface.
 **Dependencies:**
 - `next/navigation` (`useRouter`)
 - `next/image`
-- React hooks (`useState`, `useEffect`)
+- `lucide-react`
+- React hooks (`useState`, `useEffect`, `useCallback`, `useRef`)
 **Endpoints Consumed:**
 - `GET /api/investigations` (fetch past search history)
 - `POST /api/investigate` (submit new investigation with `ioc` and `max_iterations`)
 
 ### `app/src/app/investigate/[id]/page.tsx`
-**Role:** Tactical Investigation Dashboard (Tiled layout).
+**Role:** Harimau Threat Dossier Workbench & Spatial Topology Canvas.
 **Dependencies:**
+- `app/src/components/investigation/*` (`DossierMasthead`, `SpecialistReportsGrid`, `DossierCompanionRail`, `AttackFlowSection`, `TacticalSwimLanes`, `DecoyInsightBanner`, `AppendixIocTable`)
+- `app/src/lib/dossier-utils` (`buildAppendixIocs`, `extractDotFromReport`, `extractExecutiveSummary`, `extractMitreSwimLanes`, `extractDecoyInsight`, `normalizeEntityId`, `sanitizeExternalHttpUrl`)
 - `@xyflow/react` (`ReactFlow`, `Controls`, `MiniMap`, `Background`)
 - `d3-graphviz` & `d3` (attack-flow Graphviz diagram rendering)
 - `react-markdown` & `remark-gfm` (report and dossier rendering)
 - `dagre` (graph layout helper)
 **Endpoints Consumed:**
 - `GET /api/investigations/:id` (poll/fetch status and results)
-- `GET /api/investigations/:id/graph` (fetch nodes and edges for ReactFlow)
+- `GET /api/investigations/:id/graph` (fetch nodes and edges for ReactFlow and Appendix IOC fusion)
 - `GET /api/investigations/:id/stream` (SSE real-time event listener)
 
 ### `app/src/app/api/[...path]/route.ts`
-**Role:** Dynamic Next.js App Router catch-all proxy.
+**Role:** Hardened Next.js App Router catch-all proxy with fail-closed `HARIMAU_API_KEY` enforcement, header allowlisting, admin path blocking, HTTPS transport verification, and rate limiting on `POST /api/investigate`.
 **Dependencies:**
 - `next/server` (`NextRequest`, `NextResponse`)
-- Runtime env var `BACKEND_URL` (default: `http://localhost:8080`)
+- Runtime env vars `BACKEND_URL` and `HARIMAU_API_KEY`
 **HTTP Methods Handled:** `GET`, `POST`, `DELETE`
 
 ## `backend/__init__.py`

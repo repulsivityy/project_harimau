@@ -44,6 +44,7 @@ function push_secret() {
 push_secret "harimau-gti-api-key" "$GTI_API_KEY"
 push_secret "harimau-webrisk-api-key" "$WEBRISK_API_KEY"
 push_secret "harimau-shodan-api-key" "$SHODAN_API_KEY"
+push_secret "harimau-api-key" "$HARIMAU_API_KEY"
 
 # Optional: DB URL if you have it locally.
 # If managed by Terraform, you might not need to push it here.

@@ -1,8 +1,10 @@
 import os
 import json
 import uuid
+import secrets
 from datetime import datetime, timezone
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 import asyncio
@@ -25,6 +27,15 @@ checkpointer_instance = None  # LangGraph AsyncPostgresSaver (psycopg-based)
 async def lifespan(app: FastAPI):
     global db_pool, app_graph, checkpointer_instance
     
+    # --- Fail-Closed Secret Verification ---
+    harimau_api_key = os.environ.get("HARIMAU_API_KEY", "").strip()
+    if not harimau_api_key:
+        logger.critical(
+            "fatal_missing_api_key",
+            error="HARIMAU_API_KEY environment variable is missing or empty. Terminating backend instance (fail-closed).",
+        )
+        raise RuntimeError("FATAL: HARIMAU_API_KEY is not configured. Terminating instance.")
+
     # --- Startup Phase ---
     db_url = os.environ.get("DATABASE_URL")
     checkpointer_ctx = None          # declared here so shutdown can always reference it safely
@@ -142,7 +153,50 @@ async def lifespan(app: FastAPI):
         await db_pool.close()
     logger.info("backend_shutdown", status="stopped")
 
-app = FastAPI(title="Harimau Backend", lifespan=lifespan)
+app = FastAPI(
+    title="Harimau Backend",
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
+
+
+@app.middleware("http")
+async def verify_harimau_api_key(request: Request, call_next):
+    """
+    Fail-closed authentication middleware.
+    Exempts only /health and / for Cloud Run startup/liveness probes.
+    Requires a valid `x-harimau-api-key` header matching HARIMAU_API_KEY on all other endpoints.
+    """
+    if request.url.path in ("/health", "/"):
+        return await call_next(request)
+
+    expected_key = os.environ.get("HARIMAU_API_KEY", "").strip()
+    if not expected_key:
+        logger.critical(
+            "fatal_missing_api_key_runtime",
+            path=request.url.path,
+            error="HARIMAU_API_KEY missing at runtime. Terminating process (fail-closed).",
+        )
+        os._exit(1)
+
+    provided_key = (request.headers.get("x-harimau-api-key") or "").strip()
+    if not provided_key or not secrets.compare_digest(provided_key, expected_key):
+        client_ip = request.client.host if request.client else "unknown"
+        logger.warning(
+            "unauthorized_api_request",
+            path=request.url.path,
+            method=request.method,
+            client_ip=client_ip,
+            has_key=bool(provided_key),
+        )
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Unauthorized: invalid or missing x-harimau-api-key"},
+        )
+
+    return await call_next(request)
 
 # --- Data Models ---
 class InvestigationRequest(BaseModel):

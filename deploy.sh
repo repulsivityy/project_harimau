@@ -21,6 +21,9 @@
 #   SHODAN_API_KEY     Shodan API key
 #                      Saved to Secret Manager as 'harimau-shodan-api-key'
 #
+#   HARIMAU_API_KEY    Shared frontend-to-backend authentication key (x-harimau-api-key)
+#                      Saved to Secret Manager as 'harimau-api-key'
+#
 # OPTIONAL ENV VARS:
 #   DETECTION_AGENT_URL   A2A endpoint of the detection agent Cloud Run service.
 #                         When set, backend is deployed with DETECTION_AGENT_ENABLED=true
@@ -47,6 +50,7 @@ TARGET=${1:-all}
 REGION="asia-southeast1" # Change if needed
 BACKEND_SERVICE="harimau-backend"
 FRONTEND_SERVICE="harimau-frontend"
+HARIMAU_API_KEY_SECRET="harimau-api-key"
 
 function run_cleanup_menu() {
     local force_menu=$1
@@ -54,6 +58,11 @@ function run_cleanup_menu() {
     # Ensure BACKEND_URL is fetched for final logging and db management
     if [ -z "$BACKEND_URL" ]; then
         BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE --region $REGION --format 'value(status.url)' --quiet)
+    fi
+
+    local admin_key="${HARIMAU_API_KEY:-}"
+    if [ -z "$admin_key" ]; then
+        admin_key=$(gcloud secrets versions access latest --secret="$HARIMAU_API_KEY_SECRET" --quiet 2>/dev/null || true)
     fi
 
     echo "--------------------------------------------------------"
@@ -71,13 +80,13 @@ function run_cleanup_menu() {
         
         if [ "$clean_opt" == "1" ]; then
             echo "🔄 Cancelling all running jobs..."
-            curl -s -X POST "${BACKEND_URL}/api/admin/bulk-cancel"
+            curl -s -X POST -H "x-harimau-api-key: ${admin_key}" "${BACKEND_URL}/api/admin/bulk-cancel"
             echo -e "\n✅ Done!"
         elif [ "$clean_opt" == "2" ]; then
             read -p "⚠️  Are you sure you want to DELETE ALL INVESTIGATIONS? [yes/NO]: " confirm_del
             if [ "$confirm_del" == "yes" ]; then
                 echo "🗑️  Deleting all jobs..."
-                curl -s -X DELETE "${BACKEND_URL}/api/admin/jobs?delete_all=true"
+                curl -s -X DELETE -H "x-harimau-api-key: ${admin_key}" "${BACKEND_URL}/api/admin/jobs?delete_all=true"
                 echo -e "\n✅ Done!"
             else
                 echo "Skipped."
@@ -86,7 +95,7 @@ function run_cleanup_menu() {
              read -p "🔢 Enter number of most recent jobs to delete (e.g., 10): " del_count
              if [[ "$del_count" =~ ^[0-9]+$ ]]; then
                  echo "🗑️  Deleting $del_count most recent jobs..."
-                 curl -s -X DELETE "${BACKEND_URL}/api/admin/jobs?limit=${del_count}"
+                 curl -s -X DELETE -H "x-harimau-api-key: ${admin_key}" "${BACKEND_URL}/api/admin/jobs?limit=${del_count}"
                  echo -e "\n✅ Done!"
              else
                  echo "❌ Invalid number."
@@ -107,7 +116,7 @@ echo "🐯 Deploying Project Harimau to GCP ($PROJECT_ID)..."
 echo "Ensuring APIs are enabled..."
 gcloud services enable run.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com secretmanager.googleapis.com aiplatform.googleapis.com sqladmin.googleapis.com || true
 
-# 2. Setup Secrets (GTI_API_KEY & WEBRISK_API_KEY)
+# 2. Setup Secrets (GTI_API_KEY, WEBRISK_API_KEY, SHODAN_API_KEY, HARIMAU_API_KEY)
 SECRET_NAME="harimau-gti-api-key"
 WEBRISK_SECRET_NAME="harimau-webrisk-api-key"
 SHODAN_SECRET_NAME="harimau-shodan-api-key"
@@ -167,6 +176,23 @@ if [ -n "$SHODAN_API_KEY" ]; then
     fi
 else
     echo "⚠️  SHODAN_API_KEY not set locally. Assuming secret exists..."
+fi
+
+if [ -n "$HARIMAU_API_KEY" ]; then
+    read -p "❓ Local HARIMAU_API_KEY found. Update Secret Manager? [y/N] " response
+    if [[ "$response" =~ ^[yY]$ ]]; then
+        echo "🔄 Updating secret ($HARIMAU_API_KEY_SECRET)..."
+        if ! gcloud secrets describe $HARIMAU_API_KEY_SECRET --quiet > /dev/null 2>&1; then
+            printf "$HARIMAU_API_KEY" | gcloud secrets create $HARIMAU_API_KEY_SECRET --data-file=-
+        else
+            printf "$HARIMAU_API_KEY" | gcloud secrets versions add $HARIMAU_API_KEY_SECRET --data-file=-
+        fi
+        echo "✅ Secret updated."
+    else
+        echo "⏭️  Skipping secret update (using existing version)."
+    fi
+else
+    echo "⚠️  HARIMAU_API_KEY not set locally. Assuming secret exists..."
 fi
 
 # 3. Setup Cloud SQL (PostgreSQL)
@@ -255,6 +281,10 @@ if ! gcloud secrets describe $SHODAN_SECRET_NAME --quiet > /dev/null 2>&1; then
     echo "❌ Error: Secret '$SHODAN_SECRET_NAME' does not exist in Cloud and no local key provided."
     exit 1
 fi
+if ! gcloud secrets describe $HARIMAU_API_KEY_SECRET --quiet > /dev/null 2>&1; then
+    echo "❌ Error: Secret '$HARIMAU_API_KEY_SECRET' does not exist in Cloud and no local HARIMAU_API_KEY provided."
+    exit 1
+fi
 if ! gcloud secrets describe $DB_URL_SECRET --quiet > /dev/null 2>&1; then
     echo "❌ Error: Secret '$DB_URL_SECRET' does not exist."
     exit 1
@@ -291,6 +321,16 @@ if ! gcloud secrets get-iam-policy $SHODAN_SECRET_NAME --format=json | grep -q "
         --role="roles/secretmanager.secretAccessor" --quiet > /dev/null
 else
     echo "✅ Secret Access ($SHODAN_SECRET_NAME) already granted."
+fi
+
+# Secret Manager Access (Harimau Internal API Key)
+if ! gcloud secrets get-iam-policy $HARIMAU_API_KEY_SECRET --format=json | grep -q "$SERVICE_ACCOUNT_EMAIL"; then
+    echo "🔐 Granting Secret Access ($HARIMAU_API_KEY_SECRET)..."
+    gcloud secrets add-iam-policy-binding $HARIMAU_API_KEY_SECRET \
+        --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
+        --role="roles/secretmanager.secretAccessor" --quiet > /dev/null
+else
+    echo "✅ Secret Access ($HARIMAU_API_KEY_SECRET) already granted."
 fi
 
 # Vertex AI Access
@@ -351,7 +391,7 @@ if [[ "$TARGET" == "backend" || "$TARGET" == "all" ]]; then
         --no-cpu-throttling \
         --timeout="600" \
         --set-env-vars "LOG_LEVEL=DEBUG,MAX_DEPTH=2,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_REGION=${REGION}${DETECTION_AGENT_VARS}" \
-        --set-secrets "VT_APIKEY=${SECRET_NAME}:latest,GTI_API_KEY=${SECRET_NAME}:latest,WEBRISK_API_KEY=${WEBRISK_SECRET_NAME}:latest,SHODAN_API_KEY=${SHODAN_SECRET_NAME}:latest,DATABASE_URL=${DB_URL_SECRET}:latest" \
+        --set-secrets "VT_APIKEY=${SECRET_NAME}:latest,GTI_API_KEY=${SECRET_NAME}:latest,WEBRISK_API_KEY=${WEBRISK_SECRET_NAME}:latest,SHODAN_API_KEY=${SHODAN_SECRET_NAME}:latest,HARIMAU_API_KEY=${HARIMAU_API_KEY_SECRET}:latest,DATABASE_URL=${DB_URL_SECRET}:latest" \
         --add-cloudsql-instances ${PROJECT_ID}:${REGION}:${DB_INSTANCE} \
         --command "uvicorn" \
         --args "backend.main:app,--host,0.0.0.0,--port,8080" \
@@ -368,13 +408,12 @@ if [[ "$TARGET" == "frontend" || "$TARGET" == "all" ]]; then
     echo "🚀 Deploying Frontend..."
     gcloud builds submit --config cloudbuild-frontend.yaml . --quiet
     
-    # gcloud run deploy $FRONTEND_SERVICE \
-    #     --image gcr.io/$PROJECT_ID/$FRONTEND_SERVICE \
-    #     --region $REGION \
-    #     --allow-unauthenticated \
-    #     --set-env-vars BACKEND_URL=$BACKEND_URL \
-    #     --port 8501 \
-    #     --quiet
+    # Ensure HARIMAU_API_KEY secret and BACKEND_URL are also synced directly via deploy.sh
+    gcloud run services update $FRONTEND_SERVICE \
+        --region $REGION \
+        --set-env-vars "BACKEND_URL=${BACKEND_URL}" \
+        --set-secrets "HARIMAU_API_KEY=${HARIMAU_API_KEY_SECRET}:latest" \
+        --quiet
     
     FRONTEND_URL=$(gcloud run services describe $FRONTEND_SERVICE --region $REGION --format 'value(status.url)')
     echo "➡️  Frontend: $FRONTEND_URL"

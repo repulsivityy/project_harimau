@@ -19,8 +19,8 @@ The application takes an IOC such as a file hash, URL, or IP address and kicks o
 
 ## Architecture
 
-* **Frontend**: Next.js (React, Tailwind CSS v4) - interactive investigation dashboard
-* **Backend**: FastAPI + LangGraph (Cloud Run service) - multi-agent orchestration
+* **Frontend**: Next.js (React, Tailwind CSS v4) - Harimau Threat Dossier workbench & Spatial Topology Canvas
+* **Backend**: FastAPI + LangGraph (Cloud Run service) - multi-agent orchestration with fail-closed server-to-server `x-harimau-api-key` authentication
 * **MCP**: Embedded GTI + Shodan MCP servers (`stdio`) - threat intelligence and internet exposure data
 * **Brain**: Gemini 3.5 Flash / Pro - advanced AI reasoning
 * **Database**: Cloud SQL (PostgreSQL) - persistent investigation results and LangGraph checkpoints
@@ -31,7 +31,7 @@ The application takes an IOC such as a file hash, URL, or IP address and kicks o
 * **Automated Malware Analysis**: Deep behavioral analysis, capability assessment, and attribution tracking
 * **Infrastructure Mapping**: Comprehensive DNS, IP, and hosting infrastructure analysis with pivot detection
 * **Intelligence Synthesis**: Lead analyst agent correlates findings across malware and infrastructure domains
-* **Rich Visualization**: Interactive knowledge graphs with threat scores, relationships, and entity details
+* **Rich Visualization**: Interactive Threat Dossier workbench with Graphviz attack-flow diagrams, MITRE ATT&CK tactical swim lanes, specialist dossiers, and a dedicated Spatial Topology Canvas
 * **Research Pivots**: Identifies intelligence gaps and suggests next research steps
 * **Campaign Tracking**: Links IOCs to known threat actors and campaigns
 
@@ -50,11 +50,12 @@ Your infrastructure is managed by **Terraform**, and deployments are automated v
 2. **Automated Triggers**:
    - Changes in `backend/**` trigger `cloudbuild-backend.yaml`
    - Changes in `app/**` trigger `cloudbuild-frontend.yaml`
+   - Both services mount `HARIMAU_API_KEY` (`harimau-api-key:latest`) from Secret Manager and enforce fail-closed startup/runtime checks.
    - The frontend pipeline fetches the backend URL before deployment so `BACKEND_URL` is set correctly at runtime.
 
 ### Option 2: Manual Script
 
-You can still use the legacy `deploy.sh` script for manual deployments if needed.
+You can still use `deploy.sh` for manual deployments if needed.
 
 1. **Prerequisites**: `gcloud` CLI installed and authenticated
 2. **Configuration**:
@@ -62,6 +63,7 @@ You can still use the legacy `deploy.sh` script for manual deployments if needed
    export GTI_API_KEY="your_actual_key_here"
    export WEBRISK_API_KEY="your_webrisk_key_here"
    export SHODAN_API_KEY="your_shodan_key_here"
+   export HARIMAU_API_KEY="$(openssl rand -hex 32)"
    ```
 3. **Deploy**:
    ```bash
@@ -71,6 +73,7 @@ You can still use the legacy `deploy.sh` script for manual deployments if needed
    ```bash
    curl -X POST "https://harimau-backend-<PROJECT_ID>.asia-southeast1.run.app/api/investigate" \
         -H "Content-Type: application/json" \
+        -H "x-harimau-api-key: $HARIMAU_API_KEY" \
         -d '{"ioc":"<sha256>"}'
    ```
 
@@ -83,8 +86,9 @@ You can still use the legacy `deploy.sh` script for manual deployments if needed
 | Cloud SQL Persistence & Checkpointing | Complete |
 | Shodan MCP Enrichment | Complete |
 | Real-time SSE Streaming | Complete |
-| Next.js Investigation Dashboard | Complete |
+| Next.js Threat Dossier Workbench & Spatial Canvas | Complete |
 | Graph Persistence (NetworkX -> Cloud SQL JSONB) | Complete |
+| Server-to-Server API Auth (`x-harimau-api-key`, Fail-Closed) | Complete |
 | Authentication (Cloud IAP) | Planned |
 | A2A Integration | Planned |
 

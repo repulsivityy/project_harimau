@@ -27,7 +27,7 @@ steps:
         echo "$$BACKEND_URL" > /workspace/backend_url.txt
         echo "Fetched Backend URL: $$BACKEND_URL"
 
-  # 5. Deploy Frontend to Cloud Run (BACKEND_URL set as runtime env var — read by API route proxy)
+  # 5. Deploy Frontend to Cloud Run (BACKEND_URL and HARIMAU_API_KEY set at runtime — read by API route proxy)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:
@@ -38,6 +38,7 @@ steps:
           --image asia-southeast1-docker.pkg.dev/$PROJECT_ID/harimau/frontend:latest \
           --region asia-southeast1 \
           --set-env-vars BACKEND_URL=$$BACKEND_URL \
+          --set-secrets HARIMAU_API_KEY=harimau-api-key:latest \
           --quiet
 
 images:

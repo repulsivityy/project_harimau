@@ -31,6 +31,10 @@ resource "google_cloud_run_service" "backend" {
     metadata {
       annotations = {
         "run.googleapis.com/cloudsql-instances" = "${var.project_id}:${var.region}:harimau-db"
+        # Mirrors `--no-cpu-throttling` in deploy.sh. Required: the background
+        # investigation worker keeps running after the HTTP response is sent,
+        # so the CPU must stay allocated outside request handling.
+        "run.googleapis.com/cpu-throttling" = "false"
       }
     }
 
@@ -43,6 +47,16 @@ resource "google_cloud_run_service" "backend" {
           value_from {
             secret_key_ref {
               name = "harimau-db-url"
+              key  = "latest"
+            }
+          }
+        }
+        # Required: backend exits 1 at startup if unset (fail-closed auth).
+        env {
+          name = "HARIMAU_API_KEY"
+          value_from {
+            secret_key_ref {
+              name = "harimau-api-key"
               key  = "latest"
             }
           }
@@ -73,8 +87,8 @@ resource "google_cloud_run_service" "backend" {
           value = "DEBUG"
         }
         env {
-          name = "MAX_DEPTH"
-          value = "2"
+          name  = "HUNT_ITERATIONS"
+          value = "3"
         }
         env {
           name = "SHODAN_API_KEY"
@@ -103,7 +117,26 @@ resource "google_cloud_run_service" "backend" {
             }
           }
         }
+
+        # Mirrors `--command`/`--args` in deploy.sh. Same values as the image
+        # CMD in backend/Dockerfile, but set explicitly: deploy.sh writes them
+        # onto the service as an override, so omitting them here makes
+        # `terraform apply` clear the override and show perpetual drift.
+        command = ["uvicorn"]
+        args    = ["backend.main:app", "--host", "0.0.0.0", "--port", "8080"]
+
+        # Mirrors `--memory=2048Mi --cpu=2` in deploy.sh.
+        resources {
+          limits = {
+            cpu    = "2"
+            memory = "2048Mi"
+          }
+        }
       }
+
+      # Mirrors `--timeout=600` in deploy.sh. Investigations routinely exceed
+      # the 300s Cloud Run default.
+      timeout_seconds = 600
     }
   }
 
@@ -131,6 +164,17 @@ resource "google_cloud_run_service" "frontend" {
         env {
           name = "BACKEND_URL"
           value = google_cloud_run_service.backend.status[0].url
+        }
+        # Required: frontend exits 1 at startup (instrumentation.ts) if unset,
+        # and the API proxy route injects it as the x-harimau-api-key header.
+        env {
+          name = "HARIMAU_API_KEY"
+          value_from {
+            secret_key_ref {
+              name = "harimau-api-key"
+              key  = "latest"
+            }
+          }
         }
         ports {
             container_port = 3000

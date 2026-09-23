@@ -1,6 +1,5 @@
 "use client";
 
-import React from "react";
 import type { DossierMastheadProps } from "@/lib/dossier-types";
 
 function formatTimestamp(ts?: string): string {

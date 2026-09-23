@@ -660,13 +660,12 @@ graph TD
 ## `backend/utils/graph_formatter.py`
 **Imports:**
 - `backend.utils.logger`
+- `backend.utils.entity_identity` (`normalise_entity_id`)
 - `backend.utils.graph_cache` (`InvestigationCache`, `normalize_verdict`)
-- `json`
 - `os`
 
 **Top-level Functions:**
-- `format_graph_from_cache(job_id, job)`: Builds frontend graph data directly from the persisted NetworkX `investigation_graph` JSONB, providing rich tooltips, typed colors, `isMalicious`, `entityType`, and `isRoot` flags.
-- `format_investigation_graph(job_id, job)`: Legacy reconstruction fallback using `rich_intel`.
+- `format_graph_from_cache(job_id, job)`: Builds frontend graph data directly from the persisted NetworkX `investigation_graph` JSONB (or returns a single-node root IOC seed graph while a job is still running), providing rich tooltips, typed colors, `isMalicious`, `entityType`, and `isRoot` flags.
 
 ## `backend/utils/logger.py`
 **Imports:**

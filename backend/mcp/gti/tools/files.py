@@ -284,7 +284,7 @@ async def search_digital_threat_monitoring(
     truncate: str = None,
     sanitize: bool = True,
 ) -> dict:
-  """Search for historical data in Digital Threat Monitoring (DTM) using Lucene syntax.
+  r"""Search for historical data in Digital Threat Monitoring (DTM) using Lucene syntax.
 
   Digital theat monitoring is a collection of documents from surface, deep, and dark web sources.
 

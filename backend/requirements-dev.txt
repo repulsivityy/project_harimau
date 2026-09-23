@@ -1,0 +1,7 @@
+-r requirements.txt
+
+# Test tooling only — deliberately NOT in requirements.txt so it never ships
+# in the production image. Install locally with:
+#   pip install -r backend/requirements-dev.txt
+pytest==9.1.1
+pytest-asyncio==1.4.0

@@ -1,6 +1,5 @@
 "use client";
 
-import React from "react";
 import type { DossierCompanionRailProps } from "@/lib/dossier-types";
 
 function NetworkIcon({ className }: { className?: string }) {

@@ -1,23 +1,13 @@
 steps:
-  # 1. Simple Syntax and Indentation Check
-  - name: 'python:3.14-slim'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        echo "Checking syntax and indentation of python files..."
-        python -m compileall -q .
-        echo "✅ Syntax check passed!"
-
-  # 2. Build Frontend Image
+  # 1. Build Frontend Image
   - name: 'gcr.io/cloud-builders/docker'
     args: ['build', '-t', 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/harimau/frontend:latest', '-f', 'app/Dockerfile', '.']
 
-  # 3. Push Frontend Image
+  # 2. Push Frontend Image
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/harimau/frontend:latest']
 
-  # 4. Fetch Backend URL for Frontend
+  # 3. Fetch Backend URL for Frontend
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:
@@ -27,7 +17,7 @@ steps:
         echo "$$BACKEND_URL" > /workspace/backend_url.txt
         echo "Fetched Backend URL: $$BACKEND_URL"
 
-  # 5. Deploy Frontend to Cloud Run (BACKEND_URL and HARIMAU_API_KEY set at runtime — read by API route proxy)
+  # 4. Deploy Frontend to Cloud Run (BACKEND_URL and HARIMAU_API_KEY set at runtime — read by API route proxy)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:

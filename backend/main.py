@@ -1168,18 +1168,16 @@ async def debug_investigation(job_id: str):
 @app.get("/api/investigations/{job_id}/graph")
 async def get_investigation_graph(job_id: str):
     """
-    Returns graph data for visualization.
-    Prefers the persisted NetworkX graph (richer data) when available;
-    falls back to rich_intel reconstruction for running jobs or legacy records.
+    Returns graph data for visualization from the persisted NetworkX
+    InvestigationCache (`investigation_graph` JSONB column), or a single-node
+    root seed graph while a job is still running.
     """
     job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    from backend.utils.graph_formatter import format_graph_from_cache, format_investigation_graph
-    if job.get("investigation_graph"):
-        return format_graph_from_cache(job_id, job)
-    return format_investigation_graph(job_id, job)
+    from backend.utils.graph_formatter import format_graph_from_cache
+    return format_graph_from_cache(job_id, job)
 
 @app.get("/api/investigations/{job_id}/history")
 async def get_investigation_history(job_id: str):

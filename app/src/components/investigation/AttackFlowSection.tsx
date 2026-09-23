@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import * as d3 from "d3";
 import { graphviz } from "d3-graphviz";
 import type { AttackFlowSectionProps } from "@/lib/dossier-types";

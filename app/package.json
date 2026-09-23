@@ -1,5 +1,5 @@
 {
-  "name": "new_frontend_testing",
+  "name": "harimau-frontend",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -10,28 +10,28 @@
     "test": "node --import ./test-loader.mjs --test --experimental-strip-types tests/*.test.ts"
   },
   "dependencies": {
-    "@hpcc-js/wasm": "^2.20.0",
-    "@xyflow/react": "^12.10.2",
-    "d3": "^7.9.0",
-    "d3-graphviz": "^5.6.0",
-    "enhanced-resolve": "^5.25.1",
+    "@hpcc-js/wasm": "2.35.2",
+    "@xyflow/react": "12.11.6",
+    "d3": "7.9.0",
+    "d3-graphviz": "5.6.0",
+    "enhanced-resolve": "5.25.1",
     "next": "16.3.5",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "react-markdown": "^9.0.1",
-    "remark-gfm": "^4.0.0"
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/d3": "^7.4.3",
-    "@types/d3-force": "^3.0.4",
-    "@types/d3-graphviz": "^2.6.10",
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/d3": "7.4.3",
+    "@types/d3-force": "3.0.10",
+    "@types/d3-graphviz": "3.1.0",
     "@types/node": "22.20.4",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "eslint": "9.39.4",
     "eslint-config-next": "16.3.5",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3"
   }
 }

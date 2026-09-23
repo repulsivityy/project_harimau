@@ -5,10 +5,9 @@ FROM python:3.14-slim
 
 WORKDIR /app
 
-# Install system dependencies and graphing libraries
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    graphviz \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependencies first for caching

@@ -74,15 +74,6 @@ def _gti_verdict(attrs: Dict[str, Any]) -> str:
     return normalize_verdict(raw) or "unknown"
 
 
-def _gti_score(attrs: Dict[str, Any]) -> int:
-    assessment = attrs.get("gti_assessment") or {}
-    score_obj = assessment.get("threat_score") or {}
-    if isinstance(score_obj, dict):
-        value = score_obj.get("value")
-        return int(value) if value is not None else 0
-    return 0
-
-
 def _malicious_vendor_count(attrs: Dict[str, Any]) -> int:
     stats = attrs.get("last_analysis_stats") or {}
     return stats.get("malicious", 0) if isinstance(stats, dict) else 0

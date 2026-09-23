@@ -6,7 +6,6 @@ from contextlib import AsyncExitStack
 from typing import Optional, List, Dict, Any, Annotated, TypedDict
 from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage, BaseMessage
-#from langchain_google_vertexai import ChatVertexAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.tools import tool
 from langgraph.graph import StateGraph, START, END
@@ -304,7 +303,6 @@ async def infrastructure_node(state: AgentState):
                    findings_count=len(key_findings))
         
         project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
-        location = os.getenv("GOOGLE_CLOUD_REGION", "asia-southeast1")
 
         # Setup Tools & Sub-graph dynamic definitions inside MCP session context
         async with AsyncExitStack() as stack:
@@ -549,7 +547,6 @@ async def infrastructure_node(state: AgentState):
             if _infra_base_llm is None:
                 _infra_base_llm = ChatGoogleGenerativeAI(
                     model="gemini-3.8-flash",
-                    #model="gemini-3.1-pro-preview",
                     temperature=0.0,
                     project=project_id,
                     location="global",

@@ -1,6 +1,5 @@
 import os
 import aiohttp
-import asyncio
 from google.cloud import secretmanager
 from backend.utils.logger import get_logger
 

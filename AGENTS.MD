@@ -34,7 +34,7 @@ Cloud-native AI threat hunting platform using **LangGraph** for orchestration, *
 - **Toggle without redeployment**: `gcloud run services update harimau-backend --set-env-vars DETECTION_AGENT_ENABLED=true,DETECTION_AGENT_URL=https://...`
 
 ### 4. Orchestrator
-LangGraph with `MAX_DEPTH` recursion control and **Cloud SQL `AsyncPostgresSaver`** checkpointing for resiliency.
+LangGraph with `HUNT_ITERATIONS` recursion control and **Cloud SQL `AsyncPostgresSaver`** checkpointing for resiliency.
 
 ### 5. Investigation Cache
 **NetworkX MultiDiGraph** — in-memory, per-job, lives in LangGraph state for the full investigation duration.

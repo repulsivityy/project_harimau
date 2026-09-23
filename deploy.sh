@@ -132,9 +132,9 @@ if [ -n "$GTI_API_KEY" ]; then
     if [[ "$response" =~ ^[yY]$ ]]; then
         echo "🔄 Updating secret ($SECRET_NAME)..."
         if ! gcloud secrets describe $SECRET_NAME --quiet > /dev/null 2>&1; then
-            printf "$GTI_API_KEY" | gcloud secrets create $SECRET_NAME --data-file=-
+            printf '%s' "$GTI_API_KEY" | gcloud secrets create $SECRET_NAME --data-file=-
         else
-            printf "$GTI_API_KEY" | gcloud secrets versions add $SECRET_NAME --data-file=-
+            printf '%s' "$GTI_API_KEY" | gcloud secrets versions add $SECRET_NAME --data-file=-
         fi
         echo "✅ Secret updated."
     else
@@ -149,9 +149,9 @@ if [ -n "$WEBRISK_API_KEY" ]; then
     if [[ "$response" =~ ^[yY]$ ]]; then
         echo "🔄 Updating secret ($WEBRISK_SECRET_NAME)..."
         if ! gcloud secrets describe $WEBRISK_SECRET_NAME --quiet > /dev/null 2>&1; then
-            printf "$WEBRISK_API_KEY" | gcloud secrets create $WEBRISK_SECRET_NAME --data-file=-
+            printf '%s' "$WEBRISK_API_KEY" | gcloud secrets create $WEBRISK_SECRET_NAME --data-file=-
         else
-            printf "$WEBRISK_API_KEY" | gcloud secrets versions add $WEBRISK_SECRET_NAME --data-file=-
+            printf '%s' "$WEBRISK_API_KEY" | gcloud secrets versions add $WEBRISK_SECRET_NAME --data-file=-
         fi
         echo "✅ Secret updated."
     else
@@ -166,9 +166,9 @@ if [ -n "$SHODAN_API_KEY" ]; then
     if [[ "$response" =~ ^[yY]$ ]]; then
         echo "🔄 Updating secret ($SHODAN_SECRET_NAME)..."
         if ! gcloud secrets describe $SHODAN_SECRET_NAME --quiet > /dev/null 2>&1; then
-            printf "$SHODAN_API_KEY" | gcloud secrets create $SHODAN_SECRET_NAME --data-file=-
+            printf '%s' "$SHODAN_API_KEY" | gcloud secrets create $SHODAN_SECRET_NAME --data-file=-
         else
-            printf "$SHODAN_API_KEY" | gcloud secrets versions add $SHODAN_SECRET_NAME --data-file=-
+            printf '%s' "$SHODAN_API_KEY" | gcloud secrets versions add $SHODAN_SECRET_NAME --data-file=-
         fi
         echo "✅ Secret updated."
     else
@@ -183,9 +183,9 @@ if [ -n "$HARIMAU_API_KEY" ]; then
     if [[ "$response" =~ ^[yY]$ ]]; then
         echo "🔄 Updating secret ($HARIMAU_API_KEY_SECRET)..."
         if ! gcloud secrets describe $HARIMAU_API_KEY_SECRET --quiet > /dev/null 2>&1; then
-            printf "$HARIMAU_API_KEY" | gcloud secrets create $HARIMAU_API_KEY_SECRET --data-file=-
+            printf '%s' "$HARIMAU_API_KEY" | gcloud secrets create $HARIMAU_API_KEY_SECRET --data-file=-
         else
-            printf "$HARIMAU_API_KEY" | gcloud secrets versions add $HARIMAU_API_KEY_SECRET --data-file=-
+            printf '%s' "$HARIMAU_API_KEY" | gcloud secrets versions add $HARIMAU_API_KEY_SECRET --data-file=-
         fi
         echo "✅ Secret updated."
     else
@@ -205,8 +205,13 @@ if ! gcloud sql instances describe $DB_INSTANCE --quiet > /dev/null 2>&1; then
     echo "--------------------------------------------------------"
     read -p "🔐 Enter password for DB user '$DB_USER' (leave blank to generate): " USER_DB_PASS
     if [ -z "$USER_DB_PASS" ]; then
-        # Generate 18 char alpha-numeric + symbols
-        USER_DB_PASS=$(LC_ALL=C tr -dc 'A-Za-z0-9!@#$%^&*()_+' < /dev/urandom | head -c 18)
+        # Generate 18 char alphanumeric (~107 bits of entropy).
+        # Deliberately NO symbols: this password is interpolated raw into the
+        # Postgres DSN userinfo below. '@' is the userinfo/host delimiter, '#'
+        # starts a fragment, and libpq/psycopg percent-decode userinfo so a
+        # stray '%' is a decode error. Restricting the charset avoids needing
+        # to percent-encode here.
+        USER_DB_PASS=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 18)
         echo "✨ Generated Password: $USER_DB_PASS"
         echo "⚠️  SAVE THIS PASSWORD SECURELY!"
     fi
@@ -230,10 +235,13 @@ if ! gcloud sql instances describe $DB_INSTANCE --quiet > /dev/null 2>&1; then
     DB_URL="postgresql://${DB_USER}:${USER_DB_PASS}@/${DB_NAME}?host=/cloudsql/${PROJECT_ID}:${REGION}:${DB_INSTANCE}"
     
     echo "🔐 Storing DATABASE_URL in Secret Manager..."
+    # printf '%s' -- never pass the value as the format string, or '%' and
+    # backslash sequences inside it get interpreted and the secret is silently
+    # written mangled.
     if ! gcloud secrets describe $DB_URL_SECRET --quiet > /dev/null 2>&1; then
-        printf "$DB_URL" | gcloud secrets create $DB_URL_SECRET --data-file=-
+        printf '%s' "$DB_URL" | gcloud secrets create $DB_URL_SECRET --data-file=-
     else
-        printf "$DB_URL" | gcloud secrets versions add $DB_URL_SECRET --data-file=-
+        printf '%s' "$DB_URL" | gcloud secrets versions add $DB_URL_SECRET --data-file=-
     fi
 else
     echo "✅ Cloud SQL instance '$DB_INSTANCE' already exists."
@@ -246,7 +254,9 @@ else
              echo "--------------------------------------------------------"
              read -p "🔐 Enter NEW password for DB user '$DB_USER' (leave blank to generate): " USER_DB_PASS
              if [ -z "$USER_DB_PASS" ]; then
-                 USER_DB_PASS=$(LC_ALL=C tr -dc 'A-Za-z0-9!@#$%^&*()_+' < /dev/urandom | head -c 18)
+                 # Alphanumeric only — see the charset note at the first
+                 # generation site above.
+                 USER_DB_PASS=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 18)
                  echo "✨ Generated Password: $USER_DB_PASS"
              fi
              echo "--------------------------------------------------------"
@@ -257,9 +267,9 @@ else
              DB_URL="postgresql://${DB_USER}:${USER_DB_PASS}@/${DB_NAME}?host=/cloudsql/${PROJECT_ID}:${REGION}:${DB_INSTANCE}"
              echo "🔐 Creating secret '$DB_URL_SECRET'..."
              if ! gcloud secrets describe $DB_URL_SECRET --quiet > /dev/null 2>&1; then
-                 printf "$DB_URL" | gcloud secrets create $DB_URL_SECRET --data-file=-
+                 printf '%s' "$DB_URL" | gcloud secrets create $DB_URL_SECRET --data-file=-
              else
-                 printf "$DB_URL" | gcloud secrets versions add $DB_URL_SECRET --data-file=-
+                 printf '%s' "$DB_URL" | gcloud secrets versions add $DB_URL_SECRET --data-file=-
              fi
         else
              echo "❌ Deployment aborted. Please resolve the secret mismatch manually."
@@ -390,7 +400,7 @@ if [[ "$TARGET" == "backend" || "$TARGET" == "all" ]]; then
         --cpu="2" \
         --no-cpu-throttling \
         --timeout="600" \
-        --set-env-vars "LOG_LEVEL=DEBUG,MAX_DEPTH=2,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_REGION=${REGION}${DETECTION_AGENT_VARS}" \
+        --set-env-vars "LOG_LEVEL=DEBUG,HUNT_ITERATIONS=3,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_REGION=${REGION}${DETECTION_AGENT_VARS}" \
         --set-secrets "VT_APIKEY=${SECRET_NAME}:latest,GTI_API_KEY=${SECRET_NAME}:latest,WEBRISK_API_KEY=${WEBRISK_SECRET_NAME}:latest,SHODAN_API_KEY=${SHODAN_SECRET_NAME}:latest,HARIMAU_API_KEY=${HARIMAU_API_KEY_SECRET}:latest,DATABASE_URL=${DB_URL_SECRET}:latest" \
         --add-cloudsql-instances ${PROJECT_ID}:${REGION}:${DB_INSTANCE} \
         --command "uvicorn" \

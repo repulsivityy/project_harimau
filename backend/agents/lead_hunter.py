@@ -1,6 +1,5 @@
 # Active orchestrator for Project Harimau: calls run_planning_phase + generate_final_report_llm (do not delete or supersede).
 import os
-#from langchain_google_vertexai import ChatVertexAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from backend.config import DEFAULT_HUNT_ITERATIONS
@@ -45,24 +44,18 @@ async def lead_hunter_node(state: AgentState):
     logger.info("lead_hunter_start", iteration=state.get("iteration"))
 
     project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
-    location = os.getenv("GOOGLE_CLOUD_REGION", "asia-southeast1")
-
 
     llm_flash = ChatGoogleGenerativeAI(
         model="gemini-3.8-flash",
         temperature=0.1,
-        #max_tokens=1024,
         project=project_id,
         location="global",
-        #vertexai=True,  # Explicitly use Vertex AI
     )
     llm_pro = ChatGoogleGenerativeAI(
         model="gemini-3.1-pro-preview",
         temperature=0.1,
-        #max_tokens=1024,
         project=project_id,
         location="global",
-        #vertexai=True,  # Explicitly use Vertex AI
     )
 
     # Initialize Cache to read graph state

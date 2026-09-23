@@ -14,7 +14,6 @@
 # Add lifespan support for startup/shutdown with strong typing
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
 
 import logging
 import os

@@ -55,6 +55,17 @@ resource "google_secret_manager_secret" "db_url" {
   }
 }
 
+# Shared frontend-to-backend authentication key (x-harimau-api-key).
+# Both Cloud Run services fail closed (exit 1) at startup if this is unset,
+# so the container must exist before `terraform apply` on terraform/app.
+# Value is populated out-of-band by push_secrets.sh, never via Terraform state.
+resource "google_secret_manager_secret" "harimau_api_key" {
+  secret_id = "harimau-api-key"
+  replication {
+    auto {}
+  }
+}
+
 # Cloud SQL Instance
 resource "google_sql_database_instance" "default" {
   name             = "harimau-db"

@@ -25,7 +25,7 @@ from backend.utils.agent_utils import (
     push_to_rich_intel,
     build_peer_context,
     parse_indicator_string,
-    resolve_specialist_structured_output,
+    ensure_trailing_human_message,
 )
 from backend.utils.target_outcomes import (
     assess_target_outcomes, successful_target_ids, normalise_target_id,
@@ -764,12 +764,30 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
 
             # Node 4: final_output_node
             async def final_output_node(sub_state: InfraSubgraphState):
-                result = await resolve_specialist_structured_output(
-                    base_llm,
-                    InfrastructureSpecialistOutput,
-                    sub_state["messages"],
-                    logger=logger,
-                )
+                structured_llm = base_llm.with_structured_output(InfrastructureSpecialistOutput, include_raw=True)
+                response_obj = await structured_llm.ainvoke(ensure_trailing_human_message(sub_state["messages"]))
+                
+                if isinstance(response_obj, dict):
+                    if response_obj.get("parsing_error"):
+                        raw_content = response_obj["raw"].content if hasattr(response_obj["raw"], "content") else str(response_obj["raw"])
+                        if isinstance(raw_content, list):
+                            raw_content = " ".join([b.get("text", "") if isinstance(b, dict) else str(b) for b in raw_content])
+                        elif not isinstance(raw_content, str):
+                            raw_content = str(raw_content)
+                            
+                        import re
+                        json_match = re.search(r'(\{.*\})', raw_content, re.DOTALL)
+                        raw_json = json_match.group(1) if json_match else raw_content
+                        
+                        try:
+                            parsed_dict = json.loads(raw_json)
+                            result = InfrastructureSpecialistOutput(**parsed_dict).model_dump()
+                        except Exception as inner_e:
+                            raise response_obj["parsing_error"]
+                    else:
+                        result = response_obj["parsed"].model_dump()
+                else:
+                    result = response_obj.model_dump()
 
                 # Keep this attempt separate from the accumulated dossier.
                 # Lifecycle evidence must never be satisfied by an old report.

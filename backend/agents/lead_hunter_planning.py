@@ -19,6 +19,12 @@ class PlanningOutput(BaseModel):
     investigation_complete: bool = False
     comment: Optional[str] = None
 
+    @classmethod
+    def __get_pydantic_json_schema__(cls, core_schema, handler):
+        schema = super().__get_pydantic_json_schema__(core_schema, handler)
+        schema["required"] = ["subtasks", "investigation_complete"]
+        return schema
+
 
 
 def _format_lead_for_prompt(node: dict) -> str:

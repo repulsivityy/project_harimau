@@ -25,6 +25,7 @@ from backend.utils.agent_utils import (
     push_to_rich_intel,
     build_peer_context,
     parse_indicator_string,
+    resolve_specialist_structured_output,
 )
 from backend.utils.target_outcomes import (
     assess_target_outcomes, successful_target_ids, normalise_target_id,
@@ -118,7 +119,7 @@ Analyze the provided network indicator (Domain, IP, or URL) to assess its malici
 - `get_url_report`: Get verdict and analysis stats for a URL.
 - `get_entities_related_to_a_domain`: Pivot from a domain (e.g., to resolutions, subdomains).
 - `get_entities_related_to_an_ip_address`: Pivot from an IP (e.g., to resolutions, communicating_files).
-- `get_entities_related_to_an_url`: Pivot from a URL (e.g., to network_location, downloaded_files).
+- `get_entities_related_to_an_url`: Pivot from a URL to related entity collections (e.g., `downloaded_files`, `contacted_domains`, `contacted_ips`, `communicating_files`).
 - `get_webrisk_report`: Check URL for Social Engineering, Malware, or Unwanted Software.
 
 - `shodan_ip_lookup`: Look up an IP in Shodan — open ports, running services, banners, known vulns, and geolocation. Use this to enrich IPs with exposure data that GTI does not provide.
@@ -453,11 +454,18 @@ async def infrastructure_node(state: AgentState):
             @tool
             @tool_timeout(logger=logger, on_error=record_decorator_failure)
             async def get_entities_related_to_an_url(url: str, relationship: str):
-                """Get entities related to a URL. Relationships: downloaded_files, network_location."""
+                """Get collection entities related to a URL. Valid relationships: downloaded_files, contacted_domains, contacted_ips, communicating_files, redirecting_urls, redirects_to."""
                 job_id = state.get("job_id")
                 if job_id:
                     await emit_tool_call(job_id, "infrastructure", "get_entities_related_to_an_url", {"url": url, "relationship": relationship})
                 try:
+                    # Guard against 1:1 VT relationships (`network_location`, `last_serving_ip_address`)
+                    # that fail `vt_client.iterator` in the GTI MCP with `ValueError: ... is not a collection`.
+                    if relationship == "network_location":
+                        relationship = "contacted_domains"
+                    elif relationship == "last_serving_ip_address":
+                        relationship = "contacted_ips"
+
                     # See the descriptors_only note in get_entities_related_to_a_domain
                     # above — same structural limitation applies here (GTI MCP tool
                     # requires descriptors_only=True for file/domain/url/ip_address/
@@ -756,30 +764,12 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
 
             # Node 4: final_output_node
             async def final_output_node(sub_state: InfraSubgraphState):
-                structured_llm = base_llm.with_structured_output(InfrastructureSpecialistOutput, include_raw=True)
-                response_obj = await structured_llm.ainvoke(sub_state["messages"])
-                
-                if isinstance(response_obj, dict):
-                    if response_obj.get("parsing_error"):
-                        raw_content = response_obj["raw"].content if hasattr(response_obj["raw"], "content") else str(response_obj["raw"])
-                        if isinstance(raw_content, list):
-                            raw_content = " ".join([b.get("text", "") if isinstance(b, dict) else str(b) for b in raw_content])
-                        elif not isinstance(raw_content, str):
-                            raw_content = str(raw_content)
-                            
-                        import re
-                        json_match = re.search(r'(\{.*\})', raw_content, re.DOTALL)
-                        raw_json = json_match.group(1) if json_match else raw_content
-                        
-                        try:
-                            parsed_dict = json.loads(raw_json)
-                            result = InfrastructureSpecialistOutput(**parsed_dict).model_dump()
-                        except Exception as inner_e:
-                            raise response_obj["parsing_error"]
-                    else:
-                        result = response_obj["parsed"].model_dump()
-                else:
-                    result = response_obj.model_dump()
+                result = await resolve_specialist_structured_output(
+                    base_llm,
+                    InfrastructureSpecialistOutput,
+                    sub_state["messages"],
+                    logger=logger,
+                )
 
                 # Keep this attempt separate from the accumulated dossier.
                 # Lifecycle evidence must never be satisfied by an old report.
@@ -997,9 +987,14 @@ Incorporate all relevant findings from your PREVIOUS REPORT into the JSON fields
                 state["investigation_graph"] = cache.get_state()
 
     except Exception as e:
-        logger.error("infra_node_fatal_error", error=str(e))
         import traceback
         tb = traceback.format_exc()
+        # If it's an ExceptionGroup, get the sub-exceptions tracebacks
+        if hasattr(e, "exceptions"):
+            for i, sub_e in enumerate(e.exceptions):
+                tb += f"\n\nSub-exception {i}:\n{''.join(traceback.format_exception(type(sub_e), sub_e, sub_e.__traceback__))}"
+
+        logger.error("infra_node_fatal_error", error=str(e), traceback=tb)
         if "specialist_results" not in state: state["specialist_results"] = {}
         state["specialist_results"]["infrastructure"] = {
             "verdict": "System Error",

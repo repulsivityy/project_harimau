@@ -2,7 +2,7 @@ import asyncio
 import functools
 import json
 import re
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 from typing import Any, Callable, Dict, List, Optional
 from backend.utils.entity_identity import normalise_entity_id
 
@@ -160,3 +160,89 @@ def push_to_rich_intel(relationships_data: dict, rel_name: str, entity_type: str
             "source_id": source_id,
             "attributes": attributes,
         })
+
+
+def _extract_message_text(msg: Any) -> str:
+    """Extract non-thinking text content from a LangChain message or raw payload."""
+    content = getattr(msg, "content", msg)
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict):
+                if block.get("type") == "thinking" or block.get("thought") is True:
+                    continue
+                text = block.get("text", "")
+                if text:
+                    parts.append(str(text))
+            elif block:
+                parts.append(str(block))
+        return "\n".join(parts).strip()
+    if isinstance(content, str):
+        return content.strip()
+    return str(content or "").strip()
+
+
+def _try_parse_schema_json(raw_text: str, schema_cls: Any) -> Optional[Dict[str, Any]]:
+    """Attempt to extract and validate a JSON object matching `schema_cls` from `raw_text`."""
+    if not raw_text:
+        return None
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"\{", raw_text):
+        try:
+            parsed_obj, _ = decoder.raw_decode(raw_text[match.start():])
+            if isinstance(parsed_obj, dict):
+                return schema_cls(**parsed_obj).model_dump()
+        except Exception:
+            continue
+    return None
+
+
+async def resolve_specialist_structured_output(
+    base_llm: Any,
+    schema_cls: Any,
+    messages: List[BaseMessage],
+    logger: Any = None,
+) -> Dict[str, Any]:
+    """Resolve final specialist schema output without sending a trailing model turn.
+
+    1. If the last message in `messages` is a model turn (AIMessage) without pending
+       tool calls and already contains valid JSON matching `schema_cls`, parse and
+       return it directly (avoiding both a redundant LLM call and Gemini's 400
+       INVALID_ARGUMENT error on requests ending with a model turn).
+    2. Otherwise, prepare a message sequence that strictly ends with a HumanMessage
+       (stripping any dangling AIMessage with unexecuted tool_calls) and invoke
+       `base_llm.with_structured_output(schema_cls, include_raw=True)`.
+    """
+    invoke_messages = list(messages or [])
+    if invoke_messages:
+        last_msg = invoke_messages[-1]
+        is_ai = getattr(last_msg, "type", None) == "ai" or last_msg.__class__.__name__ == "AIMessage"
+        has_tool_calls = bool(getattr(last_msg, "tool_calls", None))
+
+        if is_ai and not has_tool_calls:
+            direct_parsed = _try_parse_schema_json(_extract_message_text(last_msg), schema_cls)
+            if direct_parsed is not None:
+                if logger:
+                    logger.info("specialist_structured_output_parsed_from_agent_turn")
+                return direct_parsed
+            invoke_messages.append(
+                HumanMessage(content="Format your complete analysis above into the required JSON schema.")
+            )
+        elif is_ai and has_tool_calls:
+            invoke_messages.pop()
+            if not invoke_messages or getattr(invoke_messages[-1], "type", None) != "human":
+                invoke_messages.append(HumanMessage(content=FINAL_ITERATION_PROMPT))
+
+    structured_llm = base_llm.with_structured_output(schema_cls, include_raw=True)
+    response_obj = await structured_llm.ainvoke(invoke_messages)
+
+    if isinstance(response_obj, dict):
+        if response_obj.get("parsing_error"):
+            raw_content = _extract_message_text(response_obj.get("raw"))
+            parsed = _try_parse_schema_json(raw_content, schema_cls)
+            if parsed is not None:
+                return parsed
+            raise response_obj["parsing_error"]
+        return response_obj["parsed"].model_dump()
+    return response_obj.model_dump()
+
